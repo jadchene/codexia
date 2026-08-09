@@ -49,6 +49,7 @@ import {
 
 const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 64 * 1024 * 1024;
 const DEFAULT_ERROR_BODY_LIMIT_BYTES = 1024 * 1024;
+const DEFAULT_COMPACTION_RESPONSE_LIMIT_BYTES = 64 * 1024 * 1024;
 const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_UNARY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -301,12 +302,19 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         const reader = response.body.getReader();
         if (compactAdaptEnabled) {
           try {
-            await forwardAdaptedCompactionStream({ reader, res, signal: lifecycle.signal, usageParser });
+            await forwardAdaptedCompactionStream({
+              reader,
+              res,
+              signal: lifecycle.signal,
+              controller: lifecycle.controller,
+              usageParser,
+              limitBytes: positiveSetting(settings.gateway_compaction_response_limit_bytes, DEFAULT_COMPACTION_RESPONSE_LIMIT_BYTES),
+              idleTimeoutMs: positiveSetting(settings.gateway_stream_idle_timeout_ms, DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+              totalTimeoutMs: positiveSetting(settings.gateway_unary_timeout_ms, DEFAULT_UNARY_TIMEOUT_MS)
+            });
           } catch (error) {
             if (!(usageParser.responseCompleted() && cancellationKind(error, lifecycle.signal) === "client_cancelled")) throw error;
             await reader.cancel("client closed after response.completed").catch(() => {});
-          } finally {
-            if (!res.writableEnded && !res.destroyed) res.end();
           }
         } else {
           const idleTimeoutMs = isStreamingResponsesPath(pathname)
@@ -582,15 +590,33 @@ function buildApiUpstreamHeaders(headers: Dynamic, upstream: Dynamic, hasBody: D
 }
 
 async function forwardAdaptedCompactionStream(options: Dynamic) {
-  const { reader, res, signal, usageParser } = options;
+  const { reader, res, signal, controller, usageParser, limitBytes, idleTimeoutMs, totalTimeoutMs } = options;
   const chunks: Buffer[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    usageParser.feed(value);
-    chunks.push(Buffer.from(value));
+  let size = 0;
+  let stopIdleTimeout = scheduleAbort(controller, idleTimeoutMs, "stream_idle_timeout", "Upstream compaction response stream became idle.");
+  const stopTotalTimeout = scheduleAbort(controller, totalTimeoutMs, "compaction_timeout", "Upstream compaction response timed out.");
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      stopIdleTimeout();
+      stopIdleTimeout = scheduleAbort(controller, idleTimeoutMs, "stream_idle_timeout", "Upstream compaction response stream became idle.");
+      const chunk = Buffer.from(value);
+      size += chunk.length;
+      if (size > limitBytes) {
+        await reader.cancel("gateway compaction response limit reached").catch(() => {});
+        const error: Dynamic = new Error(`Upstream compaction response exceeds the ${limitBytes}-byte gateway limit.`);
+        error.statusCode = 502;
+        throw error;
+      }
+      usageParser.feed(value);
+      chunks.push(chunk);
+    }
+  } finally {
+    stopIdleTimeout();
+    stopTotalTimeout();
   }
-  const original = Buffer.concat(chunks).toString("utf8");
+  const original = Buffer.concat(chunks, size).toString("utf8");
   const adapted = adaptCompactionStream(original);
   if (!res.writableEnded && !res.destroyed) {
     if (!signal.aborted) {

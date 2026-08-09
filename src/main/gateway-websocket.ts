@@ -12,8 +12,10 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_ERROR_BODY_LIMIT_BYTES = 1024 * 1024;
 const DEFAULT_MAX_PAYLOAD_BYTES = 128 * 1024 * 1024;
 const DEFAULT_BUFFER_HIGH_WATER_BYTES = 4 * 1024 * 1024;
+const DEFAULT_PENDING_QUEUE_LIMIT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
 const DEFAULT_MAX_CONNECTIONS = 128;
+const DEFAULT_PENDING_MAX_MESSAGES = 1024;
 const CONNECTION_LIMIT_LOG_INTERVAL_MS = 10 * 1000;
 
 const WEBSOCKET_ROUTES = new Set([
@@ -286,8 +288,10 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     downstream = await acceptDownstream(server, request, socket, head, controller.signal);
     pending = createPendingDownstreamMessages(
       downstream,
-      controller.signal,
-      positiveSetting(settings.gateway_websocket_idle_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS)
+      controller,
+      positiveSetting(settings.gateway_websocket_idle_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS),
+      positiveSetting(settings.gateway_websocket_pending_queue_limit_bytes, DEFAULT_PENDING_QUEUE_LIMIT_BYTES),
+      DEFAULT_PENDING_MAX_MESSAGES
     );
     const firstMessage = await pending.firstResponseCreate;
     selected = await selectDeferredResponsesRoute({
@@ -515,8 +519,16 @@ async function connectAutoReviewWebSocketFallback(options: Dynamic) {
     throw error;
   }
 }
-function createPendingDownstreamMessages(downstream: Dynamic, signal: Dynamic, timeoutMs: Dynamic) {
+function createPendingDownstreamMessages(
+  downstream: Dynamic,
+  controller: Dynamic,
+  timeoutMs: Dynamic,
+  maxBytes: Dynamic,
+  maxMessages: Dynamic
+) {
+  const signal = controller.signal;
   const messages: Dynamic[] = [];
+  let queuedBytes = 0;
   let settled = false;
   let resolveFirst: Dynamic;
   let rejectFirst: Dynamic;
@@ -530,7 +542,17 @@ function createPendingDownstreamMessages(downstream: Dynamic, signal: Dynamic, t
     rejectFirst(error);
   };
   const onMessage = (data: Dynamic, isBinary: Dynamic) => {
+    const messageBytes = rawDataByteLength(data);
+    if (messages.length >= maxMessages || queuedBytes + messageBytes > maxBytes) {
+      abortController(
+        controller,
+        "WEBSOCKET_PENDING_QUEUE_LIMIT",
+        `WebSocket messages queued during the upstream handshake exceed the ${maxBytes}-byte or ${maxMessages}-message limit.`
+      );
+      return;
+    }
     messages.push({ data, isBinary });
+    queuedBytes += messageBytes;
     if (settled) return;
     if (isBinary) return fail(routeError(400, "INVALID_FIRST_WEBSOCKET_EVENT", "The first WebSocket message must be a JSON response.create event."));
     const event = parseJson(data);
@@ -564,6 +586,12 @@ function createPendingDownstreamMessages(downstream: Dynamic, signal: Dynamic, t
     },
     dispose
   };
+}
+
+function rawDataByteLength(data: Dynamic): number {
+  if (Array.isArray(data)) return data.reduce((total, item) => total + rawDataByteLength(item), 0);
+  if (data instanceof ArrayBuffer) return data.byteLength;
+  return Buffer.isBuffer(data) || ArrayBuffer.isView(data) ? data.byteLength : Buffer.byteLength(String(data));
 }
 
 function createDeferredMessageTransformer(options: Dynamic) {

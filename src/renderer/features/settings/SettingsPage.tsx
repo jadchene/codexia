@@ -44,8 +44,10 @@ type SettingsFormValues = Record<string, unknown> & {
   usage_refresh_timeout_seconds: string | number;
   gateway_request_body_limit_mib: string | number;
   gateway_error_body_limit_mib: string | number;
+  gateway_compaction_response_limit_mib: string | number;
   gateway_websocket_max_payload_mib: string | number;
   gateway_websocket_buffer_high_water_mib: string | number;
+  gateway_websocket_pending_queue_limit_mib: string | number;
   auto_start_gateway_enabled: boolean;
   auto_start_mcp_gateway_enabled: boolean;
   ignore_five_hour_limit_enabled: boolean;
@@ -65,8 +67,10 @@ const SECOND_FIELDS: Record<string, string> = {
 const MIB_FIELDS: Record<string, string> = {
   gateway_request_body_limit_mib: "gateway_request_body_limit_bytes",
   gateway_error_body_limit_mib: "gateway_error_body_limit_bytes",
+  gateway_compaction_response_limit_mib: "gateway_compaction_response_limit_bytes",
   gateway_websocket_max_payload_mib: "gateway_websocket_max_payload_bytes",
-  gateway_websocket_buffer_high_water_mib: "gateway_websocket_buffer_high_water_bytes"
+  gateway_websocket_buffer_high_water_mib: "gateway_websocket_buffer_high_water_bytes",
+  gateway_websocket_pending_queue_limit_mib: "gateway_websocket_pending_queue_limit_bytes"
 };
 
 export const SettingsPage = ({
@@ -372,8 +376,10 @@ export const SettingsPage = ({
             <div className="v1-settings-grid v1-settings-grid-2">
               <NumberField name="gateway_request_body_limit_mib" label="请求体上限" suffix="MiB" min={0.01} max={1024} />
               <NumberField name="gateway_error_body_limit_mib" label="错误响应上限" suffix="MiB" min={0.01} max={64} />
+              <NumberField name="gateway_compaction_response_limit_mib" label="压缩适配响应上限" suffix="MiB" min={0.01} max={1024} />
               <NumberField name="gateway_websocket_max_payload_mib" label="WS 单消息上限" suffix="MiB" min={0.01} max={1024} />
               <NumberField name="gateway_websocket_buffer_high_water_mib" label="WS 缓冲高水位" suffix="MiB" min={0.01} max={1024} />
+              <NumberField name="gateway_websocket_pending_queue_limit_mib" label="WS 握手队列上限" suffix="MiB" min={0.01} max={1024} />
             </div>
           )
         }

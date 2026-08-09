@@ -39,6 +39,8 @@ describe("settings appearance and display units", () => {
       gateway_shutdown_grace_ms: "5000",
       usage_refresh_timeout_ms: "15000",
       gateway_request_body_limit_bytes: String(16 * 1024 * 1024),
+      gateway_compaction_response_limit_bytes: String(32 * 1024 * 1024),
+      gateway_websocket_pending_queue_limit_bytes: String(4 * 1024 * 1024),
       auto_start_gateway: "false",
       auto_start_mcp_gateway: "true",
       ignore_five_hour_limit: "false",
@@ -54,6 +56,8 @@ describe("settings appearance and display units", () => {
     expect(form.gateway_shutdown_grace_seconds).toBe("5");
     expect(form.usage_refresh_timeout_seconds).toBe("15");
     expect(form.gateway_request_body_limit_mib).toBe("16");
+    expect(form.gateway_compaction_response_limit_mib).toBe("32");
+    expect(form.gateway_websocket_pending_queue_limit_mib).toBe("4");
 
     const saved = formToSettings(settings, {
       ...form,
@@ -65,6 +69,8 @@ describe("settings appearance and display units", () => {
       gateway_shutdown_grace_seconds: 5.5,
       usage_refresh_timeout_seconds: 16,
       gateway_request_body_limit_mib: 8,
+      gateway_compaction_response_limit_mib: 24,
+      gateway_websocket_pending_queue_limit_mib: 6,
       auto_start_gateway_enabled: true
     });
     expect(saved.gateway_connect_timeout_ms).toBe("45000");
@@ -75,6 +81,8 @@ describe("settings appearance and display units", () => {
     expect(saved.gateway_shutdown_grace_ms).toBe("5500");
     expect(saved.usage_refresh_timeout_ms).toBe("16000");
     expect(saved.gateway_request_body_limit_bytes).toBe(String(8 * 1024 * 1024));
+    expect(saved.gateway_compaction_response_limit_bytes).toBe(String(24 * 1024 * 1024));
+    expect(saved.gateway_websocket_pending_queue_limit_bytes).toBe(String(6 * 1024 * 1024));
     expect(saved.auto_start_gateway).toBe("true");
   });
 

@@ -163,6 +163,46 @@ test("WebSocket gateway enforces its independent connection and message-size lim
   }
 });
 
+test("WebSocket gateway caps queued bytes while the upstream handshake is pending", async () => {
+  const harness = await startHarness({
+    onUpgrade(_request, _socket, _head, accept) {
+      setTimeout(accept, 250);
+    }
+  }, { gateway_websocket_pending_queue_limit_bytes: "128" });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "session-pending-bytes" });
+    const errorMessage = nextMessage(websocket);
+    const closed = nextCloseDetail(websocket);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
+    websocket.send("x".repeat(128));
+    const payload = JSON.parse((await errorMessage).toString());
+    assert.equal(payload.error.code, "WEBSOCKET_PENDING_QUEUE_LIMIT");
+    assert.equal((await closed).code, 1008);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket gateway caps queued message count while the upstream handshake is pending", async () => {
+  const harness = await startHarness({
+    onUpgrade(_request, _socket, _head, accept) {
+      setTimeout(accept, 500);
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "session-pending-count" });
+    const errorMessage = nextMessage(websocket);
+    const closed = nextCloseDetail(websocket);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
+    for (let index = 0; index < 1024; index += 1) websocket.send("{}");
+    const payload = JSON.parse((await errorMessage).toString());
+    assert.equal(payload.error.code, "WEBSOCKET_PENDING_QUEUE_LIMIT");
+    assert.equal((await closed).code, 1008);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("idle WebSocket connections do not consume HTTP request concurrency", async () => {
   const harness = await startHarness({
     onHttpRequest(_request, response) {
@@ -1029,6 +1069,7 @@ async function startHarness(options, settingOverrides = {}) {
     gateway_websocket_max_connections: "128",
     gateway_websocket_max_payload_bytes: "134217728",
     gateway_websocket_buffer_high_water_bytes: "4194304",
+    gateway_websocket_pending_queue_limit_bytes: "4194304",
     gateway_websocket_idle_timeout_ms: "1000",
     gateway_quota_cooldown_ms: "1000",
     codex_quota_headers_mode: "block",

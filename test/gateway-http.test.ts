@@ -903,6 +903,88 @@ test("HTTP gateway wraps compaction responses for API channels with the adaptati
   }
 });
 
+test("HTTP gateway caps buffered compaction adaptation responses", async () => {
+  const apiUpstream = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({
+      type: "response.output_item.done",
+      output_index: 0,
+      item: { type: "message", content: [{ type: "output_text", text: "x".repeat(2048) }] }
+    })}\n\n`);
+  });
+  await listen(apiUpstream);
+  const hooks = compactAdaptHooks(`http://127.0.0.1:${apiUpstream.address().port}/v1`);
+  const harness = await startHarness((_req, res) => res.end(), {
+    gateway_compaction_response_limit_bytes: "1024"
+  }, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("compact-limit", "turn-limit"),
+      body: compactionRequestBody()
+    });
+    const responseBody = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(responseBody.error.message, "The server encountered a temporary error and could not complete your request.");
+    assert.match(harness.appLogs.at(-1).message, /exceeds the 1024-byte gateway limit/);
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
+test("HTTP gateway applies a total timeout to a continuously active compaction adaptation response", async () => {
+  const apiUpstream = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const interval = setInterval(() => res.write('data: {"type":"response.in_progress"}\n\n'), 15);
+    res.once("close", () => clearInterval(interval));
+  });
+  await listen(apiUpstream);
+  const hooks = compactAdaptHooks(`http://127.0.0.1:${apiUpstream.address().port}/v1`);
+  const harness = await startHarness((_req, res) => res.end(), {
+    gateway_stream_idle_timeout_ms: "200",
+    gateway_unary_timeout_ms: "60"
+  }, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("compact-total-timeout", "turn-total-timeout"),
+      body: compactionRequestBody()
+    });
+    const responseBody = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(responseBody.error.message, "Request timed out.");
+    assert.equal(harness.appLogs.at(-1).status, "compaction_timeout");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
+test("HTTP gateway times out an idle buffered compaction adaptation response", async () => {
+  const apiUpstream = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('data: {"type":"response.created"}\n\n');
+  });
+  await listen(apiUpstream);
+  const hooks = compactAdaptHooks(`http://127.0.0.1:${apiUpstream.address().port}/v1`);
+  const harness = await startHarness((_req, res) => res.end(), {
+    gateway_stream_idle_timeout_ms: "40",
+    gateway_unary_timeout_ms: "1000"
+  }, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("compact-idle", "turn-idle"),
+      body: compactionRequestBody()
+    });
+    const responseBody = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(responseBody.error.message, "Request timed out.");
+    assert.equal(harness.appLogs.at(-1).status, "stream_idle_timeout");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
 test("HTTP gateway rewrites its plaintext compaction before routing to an API channel", async () => {
   const apiRequests = [];
   const apiUpstream = http.createServer(async (req, res) => {
@@ -1060,6 +1142,41 @@ function codexHeaders(sessionId, turnId) {
     "content-type": "application/json",
     session_id: sessionId,
     "x-codex-turn-metadata": JSON.stringify({ turn_id: turnId })
+  };
+}
+
+function compactionRequestBody() {
+  return JSON.stringify({
+    model: "deepseek-model",
+    input: [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      { type: "compaction_trigger" }
+    ]
+  });
+}
+
+function compactAdaptHooks(baseUrl) {
+  return {
+    upstreamService: {
+      findRuntimeByModel() {
+        return {
+          id: "api-owner",
+          name: "API Owner",
+          kind: "responses_api",
+          enabled: true,
+          baseUrl,
+          apiKey: "provider-key",
+          supportsWebSocket: false,
+          compactAdaptEnabled: true,
+          requestHeaders: {},
+          credentialRef: "provider-fingerprint"
+        };
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
   };
 }
 
