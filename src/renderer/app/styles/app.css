@@ -28,6 +28,15 @@ body {
   position: fixed;
   inset: 0;
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .v1-app-root {
