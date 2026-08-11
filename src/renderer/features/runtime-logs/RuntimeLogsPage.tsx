@@ -38,7 +38,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
   };
 
   const columns: TableColumnsType<AppLog> = [
-    { title: "时间", dataIndex: "created_at", width: 160, render: (value) => formatTime(value) },
+    { title: "时间", dataIndex: "created_at", width: 180, className: "v1-nowrap", render: (value) => formatTime(value) },
     {
       title: "级别",
       dataIndex: "level",

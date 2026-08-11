@@ -110,7 +110,7 @@ export const RequestAnalyticsPage = ({
     || "ChatGPT 订阅账号池";
   const breakdownTotal = upstreamUsage.reduce((total, item) => total + Number(item.total_tokens || 0), Number(accountPoolUsage.total_tokens || 0));
   const allColumns: TableColumnsType<RequestLog> = [
-    { key: "time", title: "时间", dataIndex: "created_at", width: 160, render: (value) => formatTime(value) },
+    { key: "time", title: "时间", dataIndex: "created_at", width: 180, className: "v1-nowrap", render: (value) => formatTime(value) },
     {
       title: "渠道",
       key: "target",
