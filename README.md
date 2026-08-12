@@ -69,6 +69,8 @@ Some service settings take effect after the corresponding service is restarted.
 
 Packaged application data is stored in `data/` beside the app. Back up this directory before moving or replacing the application. Do not share it because it contains account and channel configuration.
 
+Automatic schema-migration backups under `data/backups/` are encrypted as complete files with a per-backup AES-256-GCM key. That key is wrapped by Electron `safeStorage`, so the encrypted backup is bound to the Windows user security context that created it. Unencrypted migration backups from earlier versions are encrypted automatically on the next start, and migration backups are removed after 24 hours.
+
 This project is intended for personal local use. Use your own accounts and API keys, and follow each provider's terms.
 
 ## Development

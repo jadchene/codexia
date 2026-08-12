@@ -13,7 +13,9 @@ type Row = Record<string, any>;
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 const LATEST_SCHEMA_VERSION = 4;
 const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
-const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
+const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite(?:\.enc)?$/;
+const PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
+const TEMPORARY_MIGRATION_BACKUP_FILE_PATTERN = /^\.codexia-backup-.*\.sqlite\.tmp$/;
 
 interface MigrationHooks {
   beforeMigrationCommit?: (context: { db: Db; version: number }) => void;
@@ -60,14 +62,16 @@ export function createStore(options: StoreOptions = {}): Store {
   const targetDataDir = options.dataDir || dataDir();
   const targetDbPath = options.dbPath || dbPath();
   fs.mkdirSync(targetDataDir, { recursive: true });
+  removeOrphanedMigrationBackupTemps(targetDataDir);
   removeExpiredMigrationBackups(targetDataDir);
+  encryptExistingMigrationBackups(targetDataDir, secretCodec);
   const existingDatabase = fs.existsSync(targetDbPath) && fs.statSync(targetDbPath).size > 0;
   const db = new DatabaseSync(targetDbPath);
   try {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
     if (existingDatabase && schemaVersion(db) < LATEST_SCHEMA_VERSION) {
-      createMigrationBackup(db, targetDataDir, options.migrationHooks);
+      createMigrationBackup(db, targetDataDir, secretCodec, options.migrationHooks);
     }
     migrate(db);
     migrateV1(db, options.migrationHooks);
@@ -396,16 +400,65 @@ function schemaVersion(db: Db): number {
   return Number(db.prepare("PRAGMA user_version").get()?.user_version || 0);
 }
 
-function createMigrationBackup(db: Db, targetDataDir: string, hooks: MigrationHooks = {}): string {
+function createMigrationBackup(db: Db, targetDataDir: string, secretCodec: SecretCodec, hooks: MigrationHooks = {}): string {
   const backupDir = path.join(targetDataDir, "backups");
-  fs.mkdirSync(backupDir, { recursive: true });
+  ensurePrivateBackupDirectory(backupDir);
   const version = schemaVersion(db);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const file = path.join(backupDir, `codex-gateway-schema-v${version}-${timestamp}.sqlite`);
-  db.exec(`VACUUM INTO '${file.replaceAll("'", "''")}'`);
-  hooks.afterBackup?.({ file, version });
-  validateMigrationBackup(file);
-  return file;
+  const file = path.join(backupDir, `codex-gateway-schema-v${version}-${timestamp}.sqlite.enc`);
+  const plaintext = path.join(backupDir, `.codexia-backup-${randomUUID()}.sqlite.tmp`);
+  try {
+    db.exec(`VACUUM INTO '${plaintext.replaceAll("'", "''")}'`);
+    fs.chmodSync(plaintext, 0o600);
+    validateMigrationBackup(plaintext);
+    secretCodec.encryptFile(plaintext, file);
+    hooks.afterBackup?.({ file, version });
+    validateEncryptedMigrationBackup(file, secretCodec);
+    return file;
+  } catch (error) {
+    fs.rmSync(file, { force: true });
+    throw error;
+  } finally {
+    fs.rmSync(plaintext, { force: true });
+  }
+}
+
+function encryptExistingMigrationBackups(targetDataDir: string, secretCodec: SecretCodec): void {
+  const backupDir = path.join(targetDataDir, "backups");
+  if (!fs.existsSync(backupDir)) return;
+  for (const entry of fs.readdirSync(backupDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN.test(entry.name)) continue;
+    const plaintext = path.join(backupDir, entry.name);
+    const encrypted = `${plaintext}.enc`;
+    if (!fs.existsSync(encrypted)) {
+      validateMigrationBackup(plaintext);
+      secretCodec.encryptFile(plaintext, encrypted);
+      try {
+        validateEncryptedMigrationBackup(encrypted, secretCodec);
+      } catch (error) {
+        fs.rmSync(encrypted, { force: true });
+        throw error;
+      }
+    } else {
+      validateEncryptedMigrationBackup(encrypted, secretCodec);
+    }
+    fs.rmSync(plaintext, { force: true });
+  }
+}
+
+function ensurePrivateBackupDirectory(backupDir: string): void {
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(backupDir, 0o700);
+}
+
+function removeOrphanedMigrationBackupTemps(targetDataDir: string): void {
+  const backupDir = path.join(targetDataDir, "backups");
+  if (!fs.existsSync(backupDir)) return;
+  for (const entry of fs.readdirSync(backupDir, { withFileTypes: true })) {
+    if (entry.isFile() && TEMPORARY_MIGRATION_BACKUP_FILE_PATTERN.test(entry.name)) {
+      fs.rmSync(path.join(backupDir, entry.name), { force: true });
+    }
+  }
 }
 
 function removeExpiredMigrationBackups(targetDataDir: string, currentTime = Date.now()): void {
@@ -432,6 +485,17 @@ function validateMigrationBackup(file: string): void {
     schemaVersion(backup);
   } finally {
     backup.close();
+  }
+}
+
+function validateEncryptedMigrationBackup(file: string, secretCodec: SecretCodec): void {
+  if (!secretCodec.isEncryptedFile(file)) throw new Error("迁移备份未使用系统安全存储加密。");
+  const decrypted = path.join(path.dirname(file), `.codexia-backup-verify-${randomUUID()}.sqlite.tmp`);
+  try {
+    secretCodec.decryptFile(file, decrypted);
+    validateMigrationBackup(decrypted);
+  } finally {
+    fs.rmSync(decrypted, { force: true });
   }
 }
 

@@ -4,13 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
+import { BACKUP_MAGIC, createSecretCodec } from "../src/main/secret-codec.ts";
 import { createStore } from "../src/main/store.ts";
 
-const passthroughCodec = {
-  encrypt: (value) => value,
-  decrypt: (value) => value,
-  isEncrypted: () => true
-};
+const passthroughCodec = createSecretCodec({
+  isEncryptionAvailable: () => true,
+  encryptString: (value) => Buffer.from(`wrapped:${value}`, "utf8"),
+  decryptString: (value) => value.toString("utf8").replace(/^wrapped:/, "")
+});
 
 test("migrations create a verified backup, model pricing storage, and remove obsolete feature tables", () => {
   const fixture = createLegacyFixture();
@@ -45,11 +46,16 @@ test("migrations create a verified backup, model pricing storage, and remove obs
 
     const backups = backupFiles(fixture.directory);
     assert.equal(backups.length, 1);
-    const backup = new DatabaseSync(backups[0], { readOnly: true });
+    const encryptedBytes = fs.readFileSync(backups[0]);
+    assert.deepEqual(encryptedBytes.subarray(0, BACKUP_MAGIC.length), BACKUP_MAGIC);
+    assert.equal(encryptedBytes.includes(Buffer.from("legacy-secret-token", "utf8")), false);
+    const decrypted = decryptBackup(backups[0], fixture.directory);
+    const backup = new DatabaseSync(decrypted, { readOnly: true });
     assert.equal(backup.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
     assert.equal(backup.prepare("SELECT value FROM settings WHERE key = 'wal_fixture'").get().value, "committed");
     assert.equal(backup.prepare("PRAGMA user_version").get().user_version, 0);
     backup.close();
+    fs.rmSync(decrypted, { force: true });
     fixture.writer.close();
     writerOpen = false;
 
@@ -75,10 +81,12 @@ test("current migration upgrades an existing v1 database with its own verified b
     store.db.close();
     const backups = backupFiles(fixture.directory);
     assert.equal(backups.length, 1);
-    const backup = new DatabaseSync(backups[0], { readOnly: true });
+    const decrypted = decryptBackup(backups[0], fixture.directory);
+    const backup = new DatabaseSync(decrypted, { readOnly: true });
     assert.equal(backup.prepare("PRAGMA user_version").get().user_version, 1);
     assert.equal(backup.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), false);
     backup.close();
+    fs.rmSync(decrypted, { force: true });
   } finally {
     cleanupFixture(fixture.directory);
   }
@@ -100,6 +108,26 @@ test("migration backups are automatically removed after one day", () => {
     assert.deepEqual(backupFiles(fixture.directory), []);
   } finally {
     cleanupFixture(fixture.directory);
+  }
+});
+
+test("existing plaintext migration backups are encrypted and removed on startup", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-legacy-backup-"));
+  const database = path.join(directory, "codex-gateway.sqlite");
+  const initial = createStore({ secretCodec: passthroughCodec, dataDir: directory, dbPath: database });
+  initial.db.close();
+  const backupDirectory = path.join(directory, "backups");
+  fs.mkdirSync(backupDirectory, { recursive: true });
+  const plaintext = path.join(backupDirectory, "codex-gateway-schema-v1-legacy.sqlite");
+  fs.copyFileSync(database, plaintext);
+  try {
+    const restarted = createStore({ secretCodec: passthroughCodec, dataDir: directory, dbPath: database });
+    restarted.db.close();
+    assert.equal(fs.existsSync(plaintext), false);
+    assert.equal(fs.existsSync(`${plaintext}.enc`), true);
+    assert.equal(passthroughCodec.isEncryptedFile(`${plaintext}.enc`), true);
+  } finally {
+    cleanupFixture(directory);
   }
 });
 
@@ -199,6 +227,8 @@ function createLegacyFixture() {
     INSERT INTO settings (key, value) VALUES
       ('upstream_base_url', 'https://legacy.example/codex'),
       ('wal_fixture', 'committed');
+    INSERT INTO accounts (id, name, access_token, refresh_token, created_at, updated_at)
+    VALUES ('legacy-account', 'Legacy', 'legacy-secret-token', 'legacy-refresh-token', 1, 1);
   `);
   return { directory, database, writer };
 }
@@ -217,8 +247,14 @@ function backupFiles(directory) {
   const backupDirectory = path.join(directory, "backups");
   if (!fs.existsSync(backupDirectory)) return [];
   return fs.readdirSync(backupDirectory)
-    .filter((file) => file.endsWith(".sqlite"))
+    .filter((file) => file.endsWith(".sqlite.enc"))
     .map((file) => path.join(backupDirectory, file));
+}
+
+function decryptBackup(file, directory) {
+  const decrypted = path.join(directory, `decrypted-${Date.now()}-${Math.random()}.sqlite`);
+  passthroughCodec.decryptFile(file, decrypted);
+  return decrypted;
 }
 
 function cleanupFixture(directory) {
