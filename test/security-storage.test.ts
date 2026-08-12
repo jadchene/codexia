@@ -177,13 +177,20 @@ test("store repairs a legacy refresh timestamp that points to a failed refresh",
   }
 });
 
-test("single-instance channel coordinates copies without changing Electron user data", async () => {
+test("single-instance channel coordinates copies without changing Electron user data", async (context) => {
   const endpoint = singleInstanceEndpoint({ userIdentity: `test-${process.pid}-${Date.now()}` });
   let notified;
   const notification = new Promise((resolve) => {
     notified = resolve;
   });
-  const primary = await acquireSingleInstanceChannel({ endpoint, onSecondInstance: notified });
+  let primary;
+  try {
+    primary = await acquireSingleInstanceChannel({ endpoint, onSecondInstance: notified });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    context.skip("Unix domain sockets are blocked in this sandbox");
+    return;
+  }
   try {
     const secondary = await acquireSingleInstanceChannel({ endpoint });
     assert.equal(primary.primary, true);

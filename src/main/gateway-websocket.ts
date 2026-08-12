@@ -670,7 +670,6 @@ async function connectWithFailover(options: Dynamic) {
       }
       lastError = failure;
       const headers = failure.headers || {};
-      const body = failure.body || Buffer.alloc(0);
       const syncedUsage = helpers.syncAccountUsageFromHeaders(account, headers, store);
       if (!isWebSocketQuotaFailure(failure, helpers)) throw failure;
       if (!syncedUsage) {
@@ -1069,14 +1068,6 @@ function logFailure(store: Dynamic, parsedUrl: Dynamic, account: Dynamic, connec
     status: error.code || String(error.statusCode || "failed"),
     message: `[${connectionId}] ${parsedUrl.pathname} 连接账号 ${account.email || account.name || account.id} 失败（${Date.now() - started}ms）：${error.message}`
   });
-}
-
-function headerValue(headers: Dynamic, name: Dynamic) {
-  const lower = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers || {})) {
-    if (key.toLowerCase() === lower) return String(Array.isArray(value) ? value[0] || "" : value || "");
-  }
-  return "";
 }
 
 function positiveSetting(value: Dynamic, fallback: Dynamic) {

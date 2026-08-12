@@ -131,6 +131,31 @@ test("existing plaintext migration backups are encrypted and removed on startup"
   }
 });
 
+test("startup atomically replaces an interrupted legacy backup encryption", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-interrupted-backup-"));
+  const database = path.join(directory, "codex-gateway.sqlite");
+  const initial = createStore({ secretCodec: passthroughCodec, dataDir: directory, dbPath: database });
+  initial.db.close();
+  const backupDirectory = path.join(directory, "backups");
+  fs.mkdirSync(backupDirectory, { recursive: true });
+  const plaintext = path.join(backupDirectory, "codex-gateway-schema-v1-interrupted.sqlite");
+  const encrypted = `${plaintext}.enc`;
+  fs.copyFileSync(database, plaintext);
+  fs.writeFileSync(encrypted, "partial encrypted output", "utf8");
+  try {
+    const restarted = createStore({ secretCodec: passthroughCodec, dataDir: directory, dbPath: database });
+    restarted.db.close();
+    assert.equal(fs.existsSync(plaintext), false);
+    assert.equal(passthroughCodec.isEncryptedFile(encrypted), true);
+    const decrypted = decryptBackup(encrypted, directory);
+    const backup = new DatabaseSync(decrypted, { readOnly: true });
+    assert.equal(backup.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+    backup.close();
+  } finally {
+    cleanupFixture(directory);
+  }
+});
+
 test("v2 migration rolls back its column and version when interrupted", () => {
   const fixture = createV1Fixture();
   try {

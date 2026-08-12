@@ -28,7 +28,8 @@ function configPath(options: CodexPathOptions = {}): string {
 }
 
 function managedModelCatalogPath(options: CodexPathOptions = {}): string {
-  return path.resolve(options.modelCatalogPath || path.join(codexDir(options), "models.json"));
+  const configured = options.modelCatalogPath || path.join(codexDir(options), "models.json");
+  return path.win32.isAbsolute(configured) ? configured : path.resolve(configured);
 }
 
 const codexModelCache = new Map<string, { mtimeMs: number; size: number; model: string }>();

@@ -15,7 +15,7 @@ const LATEST_SCHEMA_VERSION = 4;
 const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite(?:\.enc)?$/;
 const PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
-const TEMPORARY_MIGRATION_BACKUP_FILE_PATTERN = /^\.codexia-backup-.*\.sqlite\.tmp$/;
+const TEMPORARY_MIGRATION_BACKUP_FILE_PATTERN = /^\.codexia-backup-.*\.tmp(?:\.enc)?$/;
 
 interface MigrationHooks {
   beforeMigrationCommit?: (context: { db: Db; version: number }) => void;
@@ -411,7 +411,7 @@ function createMigrationBackup(db: Db, targetDataDir: string, secretCodec: Secre
     db.exec(`VACUUM INTO '${plaintext.replaceAll("'", "''")}'`);
     fs.chmodSync(plaintext, 0o600);
     validateMigrationBackup(plaintext);
-    secretCodec.encryptFile(plaintext, file);
+    encryptMigrationBackupAtomically(plaintext, file, secretCodec);
     hooks.afterBackup?.({ file, version });
     validateEncryptedMigrationBackup(file, secretCodec);
     return file;
@@ -430,19 +430,29 @@ function encryptExistingMigrationBackups(targetDataDir: string, secretCodec: Sec
     if (!entry.isFile() || !PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN.test(entry.name)) continue;
     const plaintext = path.join(backupDir, entry.name);
     const encrypted = `${plaintext}.enc`;
-    if (!fs.existsSync(encrypted)) {
-      validateMigrationBackup(plaintext);
-      secretCodec.encryptFile(plaintext, encrypted);
+    if (fs.existsSync(encrypted)) {
       try {
         validateEncryptedMigrationBackup(encrypted, secretCodec);
+        fs.rmSync(plaintext, { force: true });
+        continue;
       } catch (error) {
         fs.rmSync(encrypted, { force: true });
-        throw error;
       }
-    } else {
-      validateEncryptedMigrationBackup(encrypted, secretCodec);
     }
+    validateMigrationBackup(plaintext);
+    encryptMigrationBackupAtomically(plaintext, encrypted, secretCodec);
     fs.rmSync(plaintext, { force: true });
+  }
+}
+
+function encryptMigrationBackupAtomically(plaintext: string, encrypted: string, secretCodec: SecretCodec): void {
+  const temporary = path.join(path.dirname(encrypted), `.codexia-backup-${randomUUID()}.tmp.enc`);
+  try {
+    secretCodec.encryptFile(plaintext, temporary);
+    validateEncryptedMigrationBackup(temporary, secretCodec);
+    fs.renameSync(temporary, encrypted);
+  } finally {
+    fs.rmSync(temporary, { force: true });
   }
 }
 
@@ -1072,16 +1082,6 @@ function normalizeLogQuery(query: Partial<LogQuery> = {}) {
 function cleanFilterValue(value: unknown): string {
   const text = String(value || "").trim();
   return text ? text.slice(0, 240) : "";
-}
-
-function cleanSessionName(value: unknown): string {
-  const text = String(value || "").trim();
-  return text ? text.slice(0, 120) : "";
-}
-
-function cleanSessionNote(value: unknown): string | null {
-  const text = String(value || "").trim();
-  return text ? text.slice(0, 1000) : null;
 }
 
 function normalizeAttemptChainJson(value: unknown): string | null {

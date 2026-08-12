@@ -17,8 +17,6 @@ import { estimateUpstreamCost } from "./cost-estimator.ts";
 
 export const BUILTIN_SUBSCRIPTION_ID = "builtin-chatgpt-subscription-pool";
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-const ZERO_PRICING: ModelPricing = { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 };
-
 interface SecretCodec {
   encrypt: (value: string) => string;
   decrypt: (value: string) => string;

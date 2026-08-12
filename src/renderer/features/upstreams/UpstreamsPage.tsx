@@ -9,7 +9,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Button,
-  Descriptions,
   Drawer,
   Dropdown,
   Empty,
@@ -55,8 +54,6 @@ interface FormValues {
 }
 
 const EMPTY_CATALOG = "";
-const ZERO_PRICE: ModelPricing = { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 };
-
 export const UpstreamsPage = () => {
   const queryClient = useQueryClient();
   const [form] = Form.useForm<FormValues>();

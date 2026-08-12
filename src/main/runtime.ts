@@ -1,7 +1,6 @@
 type Dynamic = any;
 
-import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, screen, shell } from "electron";
-import { randomUUID } from "node:crypto";
+import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -899,12 +898,22 @@ function numberOrUndefined(value: Dynamic) {
 }
 
 function bindWindowBoundsPersistence(win: Dynamic) {
-  const save = () => saveMainWindowBounds(win);
-  win.on("resize", save);
-  win.on("move", save);
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+    saveMainWindowBounds(win);
+  };
+  const schedule = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, 250);
+    saveTimer.unref?.();
+  };
+  win.on("resize", schedule);
+  win.on("move", schedule);
   win.on("close", (event: Dynamic) => {
     if (!store || win.isDestroyed()) return;
-    saveMainWindowBounds(win);
+    flush();
     if (!shuttingDown && store.getSettings().close_behavior === "tray") {
       event.preventDefault();
       void createTray();
@@ -916,6 +925,10 @@ function bindWindowBoundsPersistence(win: Dynamic) {
         message: "关闭窗口时最小化到托盘"
       });
     }
+  });
+  win.on("closed", () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
   });
 }
 
