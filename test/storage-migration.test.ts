@@ -84,6 +84,25 @@ test("current migration upgrades an existing v1 database with its own verified b
   }
 });
 
+test("migration backups are automatically removed after one day", () => {
+  const fixture = createLegacyFixture();
+  try {
+    const migrated = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    migrated.db.close();
+    fixture.writer.close();
+    const [backup] = backupFiles(fixture.directory);
+    assert.ok(backup);
+    const expired = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    fs.utimesSync(backup, expired, expired);
+
+    const restarted = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    restarted.db.close();
+    assert.deepEqual(backupFiles(fixture.directory), []);
+  } finally {
+    cleanupFixture(fixture.directory);
+  }
+});
+
 test("v2 migration rolls back its column and version when interrupted", () => {
   const fixture = createV1Fixture();
   try {

@@ -12,6 +12,8 @@ type Row = Record<string, any>;
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 const LATEST_SCHEMA_VERSION = 4;
+const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
 
 interface MigrationHooks {
   beforeMigrationCommit?: (context: { db: Db; version: number }) => void;
@@ -58,6 +60,7 @@ export function createStore(options: StoreOptions = {}): Store {
   const targetDataDir = options.dataDir || dataDir();
   const targetDbPath = options.dbPath || dbPath();
   fs.mkdirSync(targetDataDir, { recursive: true });
+  removeExpiredMigrationBackups(targetDataDir);
   const existingDatabase = fs.existsSync(targetDbPath) && fs.statSync(targetDbPath).size > 0;
   const db = new DatabaseSync(targetDbPath);
   try {
@@ -97,7 +100,7 @@ export function createStore(options: StoreOptions = {}): Store {
     listAppLogs: (query) => listAppLogs(db, query),
     addAppLog: (entry) => addAppLog(db, entry),
     clearAppLogs: () => clearAppLogs(db),
-    runMaintenance: () => runMaintenance(db),
+    runMaintenance: () => runMaintenance(db, targetDataDir),
     compactDatabase: () => compactDatabase(db)
   };
 }
@@ -403,6 +406,17 @@ function createMigrationBackup(db: Db, targetDataDir: string, hooks: MigrationHo
   hooks.afterBackup?.({ file, version });
   validateMigrationBackup(file);
   return file;
+}
+
+function removeExpiredMigrationBackups(targetDataDir: string, currentTime = Date.now()): void {
+  const backupDir = path.join(targetDataDir, "backups");
+  if (!fs.existsSync(backupDir)) return;
+  const expiresBefore = currentTime - MIGRATION_BACKUP_RETENTION_MS;
+  for (const entry of fs.readdirSync(backupDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !MIGRATION_BACKUP_FILE_PATTERN.test(entry.name)) continue;
+    const file = path.join(backupDir, entry.name);
+    if (fs.statSync(file).mtimeMs <= expiresBefore) fs.unlinkSync(file);
+  }
 }
 
 function validateMigrationBackup(file: string): void {
@@ -879,7 +893,7 @@ function clearAppLogs(db: Db): { deleted: number } {
   return { deleted: Number(result.changes || 0) };
 }
 
-function runMaintenance(db: Db): { requestLogsDeleted: number; appLogsDeleted: number; loginSessionsDeleted: number } {
+function runMaintenance(db: Db, targetDataDir: string): { requestLogsDeleted: number; appLogsDeleted: number; loginSessionsDeleted: number } {
   const settings = getSettings(db);
   const requestDays = clampInt(settings.request_log_retention_days, 30, 1, 3650);
   const appDays = clampInt(settings.app_log_retention_days, 14, 1, 3650);
@@ -890,6 +904,7 @@ function runMaintenance(db: Db): { requestLogsDeleted: number; appLogsDeleted: n
     .run(current - appDays * 86400);
   const loginResult = db.prepare("DELETE FROM login_sessions WHERE updated_at < ?")
     .run(current - 7 * 86400);
+  removeExpiredMigrationBackups(targetDataDir);
   db.exec("PRAGMA wal_checkpoint(PASSIVE)");
   return {
     requestLogsDeleted: Number(requestResult.changes || 0),
