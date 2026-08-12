@@ -335,8 +335,9 @@ function verifyPackageResources(applicationRoot) {
   if (forbidden.length > 0) throw new Error(`Packaged application contains forbidden files: ${forbidden.join(", ")}`);
   if (/(?:src|href)=["']https?:\/\//i.test(html)) throw new Error("Packaged renderer references a remote script, style, font, or image.");
   const fonts = packagedFiles.filter((file) => /\.(?:woff2?|ttf|otf)$/i.test(file));
-  if (fonts.length === 0) throw new Error("Packaged renderer is missing its local font assets.");
-  if (!fonts.some((file) => file.includes("MiSans-Medium"))) throw new Error("Packaged renderer is missing MiSans Medium.");
+  if (fonts.some((file) => file.includes("MiSans-Medium"))) {
+    throw new Error("Packaged renderer unexpectedly contains the retired MiSans Medium asset.");
+  }
   if (!fs.existsSync(path.join(appRoot, "node_modules", "ws", "index.js"))) {
     throw new Error("Packaged application is missing the externalized ws dependency.");
   }
