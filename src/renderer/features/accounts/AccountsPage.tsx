@@ -77,11 +77,14 @@ export const AccountsPage = ({
   const [detailAccount, setDetailAccount] = useState<PublicAccount | null>(null);
   const resetCredits = useMemo(() => parseResetCredits(detailAccount), [detailAccount]);
   const enabledAccounts = accounts.filter((account) => account.enabled && account.status !== "disabled");
-  const totalRemaining = enabledAccounts.reduce((total, account) => total + Math.max(0, 100 - Number(account.quota_7d_used_percent || 0)), 0);
-  const latestRefresh = accounts.reduce<string | null>((latest, account) => {
-    const value = account.last_refresh || null;
-    return value && (!latest || new Date(value).getTime() > new Date(latest).getTime()) ? value : latest;
-  }, null);
+  const totalFiveHourRemaining = enabledAccounts.reduce(
+    (total, account) => total + Math.max(0, 100 - Number(account.quota_5h_used_percent || 0)),
+    0
+  );
+  const totalSevenDayRemaining = enabledAccounts.reduce(
+    (total, account) => total + Math.max(0, 100 - Number(account.quota_7d_used_percent || 0)),
+    0
+  );
 
   const loginBusy = loginPhase === "starting" || loginPhase === "waiting";
 
@@ -137,7 +140,7 @@ export const AccountsPage = ({
       : [quotaColumn("5 小时额度", "quota_5h_used_percent", "quota_5h_reset_at")]),
     quotaColumn("7 天额度", "quota_7d_used_percent", "quota_7d_reset_at"),
     {
-      title: "最近刷新",
+      title: "令牌续期",
       dataIndex: "last_refresh",
       width: 160,
       render: (value) => value ? new Date(value).toLocaleString() : "暂无"
@@ -210,9 +213,17 @@ export const AccountsPage = ({
       </Flex>
 
       <Row gutter={[12, 12]} className="v1-summary-cards">
-        <Col xs={24} md={8}><Card size="small"><Statistic title="可用账号" value={enabledAccounts.length} suffix={`/ ${accounts.length}`} /></Card></Col>
-        <Col xs={24} md={8}><Card size="small"><Statistic title="7 天总剩余额度" value={totalRemaining} precision={1} suffix="%" /></Card></Col>
-        <Col xs={24} md={8}><Card size="small"><Statistic title="最近刷新" value={latestRefresh ? new Date(latestRefresh).toLocaleString() : "暂无"} /></Card></Col>
+        <Col xs={24} md={6}>
+          <Card size="small"><Statistic title="可用账号" value={enabledAccounts.length} suffix={`/ ${accounts.length}`} /></Card>
+        </Col>
+        {settings.ignore_five_hour_limit !== "true" && (
+          <Col xs={24} md={6}>
+            <Card size="small"><Statistic title="5 小时总剩余额度" value={totalFiveHourRemaining} precision={1} suffix="%" /></Card>
+          </Col>
+        )}
+        <Col xs={24} md={6}>
+          <Card size="small"><Statistic title="7 天总剩余额度" value={totalSevenDayRemaining} precision={1} suffix="%" /></Card>
+        </Col>
       </Row>
 
       <Table
@@ -260,7 +271,7 @@ export const AccountsPage = ({
           { key: "plan", label: "套餐", children: detailAccount.subscription_plan || "未知" },
           { key: "subscriptionExpiry", label: "订阅到期", children: formatTime(detailAccount.subscription_expires_at, "未知") },
           { key: "state", label: "状态", children: detailAccount.enabled ? "启用" : "停用" },
-          { key: "refresh", label: "最近刷新", children: detailAccount.last_refresh ? new Date(detailAccount.last_refresh).toLocaleString() : "暂无" },
+          { key: "refresh", label: "令牌续期", children: detailAccount.last_refresh ? new Date(detailAccount.last_refresh).toLocaleString() : "暂无" },
           {
             key: "token",
             label: "登录状态",

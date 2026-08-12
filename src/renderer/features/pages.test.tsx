@@ -123,6 +123,46 @@ describe("Ant Design pages", () => {
     expect(onCancelLogin).toHaveBeenCalledOnce();
   });
 
+  it("shows the five-hour account summary only when the limit is enforced", () => {
+    const props = {
+      accounts: [{
+        id: "account-1",
+        name: "测试账号",
+        enabled: true,
+        status: "active",
+        quota_5h_used_percent: 25,
+        quota_7d_used_percent: 40,
+        has_access_token: true,
+        has_refresh_token: true
+      }],
+      loginPhase: "idle" as const,
+      loginError: "",
+      refreshingIds: new Set<string>(),
+      retryIds: new Set<string>(),
+      onStartLogin: vi.fn(),
+      onImportLocal: vi.fn(),
+      onCancelLogin: vi.fn(),
+      onResetLogin: vi.fn(),
+      onRefreshUsage: vi.fn(),
+      onRefreshAll: vi.fn(),
+      onConsumeResetCredit: vi.fn(),
+      consumingResetIds: new Set<string>(),
+      onSetEnabled: vi.fn(),
+      onDelete: vi.fn()
+    };
+    const view = render(<AccountsPage {...props} settings={{ ignore_five_hour_limit: "false" }} />);
+
+    expect(screen.getByText("5 小时总剩余额度").closest(".ant-card")?.textContent).toContain("75.0%");
+    expect(screen.getByText("7 天总剩余额度").closest(".ant-card")?.textContent).toContain("60.0%");
+    expect(document.querySelector(".v1-summary-cards")?.textContent).not.toContain("令牌续期");
+    expect(document.querySelectorAll(".v1-summary-cards > .ant-col-md-6")).toHaveLength(3);
+
+    view.rerender(<AccountsPage {...props} settings={{ ignore_five_hour_limit: "true" }} />);
+    expect(screen.queryByText("5 小时总剩余额度")).toBeNull();
+    expect(screen.getByText("7 天总剩余额度")).toBeTruthy();
+    expect(document.querySelectorAll(".v1-summary-cards > .ant-col-md-6")).toHaveLength(2);
+  });
+
   it("shows the subscription expiry in account details", async () => {
     const user = userEvent.setup();
     const subscriptionExpiresAt = 1_800_000_000;
