@@ -56,7 +56,7 @@ export const AppProviders = ({ children }: PropsWithChildren) => {
             colorWarning: "#d97706",
             colorError: "#dc2626",
             borderRadius: 12,
-            fontFamily: '"Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif'
+            fontFamily: '"MiSans", "Microsoft YaHei UI", "PingFang SC", sans-serif'
           },
           components: {
             Layout: { headerBg: "transparent", siderBg: "transparent" },
