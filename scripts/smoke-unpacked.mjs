@@ -9,6 +9,7 @@ import { WebSocket } from "ws";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");
+const backupMagic = Buffer.from("CODEXIA-BACKUP-V1\n", "utf8");
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceUnpackedRoot = path.join(projectRoot, "release", "win-unpacked");
 const smokeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-packaged-smoke-"));
@@ -307,20 +308,39 @@ function verifyLegacyUpgrade(databasePath, applicationRoot) {
     const version = Number(databaseHandle.prepare("PRAGMA user_version").get()?.user_version || 0);
     const fixtureValue = databaseHandle.prepare("SELECT value FROM settings WHERE key = 'legacy_packaged_fixture'").get()?.value;
     const builtInUpstream = databaseHandle.prepare("SELECT base_url FROM upstreams WHERE id = 'builtin-chatgpt-subscription-pool'").get()?.base_url;
-    const defaultTarget = Number(databaseHandle.prepare(`
-      SELECT COUNT(*) AS count FROM routing_policy_targets
-      WHERE policy_id = 'default' AND upstream_id = 'builtin-chatgpt-subscription-pool'
+    const compactAdaptColumn = databaseHandle.prepare("PRAGMA table_info(upstreams)").all()
+      .some((column) => column.name === "compact_adapt_enabled");
+    const legacyRoutingTableCount = Number(databaseHandle.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table'
+        AND name IN ('routing_policy_targets', 'routing_policies', 'model_mappings', 'codex_sessions')
     `).get()?.count || 0);
     const backupDirectory = path.join(applicationRoot, "data", "backups");
     const backups = fs.existsSync(backupDirectory)
-      ? fs.readdirSync(backupDirectory).filter((file) => file.endsWith(".sqlite"))
+      ? fs.readdirSync(backupDirectory).filter((file) => file.endsWith(".sqlite.enc"))
       : [];
+    const encryptedBackups = backups.filter((file) => {
+      const handle = fs.openSync(path.join(backupDirectory, file), "r");
+      try {
+        const magic = Buffer.alloc(backupMagic.length);
+        return fs.readSync(handle, magic, 0, magic.length, 0) === magic.length
+          && magic.equals(backupMagic);
+      } finally {
+        fs.closeSync(handle);
+      }
+    });
     const browserMarkerPreserved = fs.existsSync(path.join(applicationRoot, "data", "browser", "v0-browser-marker.txt"));
-    if (version !== 2 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
-      || defaultTarget !== 1 || backups.length < 1 || !browserMarkerPreserved) {
-      throw new Error("Packaged legacy upgrade did not preserve data or create the expected routing and observability schema with a backup.");
+    if (version !== 4 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
+      || !compactAdaptColumn || legacyRoutingTableCount !== 0 || encryptedBackups.length < 1 || !browserMarkerPreserved) {
+      throw new Error("Packaged legacy upgrade did not preserve data, reach the current schema, or create an encrypted backup.");
     }
-    return { version, backupCount: backups.length, browserMarkerPreserved, defaultTarget };
+    return {
+      version,
+      backupCount: encryptedBackups.length,
+      browserMarkerPreserved,
+      compactAdaptColumn,
+      legacyRoutingTablesRemoved: true
+    };
   } finally {
     databaseHandle.close();
   }
