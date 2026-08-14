@@ -14,7 +14,7 @@ interface SelectionOptions {
   ignoreFiveHourLimit?: boolean;
   preferSevenDayQuota?: boolean;
   nowMs?: number;
-  activeTurns?: Map<string, number>;
+  activeRequests?: Map<string, number>;
   cooldowns?: Map<string, number>;
 }
 interface IndexedAccount { account: GatewayAccount; index: number }
@@ -83,7 +83,7 @@ export function pickBalancedGatewayAccount(accounts: GatewayAccount[], excludeId
   const excluded = new Set(excludeIds);
   const nowMs = Number(options.nowMs || Date.now());
   const nowSeconds = Math.floor(nowMs / 1000);
-  const activeTurns = options.activeTurns || new Map();
+  const activeRequests = options.activeRequests || new Map();
   const cooldowns = options.cooldowns || new Map();
   const ignoreFiveHourLimit = options.ignoreFiveHourLimit === true;
   const candidates = accounts
@@ -92,10 +92,10 @@ export function pickBalancedGatewayAccount(accounts: GatewayAccount[], excludeId
     .filter(({ account }) => !excluded.has(account.id))
     .filter(({ account }) => Number(cooldowns.get(account.id) || 0) <= nowMs)
     .sort((left, right) => {
-      const activeDiff = Number(activeTurns.get(left.account.id) || 0) - Number(activeTurns.get(right.account.id) || 0);
+      const weeklyDiff = usedPercent(left.account.quota_7d_used_percent) - usedPercent(right.account.quota_7d_used_percent);
+      if (weeklyDiff !== 0) return weeklyDiff;
+      const activeDiff = Number(activeRequests.get(left.account.id) || 0) - Number(activeRequests.get(right.account.id) || 0);
       if (activeDiff !== 0) return activeDiff;
-      const usageDiff = usageScore(left.account, { ignoreFiveHourLimit }) - usageScore(right.account, { ignoreFiveHourLimit });
-      if (usageDiff !== 0) return usageDiff;
       const priorityDiff = Number(left.account.priority || 100) - Number(right.account.priority || 100);
       if (priorityDiff !== 0) return priorityDiff;
       return left.index - right.index;

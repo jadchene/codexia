@@ -12,6 +12,7 @@ import { createStore } from "./store.ts";
 import { createSecretCodec } from "./secret-codec.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "./renderer-boundary.ts";
 import { createUsageRefreshCoordinator } from "./usage-refresh-coordinator.ts";
+import { startStartupUsageRefresh } from "./startup-usage-refresh.ts";
 import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
@@ -187,8 +188,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
   scheduleUsageRefresh("startup");
-  const startedStartupRefreshAll = await checkUsageRefreshOnStartup();
-  if (!startedStartupRefreshAll) await checkStaleQuotasOnStartup();
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
       store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动 API 服务" });
@@ -206,6 +205,19 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     });
   }
   runtimeReady = true;
+  startStartupUsageRefresh({
+    checkRefreshAll: checkUsageRefreshOnStartup,
+    checkStaleQuotas: checkStaleQuotasOnStartup,
+    onError(error: Dynamic) {
+      store.addAppLog({
+        level: "error",
+        scope: "usage",
+        action: "startup-refresh-check",
+        status: "failed",
+        message: `启动后后台检查额度失败：${compactError(error?.message || error)}`
+      });
+    }
+  });
   if (isStartupHiddenLaunch() && !showWindowWhenReady) {
     store.addAppLog({
       scope: "app",

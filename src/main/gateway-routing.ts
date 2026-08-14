@@ -1,7 +1,8 @@
 import { pickBalancedGatewayAccount, usableAccount, type GatewayAccount } from "./selection.ts";
 
 const DEFAULT_TURN_TTL_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_SESSION_TTL_MS = 168 * 60 * 60 * 1000;
+const PENDING_SESSION_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_COOLDOWN_MS = 60 * 1000;
 const MAX_BINDINGS_PER_KIND = 500;
 const BUILTIN_SUBSCRIPTION_TARGET_ID = "builtin-chatgpt-subscription-pool";
@@ -40,6 +41,8 @@ interface RoutingOptions {
   snapshot?: RoutingSnapshot;
   getIgnoreFiveHourLimit?: () => boolean;
   ignoreFiveHourLimit?: boolean;
+  getSessionAffinityTtlMs?: () => number;
+  sessionAffinityTtlMs?: number;
   onChanged?: (snapshot: RoutingSnapshot) => void;
 }
 type HeaderRecord = Record<string, string | string[] | number | undefined>;
@@ -50,11 +53,15 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
   const turnBindings = bindingMap(options.snapshot?.turns);
   const stateBindings = bindingMap(options.snapshot?.states);
   const sessionBindings = bindingMap(options.snapshot?.sessions);
+  const pendingSessionBindings = new Map<string, Binding>();
   const cooldowns = new Map<string, number>();
   const activeRequests = new Map<string, number>();
   const getIgnoreFiveHourLimit = typeof options.getIgnoreFiveHourLimit === "function"
     ? options.getIgnoreFiveHourLimit
     : () => options.ignoreFiveHourLimit === true;
+  const getSessionAffinityTtlMs = typeof options.getSessionAffinityTtlMs === "function"
+    ? options.getSessionAffinityTtlMs
+    : () => options.sessionAffinityTtlMs || DEFAULT_SESSION_TTL_MS;
 
   function context(headers: HeaderRecord = {}): RouteContext {
     prune();
@@ -62,9 +69,9 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     const turnState = headerValue(headers, "x-codex-turn-state");
     const sessionId = sessionIdFromHeaders(headers);
     const turnBinding = (turnId && turnBindings.get(turnId)) || (turnState && stateBindings.get(turnState)) || null;
-    const sessionBinding = sessionId && sessionBindings.get(sessionId) || null;
-    if (turnBinding) turnBinding.lastSeenAt = now();
-    if (sessionBinding) sessionBinding.lastSeenAt = now();
+    const sessionBinding = sessionId
+      ? pendingSessionBindings.get(sessionId) || sessionBindings.get(sessionId) || null
+      : null;
     return {
       turnId,
       turnState,
@@ -100,7 +107,7 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     prune();
     return pickBalancedGatewayAccount(accounts, excludedIds, {
       nowMs: now(),
-      activeTurns: loadCounts(),
+      activeRequests,
       cooldowns,
       ignoreFiveHourLimit: getIgnoreFiveHourLimit()
     });
@@ -119,6 +126,24 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     };
   }
 
+  function reserveSession(routeContext: RouteContext | null | undefined, account: GatewayAccount | null | undefined): void {
+    if (!routeContext?.sessionId || routeContext.established || !account?.id) return;
+    pendingSessionBindings.set(routeContext.sessionId, bindingFromTarget({
+      targetId: BUILTIN_SUBSCRIPTION_TARGET_ID,
+      accountId: account.id
+    }, now()));
+    routeContext.targetId = BUILTIN_SUBSCRIPTION_TARGET_ID;
+    routeContext.accountId = account.id;
+    routeContext.sessionPreferred = true;
+  }
+
+  function releaseSessionReservation(routeContext: RouteContext | null | undefined, accountId = ""): void {
+    if (!routeContext?.sessionId) return;
+    const pending = pendingSessionBindings.get(routeContext.sessionId);
+    if (!pending || (accountId && pending.accountId !== accountId)) return;
+    pendingSessionBindings.delete(routeContext.sessionId);
+  }
+
   function bind(routeContext: RouteContext | null | undefined, account: GatewayAccount | null | undefined): void {
     if (!routeContext || !account?.id) return;
     bindTarget(routeContext, {
@@ -129,17 +154,13 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
 
   function bindTarget(routeContext: RouteContext | null | undefined, target: BindingTarget | null | undefined): void {
     if (!routeContext || !target?.targetId) return;
-    const binding = {
-      targetId: target.targetId,
-      accountId: target.accountId || "",
-      credentialRef: target.credentialRef || "",
-      clientModel: target.clientModel || "",
-      upstreamModel: target.upstreamModel || "",
-      lastSeenAt: now()
-    };
+    const binding = bindingFromTarget(target, now());
     if (routeContext.turnId) turnBindings.set(routeContext.turnId, binding);
     if (routeContext.turnState) stateBindings.set(routeContext.turnState, binding);
-    if (routeContext.sessionId) sessionBindings.set(routeContext.sessionId, binding);
+    if (routeContext.sessionId) {
+      sessionBindings.set(routeContext.sessionId, binding);
+      pendingSessionBindings.delete(routeContext.sessionId);
+    }
     trimBindings(turnBindings);
     trimBindings(stateBindings);
     trimBindings(sessionBindings);
@@ -154,14 +175,10 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     bind(routeContext, account);
     const turnState = responseHeader(headers, "x-codex-turn-state");
     if (turnState && account?.id) {
-      const binding = {
+      const binding = bindingFromTarget({
         targetId: BUILTIN_SUBSCRIPTION_TARGET_ID,
-        accountId: account.id,
-        credentialRef: "",
-        clientModel: "",
-        upstreamModel: "",
-        lastSeenAt: now()
-      };
+        accountId: account.id
+      }, now());
       stateBindings.set(turnState, binding);
       trimBindings(stateBindings);
       if (routeContext) routeContext.turnState = turnState;
@@ -173,14 +190,7 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     bindTarget(routeContext, target);
     const turnState = responseHeader(headers, "x-codex-turn-state");
     if (turnState && target?.targetId) {
-      const binding = {
-        targetId: target.targetId,
-        accountId: target.accountId || "",
-        credentialRef: target.credentialRef || "",
-        clientModel: target.clientModel || "",
-        upstreamModel: target.upstreamModel || "",
-        lastSeenAt: now()
-      };
+      const binding = bindingFromTarget(target, now());
       stateBindings.set(turnState, binding);
       trimBindings(stateBindings);
       if (routeContext) routeContext.turnState = turnState;
@@ -197,25 +207,6 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     cooldowns.delete(accountId);
   }
 
-  function activeTurnCounts(): Map<string, number> {
-    const counts = new Map<string, number>();
-    for (const binding of turnBindings.values()) {
-      counts.set(binding.accountId, Number(counts.get(binding.accountId) || 0) + 1);
-    }
-    return counts;
-  }
-
-  function loadCounts(): Map<string, number> {
-    const counts = new Map<string, number>();
-    for (const binding of sessionBindings.values()) {
-      counts.set(binding.accountId, Number(counts.get(binding.accountId) || 0) + 1);
-    }
-    for (const [accountId, count] of activeRequests) {
-      counts.set(accountId, Number(counts.get(accountId) || 0) + count);
-    }
-    return counts;
-  }
-
   function prune(ttlMs = DEFAULT_TURN_TTL_MS): void {
     const cutoff = now() - Math.max(1, Number(ttlMs) || DEFAULT_TURN_TTL_MS);
     for (const [key, binding] of turnBindings) {
@@ -224,9 +215,17 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     for (const [key, binding] of stateBindings) {
       if (binding.lastSeenAt < cutoff) stateBindings.delete(key);
     }
-    const sessionCutoff = now() - DEFAULT_SESSION_TTL_MS;
+    const configuredSessionTtlMs = Number(getSessionAffinityTtlMs());
+    const sessionTtlMs = Number.isFinite(configuredSessionTtlMs) && configuredSessionTtlMs > 0
+      ? configuredSessionTtlMs
+      : DEFAULT_SESSION_TTL_MS;
+    const sessionCutoff = now() - sessionTtlMs;
     for (const [key, binding] of sessionBindings) {
       if (binding.lastSeenAt < sessionCutoff) sessionBindings.delete(key);
+    }
+    const pendingCutoff = now() - PENDING_SESSION_TTL_MS;
+    for (const [key, binding] of pendingSessionBindings) {
+      if (binding.lastSeenAt < pendingCutoff) pendingSessionBindings.delete(key);
     }
     for (const [accountId, until] of cooldowns) {
       if (until <= now()) cooldowns.delete(accountId);
@@ -249,16 +248,28 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     findPreferredAccount,
     selectNewAccount,
     beginRequest,
+    reserveSession,
+    releaseSessionReservation,
     bind,
     bindTarget,
     observeResponse,
     observeTargetResponse,
     setCooldown,
     clearCooldown,
-    activeTurnCounts,
     prune,
     snapshot,
     cooldowns
+  };
+}
+
+function bindingFromTarget(target: BindingTarget, lastSeenAt: number): Binding {
+  return {
+    targetId: target.targetId,
+    accountId: target.accountId || "",
+    credentialRef: target.credentialRef || "",
+    clientModel: target.clientModel || "",
+    upstreamModel: target.upstreamModel || "",
+    lastSeenAt
   };
 }
 function bindingMap(entries: BindingEntry[] | undefined): Map<string, Binding> {

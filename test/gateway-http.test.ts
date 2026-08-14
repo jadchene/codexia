@@ -77,7 +77,7 @@ test("HTTP gateway removes hop-by-hop, connection-nominated, and cookie response
   }
 });
 
-test("HTTP gateway keeps a session account until quota exhaustion then changes the session preference", async () => {
+test("HTTP gateway keeps a session account until quota exhaustion then replaces the session binding", async () => {
   const attempts = [];
   let accountAResponses = 0;
   const harness = await startHarness((req, res) => {
@@ -100,6 +100,42 @@ test("HTTP gateway keeps a session account until quota exhaustion then changes t
     assert.equal((await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("session-1", "turn-2") })).status, 200);
     assert.equal((await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("session-1", "turn-3") })).status, 200);
     assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-a", "Bearer token-b", "Bearer token-b"]);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("HTTP gateway replaces a session account when token refresh fails", async () => {
+  const attempts = [];
+  const harness = await startHarness((req, res) => {
+    attempts.push(req.headers.authorization);
+    if (req.headers.authorization === "Bearer token-a") {
+      res.writeHead(401, { "content-type": "application/json" });
+      return res.end('{"error":"token expired"}');
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    return res.end('data: {"type":"response.completed"}\n\n');
+  }, {}, {
+    async refreshAccountToken(id) {
+      assert.equal(id, "a");
+      throw new Error("refresh credential unavailable");
+    }
+  });
+  try {
+    const first = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("session-auth-failover", "turn-1")
+    });
+    assert.equal(first.status, 200);
+    await first.text();
+
+    const second = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("session-auth-failover", "turn-2")
+    });
+    assert.equal(second.status, 200);
+    await second.text();
+    assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-b", "Bearer token-b"]);
+    assert.match(harness.store.getSettings().gateway_affinity_state_json, /session-auth-failover/);
+    assert.match(harness.store.getSettings().gateway_affinity_state_json, /"accountId":"b"/);
   } finally {
     await harness.close();
   }

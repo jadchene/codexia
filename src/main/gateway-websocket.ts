@@ -638,6 +638,7 @@ async function connectWithFailover(options: Dynamic) {
   let lastError: Dynamic = null;
   let quotaRefreshNeeded = false;
   while (account) {
+    routing.reserveSession(routeContext, account);
     let result: Dynamic;
     try {
       result = await openUpstream(request, account, settings, hooks, helpers, signal);
@@ -657,21 +658,39 @@ async function connectWithFailover(options: Dynamic) {
             status: "failed",
             message: `WebSocket 刷新账号 token 失败：${account.email || account.name || account.id}: ${refreshError.message}`
           });
-          throw failure;
+          if (!allowFailover) {
+            routing.releaseSessionReservation(routeContext, account.id);
+            throw failure;
+          }
         }
-        account = refreshedAccount;
-        try {
-          result = await openUpstream(request, account, settings, hooks, helpers, signal);
-          if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
-          return { account, ...result };
-        } catch (retryError: Dynamic) {
-          failure = retryError;
+        if (refreshedAccount) {
+          account = refreshedAccount;
+          try {
+            result = await openUpstream(request, account, settings, hooks, helpers, signal);
+            if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
+            return { account, ...result };
+          } catch (retryError: Dynamic) {
+            failure = retryError;
+          }
         }
       }
       lastError = failure;
+      if (helpers.isAuthExpiredResponse(failure.statusCode, failure.body || Buffer.alloc(0))) {
+        routing.setCooldown(
+          account.id,
+          positiveSetting(settings.gateway_quota_cooldown_ms, DEFAULT_QUOTA_COOLDOWN_MS)
+        );
+        if (!allowFailover) break;
+        excluded.add(account.id);
+        account = routing.selectNewAccount(store.listAccounts(), Array.from(excluded));
+        continue;
+      }
       const headers = failure.headers || {};
       const syncedUsage = helpers.syncAccountUsageFromHeaders(account, headers, store);
-      if (!isWebSocketQuotaFailure(failure, helpers)) throw failure;
+      if (!isWebSocketQuotaFailure(failure, helpers)) {
+        routing.releaseSessionReservation(routeContext, account.id);
+        throw failure;
+      }
       if (!syncedUsage) {
         routing.setCooldown(account.id, positiveSetting(settings.gateway_quota_cooldown_ms, DEFAULT_QUOTA_COOLDOWN_MS));
         quotaRefreshNeeded = true;
@@ -691,6 +710,7 @@ async function connectWithFailover(options: Dynamic) {
       });
     }
   }
+  routing.releaseSessionReservation(routeContext);
   throw lastError || statusError(503, "No enabled GPT account with an access token is available.");
 }
 

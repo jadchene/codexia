@@ -219,6 +219,7 @@ function migrate(db: Db): void {
     gateway_websocket_idle_timeout_ms: "120000",
     gateway_websocket_reject_http_only_model_upgrade: "true",
     gateway_quota_cooldown_ms: "60000",
+    gateway_session_affinity_ttl_hours: "168",
     usage_refresh_interval_secs: "900",
     usage_refresh_timeout_ms: "20000",
     last_usage_refresh_all_at: "0",

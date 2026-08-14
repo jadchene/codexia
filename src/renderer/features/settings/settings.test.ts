@@ -36,6 +36,7 @@ describe("settings appearance and display units", () => {
       gateway_unary_timeout_ms: "90000",
       gateway_websocket_idle_timeout_ms: "180000",
       gateway_quota_cooldown_ms: "60000",
+      gateway_session_affinity_ttl_hours: "168",
       gateway_shutdown_grace_ms: "5000",
       usage_refresh_timeout_ms: "15000",
       gateway_request_body_limit_bytes: String(16 * 1024 * 1024),
@@ -66,6 +67,7 @@ describe("settings appearance and display units", () => {
       gateway_unary_timeout_seconds: 91,
       gateway_websocket_idle_timeout_seconds: 181,
       gateway_quota_cooldown_seconds: 61,
+      gateway_session_affinity_ttl_hours: 72,
       gateway_shutdown_grace_seconds: 5.5,
       usage_refresh_timeout_seconds: 16,
       gateway_request_body_limit_mib: 8,
@@ -78,6 +80,7 @@ describe("settings appearance and display units", () => {
     expect(saved.gateway_unary_timeout_ms).toBe("91000");
     expect(saved.gateway_websocket_idle_timeout_ms).toBe("181000");
     expect(saved.gateway_quota_cooldown_ms).toBe("61000");
+    expect(saved.gateway_session_affinity_ttl_hours).toBe("72");
     expect(saved.gateway_shutdown_grace_ms).toBe("5500");
     expect(saved.usage_refresh_timeout_ms).toBe("16000");
     expect(saved.gateway_request_body_limit_bytes).toBe(String(8 * 1024 * 1024));
@@ -167,6 +170,7 @@ describe("settings appearance and display units", () => {
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
     expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
     expect(screen.getByText("账号调度")).toBeTruthy();
+    expect(screen.getByText("会话亲和有效期")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));
     expect(screen.getByText("超时与并发")).toBeTruthy();
     expect(screen.getAllByRole("menuitem")).toHaveLength(7);

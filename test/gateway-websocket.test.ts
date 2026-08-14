@@ -77,6 +77,7 @@ test("WebSocket gateway proxies compressed Responses messages and keeps upstream
     assert.equal(requests[0].headers["chatgpt-account-id"], "account-a");
     assert.equal(requests[0].headers["session-id"], "session-1");
     assert.equal(requests[0].headers["openai-beta"], "responses_websockets=2026-02-06");
+    assert.match(harness.settings.gateway_affinity_state_json, /ws-state-a/);
     assert.match(harness.settings.gateway_affinity_state_json, /session-1/);
     await waitFor(() => harness.tokenLogs.length > 0, 1_000);
     assert.equal(harness.tokenLogs.at(-1).input_tokens, 12);
@@ -264,27 +265,33 @@ test("WebSocket gateway refreshes an expired account before forwarding response.
   }
 });
 
-test("WebSocket gateway reports a structured error when token refresh fails after local upgrade", async () => {
+test("WebSocket gateway replaces a session account when token refresh fails", async () => {
+  const attempts = [];
   const harness = await startHarness({
     hooks: {
       async refreshAccountToken() {
         throw new Error("credential store unavailable");
       }
     },
-    onUpgrade(_request, socket) {
-      socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    onUpgrade(request, socket, _head, accept) {
+      attempts.push(request.headers.authorization);
+      if (request.headers.authorization === "Bearer token-a") {
+        socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      accept();
     }
   });
   try {
-    const { websocket, response } = await connectGateway(harness, "/v1/responses", { "session-id": "session-refresh-failure" });
-    assert.equal(response.statusCode, 101);
-    const message = nextMessage(websocket);
-    const closed = nextCloseDetail(websocket);
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "session-refresh-failure" });
     websocket.send(JSON.stringify({ type: "response.create", model: "gpt-5" }));
-    const event = JSON.parse((await message).toString());
-    assert.equal(event.type, "error");
-    assert.equal((await closed).code, 1008);
+    await waitFor(() => attempts.length === 2, 1_000);
+    websocket.close();
+    await nextClose(websocket);
+    assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-b"]);
     assert.equal(harness.appLogs.some((entry) => entry.action === "refresh-token" && entry.status === "failed"), true);
+    assert.match(harness.settings.gateway_affinity_state_json, /session-refresh-failure/);
+    assert.match(harness.settings.gateway_affinity_state_json, /"accountId":"b"/);
   } finally {
     await harness.close();
   }

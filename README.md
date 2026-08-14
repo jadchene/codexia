@@ -58,7 +58,7 @@ The **Services** page starts, stops, and restarts the local API service and the 
 | General | Launch with Windows, window-close behavior, theme, and interface density. |
 | API service | Listening address, port, access key, and automatic service start. |
 | MCP service | Installation notice, automatic start, configuration file path, host, port, and HTTP path. |
-| Accounts and quotas | Refresh interval, refresh timeout, account-selection policy, quota cooldown, quota display, and an optional third-party fallback model for auto review. |
+| Accounts and quotas | Refresh interval, refresh timeout, account-selection policy, sliding Session-affinity lifetime, account-failure cooldown, quota display, and an optional third-party fallback model for auto review. |
 | Logs and billing | Request-log retention, runtime-log retention, and billing currency. |
 | Storage | Current data location and controls for clearing request or runtime logs. |
 | Advanced network | Connection and idle timeouts, request timeout, shutdown grace period, HTTP and WebSocket limits, payload and buffer limits, and automatic HTTP fallback for HTTP-only models. Defaults are suitable for normal use. |

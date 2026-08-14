@@ -551,12 +551,12 @@ test("quotaWindowExhausted makes a reset quota window usable again", () => {
   assert.equal(quotaWindowExhausted({ quota_5h_used_percent: 100, quota_5h_reset_at: 1_100 }, 1_000), true);
 });
 
-test("gateway routing keeps session preference while turn affinity remains strict", () => {
+test("gateway routing keeps new turns on their active session account while turn affinity remains strict", () => {
   let now = 1_000;
   const routing = createGatewayRouting({ now: () => now });
   const accounts = [
-    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_5h_used_percent: 10 },
-    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_5h_used_percent: 20 }
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_7d_used_percent: 80 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_7d_used_percent: 20 }
   ];
   const first = routing.context({ session_id: "session-1", "x-codex-turn-metadata": '{"turn_id":"turn-1"}' });
   assert.equal(first.established, false);
@@ -573,38 +573,103 @@ test("gateway routing keeps session preference while turn affinity remains stric
   assert.equal(routing.findPreferredAccount(nextTurn, accounts).id, "a");
 });
 
-test("gateway routing changes a session preference only after the preferred account is unavailable", () => {
-  const routing = createGatewayRouting({ now: () => 10_000 });
+test("gateway routing uses a sliding session affinity TTL based on successful use", () => {
+  let now = 1_000;
+  const routing = createGatewayRouting({ now: () => now, sessionAffinityTtlMs: 100 });
   const accounts = [
-    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_5h_used_percent: 10 },
-    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_5h_used_percent: 20 }
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_7d_used_percent: 80 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_7d_used_percent: 20 }
   ];
   const first = routing.context({ session_id: "session-1" });
   routing.observeResponse(first, accounts[0], new Headers());
-  routing.setCooldown("a", 60_000);
+
+  now = 1_099;
+  const next = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(next, accounts).id, "a");
+  routing.observeResponse(next, accounts[0], new Headers());
+
+  now = 1_198;
+  assert.equal(routing.findPreferredAccount(routing.context({ session_id: "session-1" }), accounts).id, "a");
+  now = 1_200;
+  const expired = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(expired, accounts), null);
+  assert.equal(routing.selectNewAccount(accounts).id, "b");
+});
+
+test("gateway routing restores unexpired session affinity and expires stale snapshots", () => {
+  let now = 10_000;
+  const routing = createGatewayRouting({
+    now: () => now,
+    sessionAffinityTtlMs: 2_000,
+    snapshot: {
+      sessions: [{
+        key: "session-1",
+        targetId: "builtin-chatgpt-subscription-pool",
+        accountId: "a",
+        credentialRef: "",
+        clientModel: "",
+        upstreamModel: "",
+        lastSeenAt: 9_000
+      }]
+    }
+  });
+  const accounts = [
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_7d_used_percent: 80 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_7d_used_percent: 20 }
+  ];
+
+  const route = routing.context({ session_id: "session-1" });
+  assert.equal(route.established, false);
+  assert.equal(routing.findPreferredAccount(route, accounts).id, "a");
+  now = 11_001;
+  const expired = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(expired, accounts), null);
+  assert.equal(routing.selectNewAccount(accounts).id, "b");
+  assert.deepEqual(routing.snapshot().sessions, []);
+});
+
+test("gateway routing switches an unavailable session account and persists the replacement", () => {
+  const routing = createGatewayRouting({ now: () => 10_000 });
+  const accounts = [
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_7d_used_percent: 80 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_7d_used_percent: 20 }
+  ];
+  const first = routing.context({ session_id: "session-1" });
+  routing.observeResponse(first, accounts[0], new Headers());
+  accounts[0].enabled = false;
 
   const next = routing.context({ session_id: "session-1" });
   assert.equal(routing.findPreferredAccount(next, accounts), null);
   assert.equal(routing.selectNewAccount(accounts).id, "b");
   routing.observeResponse(next, accounts[1], new Headers());
-  routing.clearCooldown("a");
-
-  const later = routing.context({ session_id: "session-1" });
-  assert.equal(routing.findPreferredAccount(later, accounts).id, "b");
+  assert.equal(routing.findPreferredAccount(routing.context({ session_id: "session-1" }), accounts).id, "b");
 });
 
-test("gateway routing balances only newly seen sessions", () => {
+test("gateway routing reserves one account for concurrent first requests in a session", () => {
   const routing = createGatewayRouting({ now: () => 10_000 });
   const accounts = [
-    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_5h_used_percent: 10 },
-    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_5h_used_percent: 20 }
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_7d_used_percent: 20 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_7d_used_percent: 20 }
   ];
-  const firstSession = routing.context({ session_id: "session-1" });
-  routing.observeResponse(firstSession, accounts[0], new Headers());
-  assert.equal(routing.selectNewAccount(accounts).id, "b");
+  const first = routing.context({ session_id: "session-1" });
+  const selected = routing.selectNewAccount(accounts);
+  routing.reserveSession(first, selected);
 
-  const sameSession = routing.context({ session_id: "session-1" });
-  assert.equal(routing.findPreferredAccount(sameSession, accounts).id, "a");
+  const concurrent = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(concurrent, accounts).id, "a");
+  routing.releaseSessionReservation(first, "a");
+  assert.equal(routing.findPreferredAccount(routing.context({ session_id: "session-1" }), accounts), null);
+});
+
+test("gateway routing prioritizes seven-day quota before active request count", () => {
+  const routing = createGatewayRouting({ now: () => 10_000 });
+  const accounts = [
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_7d_used_percent: 80 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_7d_used_percent: 20 }
+  ];
+  const releases = Array.from({ length: 5 }, () => routing.beginRequest("b"));
+  assert.equal(routing.selectNewAccount(accounts).id, "b");
+  for (const release of releases) release();
 });
 
 test("routing header parsers read Codex session and turn identifiers", () => {
@@ -632,29 +697,34 @@ test("gateway routing snapshot preserves session and turn affinity across restar
   const restoredTurn = restored.context({ session_id: "session-1", "x-codex-turn-state": "state-a" });
   assert.equal(restoredTurn.established, true);
   assert.equal(restoredTurn.accountId, "a");
+  const restoredSession = restored.context({ session_id: "session-1", "x-codex-turn-metadata": '{"turn_id":"turn-2"}' });
+  assert.equal(restoredSession.sessionPreferred, true);
+  assert.equal(restoredSession.accountId, "a");
+  assert.equal(savedSnapshot.sessions.length, 1);
 
   const unknown = createGatewayRouting({ now: () => 10_001 }).context({ "x-codex-turn-state": "unknown-state" });
   assert.equal(unknown.unknownTurnState, true);
 });
 
-test("gateway routing bounds affinity maps while retaining recently used bindings", () => {
+test("gateway routing bounds turn affinity maps while retaining recently used bindings", () => {
   let now = 10_000;
   const routing = createGatewayRouting({ now: () => now });
   for (let index = 0; index < 500; index += 1) {
-    const route = routing.context({ session_id: `session-${index}` });
+    const route = routing.context({ "x-codex-turn-metadata": JSON.stringify({ turn_id: `turn-${index}` }) });
     routing.observeResponse(route, { id: "a" }, new Headers());
     now += 1;
   }
-  routing.context({ session_id: "session-0" });
+  const refreshed = routing.context({ "x-codex-turn-metadata": '{"turn_id":"turn-0"}' });
+  routing.observeResponse(refreshed, { id: "a" }, new Headers());
   now += 1;
-  const newest = routing.context({ session_id: "session-500" });
+  const newest = routing.context({ "x-codex-turn-metadata": '{"turn_id":"turn-500"}' });
   routing.observeResponse(newest, { id: "b" }, new Headers());
 
-  const sessions = routing.snapshot().sessions;
-  assert.equal(sessions.length, 500);
-  assert.equal(sessions.some((item) => item.key === "session-0"), true);
-  assert.equal(sessions.some((item) => item.key === "session-1"), false);
-  assert.equal(sessions.some((item) => item.key === "session-500"), true);
+  const turns = routing.snapshot().turns;
+  assert.equal(turns.length, 500);
+  assert.equal(turns.some((item) => item.key === "turn-0"), true);
+  assert.equal(turns.some((item) => item.key === "turn-1"), false);
+  assert.equal(turns.some((item) => item.key === "turn-500"), true);
 });
 
 test("callWithFailover returns the last attempted account when all accounts fail", async () => {

@@ -65,6 +65,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
   const routing = createGatewayRouting({
     snapshot: parseAffinitySnapshot(store.getSettings().gateway_affinity_state_json),
     getIgnoreFiveHourLimit: () => store.getSettings().ignore_five_hour_limit === "true",
+    getSessionAffinityTtlMs: () => positiveSetting(store.getSettings().gateway_session_affinity_ttl_hours, 168) * 60 * 60 * 1000,
     onChanged(snapshot: Dynamic) {
       store.saveSettings({ gateway_affinity_state_json: JSON.stringify(snapshot) });
     }
@@ -242,6 +243,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
     }
     const onAccountSelected = (account: Dynamic) => {
       if (!account?.id || account.id === accountForLog?.id) return;
+      runtime.routing?.reserveSession(routeContext, account);
       releaseAccountLoad();
       releaseAccountLoad = runtime.routing?.beginRequest(account.id) || (() => {});
       accountForLog = account;
@@ -441,12 +443,21 @@ async function callSubscriptionTarget(options: Dynamic) {
   if (!firstAccount) {
     throw gatewayRouteError(503, "SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "The server is currently unavailable. Please try again later.");
   }
-  const result: Dynamic = await callWithFailover(req, routedRequest, firstAccount, settings, store, hooks, {
-    signal,
-    allowAccountFailover: !routeContext.established,
-    routing: runtime.routing,
-    onAccountSelected
-  });
+  let result: Dynamic;
+  try {
+    result = await callWithFailover(req, routedRequest, firstAccount, settings, store, hooks, {
+      signal,
+      allowAccountFailover: !routeContext.established,
+      routing: runtime.routing,
+      onAccountSelected
+    });
+  } catch (error) {
+    runtime.routing?.releaseSessionReservation(routeContext);
+    throw error;
+  }
+  if (!(result.response?.status >= 200 && result.response?.status < 300)) {
+    runtime.routing?.releaseSessionReservation(routeContext, result.account?.id);
+  }
   const modelId = String(parseResponsesPayload(request.body)?.model || "");
   return {
     ...result,
@@ -746,6 +757,19 @@ async function callWithFailover(req: Dynamic, request: Dynamic, firstAccount: Dy
           message: `${request.path} 刷新账号 token 失败：${account.email || account.name || account.id}: ${error.message}`
         });
       }
+    }
+    if (isAuthExpiredResponse(result.response.status, result.body)) {
+      lastResult = result;
+      options.routing?.setCooldown(
+        account.id,
+        positiveSetting(settings.gateway_quota_cooldown_ms, DEFAULT_QUOTA_COOLDOWN_MS)
+      );
+      if (!allowAccountFailover) break;
+      excluded.add(account.id);
+      account = options.routing
+        ? options.routing.selectNewAccount(store.listAccounts(), Array.from(excluded))
+        : pickGatewayAccount(store.listAccounts(), "", Array.from(excluded), { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
+      continue;
     }
     const syncedUsage = syncAccountUsageFromHeaders(account, result.response.headers, store);
     if (!isQuotaExhaustedResponse(result.response.status, result.body)) {

@@ -249,6 +249,7 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
     gateway_unary_timeout_ms: "91000",
     gateway_websocket_idle_timeout_ms: "181000",
     gateway_quota_cooldown_ms: "61000",
+    gateway_session_affinity_ttl_hours: "168",
     gateway_shutdown_grace_ms: "5500",
     usage_refresh_timeout_ms: "16000"
   }), {
@@ -257,6 +258,7 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
     gateway_unary_timeout_ms: "91000",
     gateway_websocket_idle_timeout_ms: "181000",
     gateway_quota_cooldown_ms: "61000",
+    gateway_session_affinity_ttl_hours: "168",
     gateway_shutdown_grace_ms: "5500",
     usage_refresh_timeout_ms: "16000"
   });

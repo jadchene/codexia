@@ -40,6 +40,7 @@ type SettingsFormValues = Record<string, unknown> & {
   gateway_unary_timeout_seconds: string | number;
   gateway_websocket_idle_timeout_seconds: string | number;
   gateway_quota_cooldown_seconds: string | number;
+  gateway_session_affinity_ttl_hours: string | number;
   gateway_shutdown_grace_seconds: string | number;
   usage_refresh_timeout_seconds: string | number;
   gateway_request_body_limit_mib: string | number;
@@ -241,10 +242,20 @@ export const SettingsPage = ({
           <NumberField name="usage_refresh_timeout_seconds" label="单次刷新超时" suffix="秒" min={1} max={300} />
         </div>
       </SettingsSection>
-      <SettingsSection title="账号调度" description="设置账号选择和额度耗尽后的冷却策略。">
-        <div style={{ maxWidth: 320 }}>
-          <NumberField name="gateway_quota_cooldown_seconds" label="额度冷却" suffix="秒" min={1} max={3600} />
+      <SettingsSection title="账号调度" description="设置会话账号亲和、账号选择和额度耗尽后的冷却策略。">
+        <div className="v1-settings-grid v1-settings-grid-2">
+          <NumberField
+            name="gateway_session_affinity_ttl_hours"
+            label="会话亲和有效期"
+            suffix="小时"
+            min={1}
+            max={8760}
+          />
+          <NumberField name="gateway_quota_cooldown_seconds" label="账号失败冷却" suffix="秒" min={1} max={3600} />
         </div>
+        <Typography.Text type="secondary" className="v1-block">
+          同一会话持续使用已绑定账号；每次成功使用后重新计时，过期后按 7 天剩余额度重新选择。
+        </Typography.Text>
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
             <Typography.Text strong>忽略 5 小时限制</Typography.Text>
@@ -478,6 +489,7 @@ const NumberField = ({
 export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => {
   const values = { ...settings } as SettingsFormValues;
   values.gateway_api_key = "";
+  values.gateway_session_affinity_ttl_hours = settings.gateway_session_affinity_ttl_hours || "168";
   for (const [formKey, settingKey] of Object.entries(SECOND_FIELDS)) {
     values[formKey] = formatNumber(Number(settings[settingKey] || 0) / 1000);
   }
