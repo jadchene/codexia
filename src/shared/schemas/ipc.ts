@@ -9,6 +9,10 @@ const pricing = z.object({
   cachedInputPerMillion: z.number().finite().nonnegative().max(1_000_000),
   outputPerMillion: z.number().finite().nonnegative().max(1_000_000)
 }).strict();
+const bundledModelOverride = z.object({
+  enabled: z.boolean(),
+  modelCatalogJson: z.string().max(16 * 1024 * 1024)
+}).strict();
 const logQuery = z.object({
   page: z.number().int().min(1),
   pageSize: z.number().int().min(1).max(500),
@@ -36,6 +40,8 @@ export const ipcArgumentSchemas = {
   "upstreams:save": z.tuple([saveResponsesApiUpstreamSchema]),
   "upstreams:delete": z.tuple([id]),
   "upstreams:refreshBalance": z.tuple([id]),
+  "upstreams:bundledOverride": empty,
+  "upstreams:saveBundledOverride": z.tuple([bundledModelOverride]),
   "upstreams:refreshBuiltinModels": empty,
   "upstreams:saveModelPricing": z.tuple([id, z.record(id, pricing)]),
   "upstreams:testConnection": z.tuple([id]),

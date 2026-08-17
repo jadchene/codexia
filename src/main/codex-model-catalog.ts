@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import type { BundledModelOverride, ModelCatalogBuildResult } from "../shared/contracts/upstreams.ts";
 import { writeFilesTransaction } from "./codex-cli-auth.ts";
 import { BUILTIN_SUBSCRIPTION_ID } from "./upstreams/upstream-service.ts";
 
@@ -12,23 +13,32 @@ interface CatalogServiceOptions {
   db: DatabaseSync;
   dataDir: string;
   runBundledModels?: () => string;
+  getBundledOverride?: () => BundledModelOverride;
 }
 
 export function createCodexModelCatalogService(options: CatalogServiceOptions) {
   const catalogPath = path.join(options.dataDir, "models.json");
   const bundledCachePath = path.join(options.dataDir, "codex-bundled-models.json");
-  const rebuild = (refreshBundled: boolean, allowCachedFallback: boolean) => {
+  const rebuild = (refreshBundled: boolean, allowCachedFallback: boolean): ModelCatalogBuildResult => {
+    const override = options.getBundledOverride?.() || { enabled: false, modelCatalogJson: "" };
     let bundled: Catalog;
-    if (refreshBundled || !fs.existsSync(bundledCachePath)) {
+    let bundledSource: ModelCatalogBuildResult["bundledSource"];
+    if (override.enabled) {
+      bundled = parseBundledOverrideCatalog(override.modelCatalogJson);
+      bundledSource = "override";
+    } else if (refreshBundled || !fs.existsSync(bundledCachePath)) {
       try {
         bundled = parseCatalog((options.runBundledModels || runBundledModels)(), "Codex 内置模型目录");
         writeFilesTransaction([{ file: bundledCachePath, content: `${JSON.stringify(bundled, null, 2)}\n` }]);
+        bundledSource = "cli";
       } catch (error) {
         if (!allowCachedFallback || !fs.existsSync(bundledCachePath)) throw error;
         bundled = parseCatalog(fs.readFileSync(bundledCachePath, "utf8"), "Codex 内置模型缓存");
+        bundledSource = "cache";
       }
     } else {
       bundled = parseCatalog(fs.readFileSync(bundledCachePath, "utf8"), "Codex 内置模型缓存");
+      bundledSource = "cache";
     }
     const external = enabledExternalModels(options.db);
     const merged = mergeCatalogs(bundled, external);
@@ -39,6 +49,7 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
     return {
       path: catalogPath,
       bundledCachePath,
+      bundledSource,
       bundledCount: bundled.models.length,
       externalCount: external.length,
       totalCount: merged.models.length
@@ -76,7 +87,16 @@ export function parseCatalog(raw: string, label = "模型目录"): Catalog {
     if (!slug) throw new Error(`${label}包含缺少 slug 的模型项。`);
     return { ...entry, slug } as ModelEntry;
   });
+  if (new Set(models.map((model) => model.slug)).size !== models.length) {
+    throw new Error(`${label}包含重复的模型 slug。`);
+  }
   return { ...value, models } as Catalog;
+}
+
+export function parseBundledOverrideCatalog(raw: string): Catalog {
+  const catalog = parseCatalog(raw, "Codex Bundled 覆盖模型目录");
+  if (catalog.models.length === 0) throw new Error("Codex Bundled 覆盖模型目录必须包含非空 models 数组。");
+  return catalog;
 }
 
 export function mergeCatalogs(bundled: Catalog, external: ModelEntry[]): Catalog {

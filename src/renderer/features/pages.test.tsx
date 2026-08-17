@@ -236,9 +236,47 @@ describe("Ant Design pages", () => {
     renderWithQueries(<UpstreamsPage />);
     expect(await screen.findByText("内置账号渠道")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "删除" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "配置 Bundled 覆盖" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新内置模型" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新余额" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "更多操作" })).toHaveLength(1);
+  });
+
+  it("configures a disabled-by-default bundled model override with validated JSON", async () => {
+    const user = userEvent.setup();
+    const builtin = createUpstream("builtin", "内置账号渠道", "chatgpt_subscription_pool");
+    vi.mocked(window.codexGateway.listUpstreams).mockResolvedValue([builtin]);
+    vi.mocked(window.codexGateway.getBundledModelOverride).mockResolvedValue({ enabled: false, modelCatalogJson: "" });
+    vi.mocked(window.codexGateway.saveBundledModelOverride).mockImplementation(async (input) => ({
+      override: input,
+      catalog: {
+        path: "D:/data/models.json",
+        bundledCachePath: "D:/data/codex-bundled-models.json",
+        bundledSource: "override",
+        bundledCount: 1,
+        externalCount: 0,
+        totalCount: 1
+      }
+    }));
+    renderWithQueries(<UpstreamsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "配置 Bundled 覆盖" }));
+    const dialog = await screen.findByRole("dialog", { name: "Codex Bundled 覆盖" });
+    const enabled = within(dialog).getByRole("switch", { name: "启用覆盖" });
+    expect(enabled.getAttribute("aria-checked")).toBe("false");
+    await user.click(enabled);
+    await user.click(within(dialog).getByRole("button", { name: /保\s*存/ }));
+    expect(await within(dialog).findByText("模型 JSON 格式不正确")).toBeTruthy();
+
+    const modelCatalogJson = '{"models":[{"slug":"gpt-override"}]}';
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Codex Bundled 模型 JSON" }), {
+      target: { value: modelCatalogJson }
+    });
+    await user.click(within(dialog).getByRole("button", { name: /保\s*存/ }));
+    await waitFor(() => expect(window.codexGateway.saveBundledModelOverride).toHaveBeenCalledWith({
+      enabled: true,
+      modelCatalogJson
+    }));
   });
 
   it("starts the gateway from service management", async () => {
@@ -429,6 +467,9 @@ function createBridge(): CodexGatewayBridge {
   return {
     listUpstreams: vi.fn().mockResolvedValue([]),
     listUpstreamModels: vi.fn().mockResolvedValue([]),
+    getBundledModelOverride: vi.fn().mockResolvedValue({ enabled: false, modelCatalogJson: "" }),
+    saveBundledModelOverride: vi.fn(),
+    refreshBuiltinModels: vi.fn(),
     bootstrap: vi.fn().mockResolvedValue({ settings: { billing_currency: "USD" } })
   } as unknown as CodexGatewayBridge;
 }

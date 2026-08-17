@@ -8,6 +8,8 @@ describe("IPC runtime argument schemas", () => {
     expect(new Set(channels).size).toBe(channels.length);
     expect(channels).toContain("upstreams:save");
     expect(channels).toContain("upstreams:refreshBalance");
+    expect(channels).toContain("upstreams:bundledOverride");
+    expect(channels).toContain("upstreams:saveBundledOverride");
     expect(channels).toContain("upstreams:refreshBuiltinModels");
     expect(channels.some((channel) => channel.startsWith("modelMappings:"))).toBe(false);
     expect(channels.some((channel) => channel.startsWith("routing:"))).toBe(false);
@@ -17,5 +19,7 @@ describe("IPC runtime argument schemas", () => {
   it("rejects invalid IDs", () => {
     expect(ipcArgumentSchemas["upstreams:models"].safeParse([""]).success).toBe(false);
     expect(ipcArgumentSchemas["upstreams:testInvocation"].safeParse(["upstream-a", ""]).success).toBe(false);
+    expect(ipcArgumentSchemas["upstreams:saveBundledOverride"].safeParse([{ enabled: true, modelCatalogJson: "{}" }]).success).toBe(true);
+    expect(ipcArgumentSchemas["upstreams:saveBundledOverride"].safeParse([{ enabled: "true", modelCatalogJson: "{}" }]).success).toBe(false);
   });
 });

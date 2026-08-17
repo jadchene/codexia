@@ -10,8 +10,11 @@ import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "./logs"
 import type { ServiceStatus, Settings } from "./settings";
 import type {
   BalanceRefreshResult,
+  BundledModelOverride,
   GatewayModelSummary,
+  ModelCatalogBuildResult,
   ModelPricing,
+  SaveBundledModelOverrideResult,
   SaveResponsesApiUpstreamInput,
   UpstreamHealthResult,
   UpstreamInvocationTestResult,
@@ -39,7 +42,9 @@ export type IpcContract = {
   "upstreams:save": IpcSpec<[input: SaveResponsesApiUpstreamInput], UpstreamSummary>;
   "upstreams:delete": IpcSpec<[upstreamId: string], { deleted: boolean; id: string }>;
   "upstreams:refreshBalance": IpcSpec<[upstreamId: string], BalanceRefreshResult>;
-  "upstreams:refreshBuiltinModels": IpcSpec<[], { path: string; bundledCount: number; externalCount: number; totalCount: number }>;
+  "upstreams:bundledOverride": IpcSpec<[], BundledModelOverride>;
+  "upstreams:saveBundledOverride": IpcSpec<[input: BundledModelOverride], SaveBundledModelOverrideResult>;
+  "upstreams:refreshBuiltinModels": IpcSpec<[], ModelCatalogBuildResult>;
   "upstreams:saveModelPricing": IpcSpec<[upstreamId: string, pricing: Record<string, ModelPricing>], UpstreamModel[]>;
   "upstreams:testConnection": IpcSpec<[upstreamId: string], UpstreamHealthResult>;
   "upstreams:testInvocation": IpcSpec<[upstreamId: string, modelId: string], UpstreamInvocationTestResult>;

@@ -12,6 +12,7 @@ import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shar
 import type { ServiceStatus, Settings } from "../shared/contracts/settings";
 import type {
   BalanceRefreshResult,
+  BundledModelOverride,
   GatewayModelSummary,
   ModelPricing,
   SaveResponsesApiUpstreamInput,
@@ -49,6 +50,8 @@ const api = {
   saveUpstream: (input: SaveResponsesApiUpstreamInput): Promise<UpstreamSummary> => invoke("upstreams:save", input),
   deleteUpstream: (upstreamId: string): Promise<{ deleted: boolean; id: string }> => invoke("upstreams:delete", upstreamId),
   refreshUpstreamBalance: (upstreamId: string): Promise<BalanceRefreshResult> => invoke("upstreams:refreshBalance", upstreamId),
+  getBundledModelOverride: (): Promise<BundledModelOverride> => invoke("upstreams:bundledOverride"),
+  saveBundledModelOverride: (input: BundledModelOverride) => invoke("upstreams:saveBundledOverride", input),
   refreshBuiltinModels: () => invoke("upstreams:refreshBuiltinModels"),
   saveUpstreamModelPricing: (upstreamId: string, pricing: Record<string, ModelPricing>): Promise<UpstreamModel[]> => invoke("upstreams:saveModelPricing", upstreamId, pricing),
   testUpstreamConnection: (upstreamId: string): Promise<UpstreamHealthResult> => invoke("upstreams:testConnection", upstreamId),

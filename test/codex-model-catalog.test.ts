@@ -43,6 +43,102 @@ test("cached bundled and external channel catalogs merge without rerunning Codex
   }
 });
 
+test("enabled bundled override skips Codex and merges the manual catalog with external models", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-override-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  let debugCalls = 0;
+  let override = { enabled: false, modelCatalogJson: "" };
+  try {
+    const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
+    const catalogs = createCodexModelCatalogService({
+      db: store.db,
+      dataDir: directory,
+      runBundledModels: () => { debugCalls += 1; return bundled; },
+      getBundledOverride: () => override
+    });
+    catalogs.refreshBundled();
+    const cachedBundled = fs.readFileSync(path.join(directory, "codex-bundled-models.json"), "utf8");
+    upstreams.save({
+      name: "Third Party", baseUrl: "https://api.example.test/v1", enabled: true,
+      supportsWebSocket: false, balanceQueryType: "none",
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "third-party-model", display_name: "Third Party" }] }),
+      modelPricing: {}
+    });
+
+    override = {
+      enabled: true,
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "gpt-override", display_name: "GPT Override" }] })
+    };
+    const result = catalogs.refreshBundled();
+
+    assert.equal(debugCalls, 1);
+    assert.equal(result.bundledSource, "override");
+    assert.equal(result.bundledCount, 1);
+    assert.equal(result.externalCount, 1);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(result.path, "utf8")).models.map((model: { slug: string }) => model.slug),
+      ["gpt-override", "third-party-model"]
+    );
+    assert.equal(fs.readFileSync(path.join(directory, "codex-bundled-models.json"), "utf8"), cachedBundled);
+    assert.deepEqual(
+      upstreams.listModels(BUILTIN_SUBSCRIPTION_ID).filter((model) => model.available).map((model) => model.modelId),
+      ["gpt-override"]
+    );
+
+    override = { enabled: false, modelCatalogJson: override.modelCatalogJson };
+    const restored = catalogs.refreshBundled();
+    assert.equal(debugCalls, 2);
+    assert.equal(restored.bundledSource, "cli");
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(restored.path, "utf8")).models.map((model: { slug: string }) => model.slug),
+      ["gpt-built-in", "third-party-model"]
+    );
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("bundled override rejects duplicate slugs and conflicts with external models", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-override-conflict-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  let override = {
+    enabled: true,
+    modelCatalogJson: JSON.stringify({ models: [{ slug: "duplicate" }, { slug: "duplicate" }] })
+  };
+  try {
+    const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
+    const catalogs = createCodexModelCatalogService({
+      db: store.db,
+      dataDir: directory,
+      runBundledModels: () => bundled,
+      getBundledOverride: () => override
+    });
+    override = { enabled: true, modelCatalogJson: JSON.stringify({ models: [] }) };
+    assert.throws(() => catalogs.refreshBundled(), /必须包含非空 models 数组/);
+    override = {
+      enabled: true,
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "duplicate" }, { slug: "duplicate" }] })
+    };
+    assert.throws(() => catalogs.refreshBundled(), /重复的模型 slug/);
+
+    upstreams.save({
+      name: "Third Party", baseUrl: "https://api.example.test/v1", enabled: true,
+      supportsWebSocket: false, balanceQueryType: "none",
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "shared-model" }] }),
+      modelPricing: {}
+    });
+    override = {
+      enabled: true,
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "shared-model" }] })
+    };
+    assert.throws(() => catalogs.refreshBundled(), /模型 ID 冲突：shared-model/);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("legacy discovered API models are normalized to Codex slugs during catalog rebuild", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-legacy-"));
   const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });

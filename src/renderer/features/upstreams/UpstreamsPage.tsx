@@ -3,7 +3,8 @@ import {
   EditOutlined,
   MoreOutlined,
   PlusOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  SettingOutlined
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,6 +32,7 @@ import {
 import type { MenuProps, TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
 import type {
+  BundledModelOverride,
   ModelPricing,
   SaveResponsesApiUpstreamInput,
   UpstreamModel,
@@ -53,11 +55,14 @@ interface FormValues {
   secretHeadersJson: string;
 }
 
+type BundledOverrideFormValues = BundledModelOverride;
+
 const EMPTY_CATALOG = "";
 export const UpstreamsPage = () => {
   const queryClient = useQueryClient();
   const [form] = Form.useForm<FormValues>();
   const [pricingForm] = Form.useForm<{ pricing: Record<string, ModelPricing> }>();
+  const [bundledOverrideForm] = Form.useForm<BundledOverrideFormValues>();
   const [editing, setEditing] = useState<UpstreamSummary | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modelUpstream, setModelUpstream] = useState<UpstreamSummary | null>(null);
@@ -65,6 +70,7 @@ export const UpstreamsPage = () => {
   const [invocationModel, setInvocationModel] = useState("");
   const [pricingUpstream, setPricingUpstream] = useState<UpstreamSummary | null>(null);
   const [pricingModels, setPricingModels] = useState<UpstreamModel[]>([]);
+  const [bundledOverrideOpen, setBundledOverrideOpen] = useState(false);
   const watchedCatalog = Form.useWatch("modelCatalogJson", form) || EMPTY_CATALOG;
 
   const upstreamsQuery = useQuery({ queryKey: ["upstreams"], queryFn: () => window.codexGateway.listUpstreams() });
@@ -111,6 +117,21 @@ export const UpstreamsPage = () => {
       message.success({ key: "refresh-bundled-models", content: `已刷新 ${result.bundledCount} 个内置模型` });
     },
     onError: (error) => message.error({ key: "refresh-bundled-models", content: `刷新失败：${readableError(error)}`, duration: 8 })
+  });
+  const bundledOverrideMutation = useMutation({
+    mutationFn: (input: BundledModelOverride) => window.codexGateway.saveBundledModelOverride(input),
+    onMutate: () => { message.loading({ key: "save-bundled-override", content: "正在保存 Bundled 覆盖...", duration: 0 }); },
+    onSuccess: async (result) => {
+      await invalidate();
+      setBundledOverrideOpen(false);
+      message.success({
+        key: "save-bundled-override",
+        content: result.override.enabled
+          ? `已启用覆盖并写入 ${result.catalog.totalCount} 个模型`
+          : `已关闭覆盖并恢复 ${result.catalog.bundledCount} 个 Codex 内置模型`
+      });
+    },
+    onError: (error) => message.error({ key: "save-bundled-override", content: `保存失败：${readableError(error)}`, duration: 8 })
   });
   const healthMutation = useMutation({
     mutationFn: (id: string) => window.codexGateway.testUpstreamConnection(id),
@@ -168,6 +189,17 @@ export const UpstreamsPage = () => {
     setPricingModels(models.filter((model) => model.available));
     pricingForm.setFieldsValue({ pricing: Object.fromEntries(models.map((model) => [model.modelId, model.pricing])) });
     setPricingUpstream(upstream);
+  };
+
+  const openBundledOverride = async () => {
+    try {
+      const override = await window.codexGateway.getBundledModelOverride();
+      bundledOverrideForm.resetFields();
+      bundledOverrideForm.setFieldsValue(override);
+      setBundledOverrideOpen(true);
+    } catch (error) {
+      message.error(`读取 Bundled 覆盖失败：${readableError(error)}`);
+    }
   };
 
   const save = async (values: FormValues) => {
@@ -243,6 +275,11 @@ export const UpstreamsPage = () => {
           <Button aria-label="编辑" icon={<EditOutlined />} onClick={() => void (upstream.kind === "chatgpt_subscription_pool" ? openPricing(upstream) : openEdit(upstream))} />
         </Tooltip>
         {upstream.kind === "chatgpt_subscription_pool" && (
+          <Tooltip title="配置 Bundled 覆盖">
+            <Button aria-label="配置 Bundled 覆盖" icon={<SettingOutlined />} onClick={() => void openBundledOverride()} />
+          </Tooltip>
+        )}
+        {upstream.kind === "chatgpt_subscription_pool" && (
           <Tooltip title="刷新内置模型">
             <Button aria-label="刷新内置模型" loading={bundledMutation.isPending} icon={<ReloadOutlined />} onClick={() => bundledMutation.mutate()} />
           </Tooltip>
@@ -274,6 +311,43 @@ export const UpstreamsPage = () => {
       rowKey="id" columns={columns} dataSource={upstreamsQuery.data ?? []} loading={upstreamsQuery.isLoading}
       pagination={false} scroll={{ x: 1120 }} sticky={{ offsetHeader: 0 }}
     />
+
+    <Modal
+      title="Codex Bundled 覆盖"
+      width={760}
+      open={bundledOverrideOpen}
+      okText="保存"
+      confirmLoading={bundledOverrideMutation.isPending}
+      onCancel={() => setBundledOverrideOpen(false)}
+      onOk={() => bundledOverrideForm.submit()}
+    >
+      <Form
+        form={bundledOverrideForm}
+        layout="vertical"
+        initialValues={{ enabled: false, modelCatalogJson: "" }}
+        onFinish={(values) => bundledOverrideMutation.mutate(values)}
+      >
+        <Form.Item name="enabled" label="启用覆盖" valuePropName="checked"><Switch /></Form.Item>
+        <Alert
+          showIcon
+          type="info"
+          title="关闭时使用 Codex CLI 内置目录；启用后使用下方 JSON 覆盖 Bundled，并与已启用的第三方模型合并。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form.Item
+          name="modelCatalogJson"
+          label="Codex Bundled 模型 JSON"
+          dependencies={["enabled"]}
+          rules={[
+            ({ getFieldValue }) => ({
+              validator: (_, value) => getFieldValue("enabled") ? validateCatalog(_, value) : Promise.resolve()
+            })
+          ]}
+        >
+          <Input.TextArea className="v1-code-editor" autoSize={{ minRows: 12, maxRows: 24 }} spellCheck={false} />
+        </Form.Item>
+      </Form>
+    </Modal>
 
     <Drawer
       title={editing ? "编辑模型渠道" : "新增模型渠道"}

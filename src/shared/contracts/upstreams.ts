@@ -92,6 +92,25 @@ export interface GatewayModelSummary {
   upstreamName: string;
 }
 
+export interface BundledModelOverride {
+  enabled: boolean;
+  modelCatalogJson: string;
+}
+
+export interface ModelCatalogBuildResult {
+  path: string;
+  bundledCachePath: string;
+  bundledSource: "cli" | "cache" | "override";
+  bundledCount: number;
+  externalCount: number;
+  totalCount: number;
+}
+
+export interface SaveBundledModelOverrideResult {
+  override: BundledModelOverride;
+  catalog: ModelCatalogBuildResult;
+}
+
 export interface ModelCatalogSaveResult {
   upstreamId: string;
   count: number;

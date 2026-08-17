@@ -43,6 +43,8 @@ Each Responses API channel supports the following settings:
 - Remote compaction adaptation. Keep it enabled unless the provider explicitly supports native Codex compaction.
 - Optional balance lookup, public or encrypted request headers, and per-model input, cached-input, and output prices.
 
+The built-in subscription channel also provides an optional Codex Bundled override, disabled by default. When enabled, its manually supplied model JSON replaces the CLI bundled catalog before third-party models are merged into the final `models.json`.
+
 You can inspect the imported model catalog and test a channel before using it in Codex.
 
 The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it.

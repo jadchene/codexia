@@ -16,7 +16,7 @@ import { startStartupUsageRefresh } from "./startup-usage-refresh.ts";
 import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
-import { createCodexModelCatalogService } from "./codex-model-catalog.ts";
+import { createCodexModelCatalogService, parseBundledOverrideCatalog } from "./codex-model-catalog.ts";
 import { createAuthService, accountFromTokens } from "./auth.ts";
 import { normalizeUsagePayload, normalizeResetCreditsPayload } from "./quota.ts";
 import {
@@ -173,7 +173,11 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   await waitForStartupDelay();
   if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) syncDetectedCodexAuthMode();
   authService = createAuthService(store, () => gateway.start(), refreshUsage);
-  modelCatalogService = createCodexModelCatalogService({ db: store.db, dataDir: store.paths.dataDir });
+  modelCatalogService = createCodexModelCatalogService({
+    db: store.db,
+    dataDir: store.paths.dataDir,
+    getBundledOverride: bundledModelOverride
+  });
   try {
     modelCatalogService.refreshBundled(true);
   } catch (error: Dynamic) {
@@ -433,6 +437,8 @@ function registerIpc() {
     notifyDataChanged(["upstreams"]);
     return result;
   });
+  handleIpc("upstreams:bundledOverride", () => bundledModelOverride());
+  handleIpc("upstreams:saveBundledOverride", (_event, input) => saveBundledModelOverride(input));
   handleIpc("upstreams:refreshBuiltinModels", () => {
     const result = modelCatalogService.refreshBundled();
     notifyDataChanged(["upstreams", "upstreamModels"]);
@@ -555,6 +561,49 @@ function gatewayQuotaSummary() {
   return buildAccountPoolQuotaSummary(store.listAccounts(), undefined, {
     ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true"
   });
+}
+
+function bundledModelOverride() {
+  const settings = store.getSettings();
+  return {
+    enabled: settings.codex_bundled_override_enabled === "true",
+    modelCatalogJson: String(settings.codex_bundled_override_json || "")
+  };
+}
+
+function saveBundledModelOverride(input: Dynamic) {
+  const previous = bundledModelOverride();
+  const next = {
+    enabled: Boolean(input.enabled),
+    modelCatalogJson: String(input.modelCatalogJson || "")
+  };
+  if (next.enabled) parseBundledOverrideCatalog(next.modelCatalogJson);
+  store.saveSettings({
+    codex_bundled_override_enabled: next.enabled ? "true" : "false",
+    codex_bundled_override_json: next.modelCatalogJson
+  });
+  try {
+    const catalog = next.enabled ? modelCatalogService.refresh() : modelCatalogService.refreshBundled();
+    notifyDataChanged(["upstreams", "upstreamModels"]);
+    return { override: bundledModelOverride(), catalog };
+  } catch (error: Dynamic) {
+    store.saveSettings({
+      codex_bundled_override_enabled: previous.enabled ? "true" : "false",
+      codex_bundled_override_json: previous.modelCatalogJson
+    });
+    try {
+      modelCatalogService.refresh();
+    } catch (recoveryError: Dynamic) {
+      store.addAppLog({
+        level: "error",
+        scope: "models",
+        action: "bundled-override-rollback",
+        status: "failed",
+        message: compactError(recoveryError?.message || recoveryError)
+      });
+    }
+    throw error;
+  }
 }
 
 async function startGateway(reason: Dynamic = "manual") {

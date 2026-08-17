@@ -14,6 +14,18 @@ import { isStrongGatewayApiKey } from "../src/main/gateway.ts";
 import { createUsageRefreshCoordinator } from "../src/main/usage-refresh-coordinator.ts";
 import { acquireSingleInstanceChannel, closeSingleInstanceChannel, singleInstanceEndpoint } from "../src/main/single-instance.ts";
 
+test("bundled model override is disabled by default", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-bundled-override-default-"));
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    assert.equal(store.getSettings().codex_bundled_override_enabled, "false");
+    assert.equal(store.getSettings().codex_bundled_override_json, "");
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("safe storage codec encrypts account and PKCE secrets at rest and migrates plaintext rows", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-store-"));
   const database = path.join(directory, "test.sqlite");
@@ -231,8 +243,15 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
     appearance_density: "compact",
     navigation_collapsed: "true"
   });
-  const safeSettings = publicSettings({ gateway_port: "8436", gateway_api_key: "top-secret-key" });
+  const safeSettings = publicSettings({
+    gateway_port: "8436",
+    gateway_api_key: "top-secret-key",
+    codex_bundled_override_enabled: "true",
+    codex_bundled_override_json: "{\"models\":[]}"
+  });
   assert.equal(safeSettings.gateway_api_key, undefined);
+  assert.equal(safeSettings.codex_bundled_override_enabled, undefined);
+  assert.equal(safeSettings.codex_bundled_override_json, undefined);
   assert.equal(safeSettings.gateway_api_key_configured, "true");
   assert.match(safeSettings.gateway_api_key_fingerprint, /^[a-f0-9]{12}$/);
   assert.throws(() => editableSettingsPatch({ appearance_theme: "midnight" }), /取值无效/);

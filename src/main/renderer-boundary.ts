@@ -72,7 +72,12 @@ export function publicAccount(account: Record<string, unknown> | null | undefine
 }
 export function publicSettings(settings: Settings): Settings {
   const gatewayApiKey = String(settings.gateway_api_key || "");
-  const { gateway_api_key: _gatewayApiKey, ...safe } = settings;
+  const {
+    gateway_api_key: _gatewayApiKey,
+    codex_bundled_override_enabled: _bundledOverrideEnabled,
+    codex_bundled_override_json: _bundledOverrideJson,
+    ...safe
+  } = settings;
   return {
     ...safe,
     gateway_api_key_configured: gatewayApiKey ? "true" : "false",
