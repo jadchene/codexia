@@ -2,7 +2,6 @@ type Dynamic = any;
 
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserDataDir } from "./paths.ts";
@@ -28,7 +27,7 @@ import {
   pickResetCreditById,
   requestResetCreditConsume
 } from "./reset-credit.ts";
-import { applyGatewayMode, applyAccountMode, detectCodexAuthMode, ensureProviderConfig } from "./codex-cli-auth.ts";
+import { applyGatewayMode, applyAccountMode, detectCodexAuthMode, ensureProviderConfig, resolveCodexHome } from "./codex-cli-auth.ts";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc.ts";
 import { ipcArgumentSchemas } from "../shared/schemas/ipc.ts";
 
@@ -666,7 +665,7 @@ async function stopMcpGateway(reason: Dynamic = "manual") {
 
 async function importLocalCodexAccount() {
   const codexOptions = codexAccessOptions(runtimeProfile);
-  const file = path.join(codexOptions.codexDir || path.join(os.homedir(), ".codex"), "auth.json");
+  const file = path.join(resolveCodexHome(codexOptions), "auth.json");
   if (!fs.existsSync(file)) throw new Error(`未找到 ${file}`);
   let auth;
   try {
@@ -701,7 +700,7 @@ async function importLocalCodexAccount() {
     scope: "auth",
     action: "import-local-codex",
     status: "success",
-    message: `已从 ~/.codex/auth.json 导入账号：${saved.name}`
+    message: `已从 ${file} 导入账号：${saved.name}`
   });
   try {
     const refreshed = await refreshUsage(saved.id);

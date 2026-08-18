@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import type { Settings } from "../shared/contracts/settings";
 
-interface CodexPathOptions { codexDir?: string; modelCatalogPath?: string }
+interface CodexPathOptions {
+  codexDir?: string;
+  modelCatalogPath?: string;
+  environment?: NodeJS.ProcessEnv;
+}
 interface AccountRecord extends Record<string, unknown> {
   id: string;
   access_token?: string;
@@ -17,25 +21,27 @@ interface AccountRecord extends Record<string, unknown> {
 interface FileEntry { file: string; content: string }
 type AuthModeResult = { mode: "gateway" | "account" | "unknown"; accountId: string };
 
-function codexDir(options: CodexPathOptions = {}): string {
-  return options.codexDir ? path.resolve(options.codexDir) : path.join(os.homedir(), ".codex");
+export function resolveCodexHome(options: CodexPathOptions = {}): string {
+  if (options.codexDir) return path.resolve(options.codexDir);
+  const configured = String((options.environment || process.env).CODEX_HOME || "").trim();
+  return configured ? path.resolve(configured) : path.join(os.homedir(), ".codex");
 }
 function authPath(options: CodexPathOptions = {}): string {
-  return path.join(codexDir(options), "auth.json");
+  return path.join(resolveCodexHome(options), "auth.json");
 }
 function configPath(options: CodexPathOptions = {}): string {
-  return path.join(codexDir(options), "config.toml");
+  return path.join(resolveCodexHome(options), "config.toml");
 }
 
 function managedModelCatalogPath(options: CodexPathOptions = {}): string {
-  const configured = options.modelCatalogPath || path.join(codexDir(options), "models.json");
+  const configured = options.modelCatalogPath || path.join(resolveCodexHome(options), "models.json");
   return path.win32.isAbsolute(configured) ? configured : path.resolve(configured);
 }
 
 const codexModelCache = new Map<string, { mtimeMs: number; size: number; model: string }>();
 
 /**
- * 读取 ~/.codex/config.toml 顶层当前模型（不读取 profiles 子表）。
+ * 读取 Codex Home 下 config.toml 的顶层当前模型（不读取 profiles 子表）。
  * 供网关在 WebSocket 握手阶段判断当前模型是否支持 WS，依据文件 mtime/size 做轻量缓存。
  */
 export function readCurrentCodexModel(options: CodexPathOptions = {}): string {
@@ -294,7 +300,7 @@ function readJsonSafe(file: string): any {
 }
 
 function ensureCodexDir(options: CodexPathOptions = {}): void {
-  fs.mkdirSync(codexDir(options), { recursive: true });
+  fs.mkdirSync(resolveCodexHome(options), { recursive: true });
 }
 
 function readText(file: string): string {

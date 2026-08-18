@@ -47,7 +47,7 @@ The built-in subscription channel also provides an optional Codex Bundled overri
 
 You can inspect the imported model catalog and test a channel before using it in Codex.
 
-The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it.
+The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it. Codexia reads and writes Codex configuration from `CODEX_HOME` when that environment variable is set, otherwise it uses the current user's default `.codex` directory.
 
 ### Services
 

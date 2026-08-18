@@ -8,7 +8,7 @@ import { test } from "vitest";
 import { createSecretCodec, PREFIX } from "../src/main/secret-codec.ts";
 import { createStore } from "../src/main/store.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "../src/main/renderer-boundary.ts";
-import { applyGatewayMode, gatewayProviderBlock, nextGatewayConfig, withoutGatewayProvider, writeFilesTransaction } from "../src/main/codex-cli-auth.ts";
+import { applyGatewayMode, gatewayProviderBlock, nextGatewayConfig, resolveCodexHome, withoutGatewayProvider, writeFilesTransaction } from "../src/main/codex-cli-auth.ts";
 import { createMcpGatewayService, resolveWindowsNpmShim } from "../src/main/mcp-gateway-service.ts";
 import { isStrongGatewayApiKey } from "../src/main/gateway.ts";
 import { createUsageRefreshCoordinator } from "../src/main/usage-refresh-coordinator.ts";
@@ -22,6 +22,31 @@ test("bundled model override is disabled by default", () => {
     assert.equal(store.getSettings().codex_bundled_override_json, "");
   } finally {
     store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Codex home honors CODEX_HOME and explicit directory precedence", () => {
+  const configured = path.resolve("configured-codex-home");
+  const explicit = path.resolve("explicit-codex-home");
+  assert.equal(resolveCodexHome({ environment: { CODEX_HOME: configured } }), configured);
+  assert.equal(resolveCodexHome({ codexDir: explicit, environment: { CODEX_HOME: configured } }), explicit);
+});
+
+test("applying gateway mode writes Codex files under CODEX_HOME", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-custom-home-"));
+  try {
+    const result = applyGatewayMode({
+      gateway_api_key: "local-test-key",
+      gateway_host: "localhost",
+      gateway_port: "8436"
+    }, { environment: { CODEX_HOME: directory } });
+    assert.equal(result.authPath, path.join(directory, "auth.json"));
+    assert.equal(result.configPath, path.join(directory, "config.toml"));
+    assert.equal(result.modelCatalogPath, path.join(directory, "models.json"));
+    assert.equal(JSON.parse(fs.readFileSync(result.authPath, "utf8")).OPENAI_API_KEY, "local-test-key");
+    assert.match(fs.readFileSync(result.configPath, "utf8"), /model_catalog_json/);
+  } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
