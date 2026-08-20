@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 import { test } from "vitest";
 
@@ -92,6 +95,133 @@ test("WebSocket gateway proxies compressed Responses messages and keeps upstream
     assert.ok(connectionId);
     assert.match(disconnectLog.message, new RegExp(`^\\[${connectionId}\\]`));
     assert.equal(disconnectLog.status, "1000");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("Responses WebSocket removes non-empty external reasoning items before replaying history to the subscription pool", async () => {
+  const upstreamMessages = [];
+  const harness = await startHarness({
+    onConnection(websocket) {
+      websocket.once("message", (data) => {
+        upstreamMessages.push(JSON.parse(data.toString()));
+        websocket.send(JSON.stringify({ type: "response.completed", response: { model: "gpt-5.6-sol" } }));
+      });
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", {
+      "session-id": "cross-provider-ws-session"
+    });
+    const completed = nextMessages(websocket, 1);
+    websocket.send(JSON.stringify({
+      type: "response.create",
+      model: "gpt-5.6-sol",
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "你好" }] },
+        { type: "reasoning", id: "rs_openai", summary: [], content: [], encrypted_content: "gAAAAA-openai" },
+        {
+          type: "reasoning",
+          summary: [],
+          content: [{ type: "reasoning_text", text: "provider-private reasoning" }],
+          encrypted_content: "deepseek-response-id-0"
+        },
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: "你好" }] }
+      ]
+    }));
+    await completed;
+    assert.equal(upstreamMessages.length, 1);
+    assert.deepEqual(upstreamMessages[0].input, [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "你好" }] },
+      { type: "reasoning", id: "rs_openai", summary: [], content: [], encrypted_content: "gAAAAA-openai" },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "你好" }] }
+    ]);
+    websocket.close();
+    await nextClose(websocket);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket gateway writes JSONL debug logs for the handshake and relayed messages when enabled", async () => {
+  const harness = await startHarness({
+    onConnection(websocket) {
+      websocket.once("message", (data, isBinary) => {
+        websocket.send(`upstream:${data.toString()}`);
+        websocket.send(JSON.stringify({
+          type: "response.completed",
+          response: { usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }
+        }));
+      });
+    }
+  }, {
+    debug_api_logging: "true",
+    debug_api_logging_expires_at: String(Date.now() + 10 * 60 * 1000)
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", {
+      "session-id": "debug-ws-session"
+    });
+    const messagesPromise = nextMessages(websocket, 2);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-debug-ws" }));
+    const messages = await messagesPromise;
+    assert.match(messages[0].toString(), /^upstream:/);
+    assert.match(messages[1].toString(), /response\.completed/);
+    websocket.close(1000, "done");
+    await nextClose(websocket);
+
+    const logDir = path.join(harness.store.paths.dataDir, "logs");
+    await waitFor(() => {
+      if (!fs.existsSync(logDir)) return false;
+      const files = fs.readdirSync(logDir);
+      if (files.length !== 1) return false;
+      return fs.readFileSync(path.join(logDir, files[0]), "utf8").trim().split("\n").length >= 4;
+    }, 1000);
+    const files = fs.readdirSync(logDir);
+    assert.equal(files.length, 1);
+    assert.equal(files[0], `${localDateKey(new Date())}.jsonl`);
+    const entries = fs.readFileSync(path.join(logDir, files[0]), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(entries[0].kind, "request");
+    assert.equal(entries[0].transport, "websocket");
+    assert.equal(entries[0].path, "/v1/responses");
+    assert.equal(entries[0].headers.authorization, "[REDACTED]");
+    const handshake = entries.find((entry) => entry.kind === "response" && entry.status === 101);
+    assert.ok(handshake);
+    assert.equal(handshake.id, entries[0].id);
+    const requestMessage = entries.find((entry) => entry.kind === "request" && entry.transport === "websocket" && entry.message);
+    assert.match(requestMessage.message, /response\.create/);
+    assert.match(requestMessage.message, /gpt-debug-ws/);
+    const responseMessage = entries.find((entry) => entry.kind === "response" && entry.transport === "websocket" && entry.message);
+    assert.match(responseMessage.message, /upstream:/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket gateway writes debug request and rejection responses when enabled", async () => {
+  const harness = await startHarness({}, {
+    debug_api_logging: "true",
+    debug_api_logging_expires_at: String(Date.now() + 10 * 60 * 1000)
+  });
+  try {
+    const response = await connectFailure(harness, "/v1/unknown");
+    assert.equal(response.statusCode, 404);
+    const logDir = path.join(harness.store.paths.dataDir, "logs");
+    await waitFor(() => {
+      if (!fs.existsSync(logDir)) return false;
+      const files = fs.readdirSync(logDir);
+      if (files.length !== 1) return false;
+      return fs.readFileSync(path.join(logDir, files[0]), "utf8").trim().split("\n").length >= 2;
+    }, 1000);
+    const files = fs.readdirSync(logDir);
+    assert.equal(files.length, 1);
+    const entries = fs.readFileSync(path.join(logDir, files[0]), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(entries[0].kind, "request");
+    assert.equal(entries[0].path, "/v1/unknown");
+    assert.equal(entries[1].kind, "response");
+    assert.equal(entries[1].status, 404);
+    assert.equal(entries[1].id, entries[0].id);
   } finally {
     await harness.close();
   }
@@ -1084,7 +1214,12 @@ async function startHarness(options, settingOverrides = {}) {
   };
   const tokenLogs = [];
   const appLogs = [];
+  const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-ws-test-"));
   const store = {
+    paths: {
+      dataDir: testDataDir,
+      dbPath: path.join(testDataDir, "codex-gateway.sqlite")
+    },
     getSettings: () => ({ ...settings }),
     saveSettings: (patch) => Object.assign(settings, patch),
     listAccounts: () => accounts,
@@ -1113,6 +1248,7 @@ async function startHarness(options, settingOverrides = {}) {
       for (const websocket of upstreamWebSocketServer.clients) websocket.terminate();
       await closeWebSocketServer(upstreamWebSocketServer);
       await closeServer(upstreamServer);
+      fs.rmSync(testDataDir, { recursive: true, force: true });
     }
   };
 }
@@ -1234,4 +1370,11 @@ async function waitFor(predicate, timeoutMs) {
     if (Date.now() - started >= timeoutMs) throw new Error("condition was not met before timeout");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }

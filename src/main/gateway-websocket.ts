@@ -5,8 +5,10 @@ import { WebSocket, WebSocketServer } from "ws";
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { createWebSocketObserver } from "./gateway-websocket-observer.ts";
 import { rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
+import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter.ts";
 import { isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import { stripSubscriptionHeaders } from "./gateway/protocol.ts";
+import { DEFAULT_API_DEBUG_BODY_LIMIT_BYTES, sanitizeHeaders } from "./api-debug-log.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_ERROR_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -78,11 +80,39 @@ function createGatewayWebSocketGateway(options: Dynamic) {
     const connectionId = randomUUID();
     const settings = store.getSettings();
     const parsedUrl = new URL(request.url, "http://localhost");
+    const apiDebugLogger = runtime.apiDebugLogger;
+    const debugEnabled = Boolean(apiDebugLogger && settings.debug_api_logging === "true");
+    const debugResponse = (status: Dynamic, message: Dynamic = "", extra: Dynamic = {}) => {
+      writeApiDebugLog(apiDebugLogger, debugEnabled, connectionId, {
+        kind: "response",
+        transport: "websocket",
+        status: Number(status || 0),
+        message: String(message || ""),
+        durationMs: Date.now() - started,
+        ...extra
+      });
+    };
+    if (debugEnabled && apiDebugLogger) {
+      apiDebugLogger.write({
+        ts: new Date().toISOString(),
+        id: connectionId,
+        kind: "request",
+        transport: "websocket",
+        method: "GET",
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        headers: sanitizeHeaders(request.headers),
+        body: "",
+        bodyBytes: 0,
+        truncated: false
+      });
+    }
     if (!WEBSOCKET_ROUTES.has(parsedUrl.pathname)) {
+      debugResponse(404, "Unrecognized WebSocket request URL.");
       return rejectUpgrade(socket, 404, "Unrecognized WebSocket request URL.");
     }
     const localKey = settings.gateway_api_key || "";
     if (localKey && request.headers.authorization !== `Bearer ${localKey}`) {
+      debugResponse(401, "Incorrect API key provided.");
       return rejectUpgrade(socket, 401, "Incorrect API key provided.");
     }
     const maxConnections = positiveSetting(settings.gateway_websocket_max_connections, DEFAULT_MAX_CONNECTIONS);
@@ -98,11 +128,13 @@ function createGatewayWebSocketGateway(options: Dynamic) {
           message: `WebSocket 连接数已达到上限：${runtime.activeWebSockets.size}/${maxConnections}`
         });
       }
+      debugResponse(503, "The gateway has reached its WebSocket connection limit.");
       return rejectUpgrade(socket, 503, "The gateway has reached its WebSocket connection limit.");
     }
 
     const routeContext = runtime.routing.context(request.headers);
     if (routeContext.unknownTurnState) {
+      debugResponse(409, "The gateway cannot safely route this existing turn state.");
       return rejectUpgrade(socket, 409, "The gateway cannot safely route this existing turn state.");
     }
     if (parsedUrl.pathname === "/v1/responses") {
@@ -118,6 +150,9 @@ function createGatewayWebSocketGateway(options: Dynamic) {
             action: "reject",
             status: "WEBSOCKET_NOT_SUPPORTED",
             message: `[${connectionId}] ${parsedUrl.pathname} 握手阶段已拒绝：Codex 当前模型 ${clientModel} 仅支持 HTTP 传输（426）。`
+          });
+          debugResponse(426, `The model ${clientModel} configured in Codex supports HTTP transport only.`, {
+            code: "WEBSOCKET_NOT_SUPPORTED"
           });
           return rejectUpgrade(
             socket,
@@ -154,6 +189,7 @@ function createGatewayWebSocketGateway(options: Dynamic) {
       const message = routeContext.established
         ? "The account assigned to this Codex session is unavailable. Start a new session and try again."
         : "The server is currently unavailable. Please try again later.";
+      debugResponse(503, message);
       return rejectUpgrade(socket, 503, message);
     }
 
@@ -192,6 +228,10 @@ function createGatewayWebSocketGateway(options: Dynamic) {
       request.gatewaySelectedProtocol = upstream.protocol || "";
       request.gatewayResponseHeaders = responseHeadersForClient(result.headers, settings, store, helpers);
       const downstream = await acceptDownstream(server, request, socket, head, controller.signal);
+      debugResponse(101, "", {
+        headers: sanitizeHeaders(responseHeadersToObject(request.gatewayResponseHeaders)),
+        accountId: result.account?.id || null
+      });
       observer = createWebSocketObserver({
         store,
         hooks,
@@ -213,10 +253,12 @@ function createGatewayWebSocketGateway(options: Dynamic) {
         bufferHighWaterBytes: positiveSetting(settings.gateway_websocket_buffer_high_water_bytes, DEFAULT_BUFFER_HIGH_WATER_BYTES),
         onDownstreamMessage(data: Dynamic, isBinary: Dynamic) {
           observer.onDownstreamMessage(data, isBinary);
-          return rewriteDownstreamCompactionRequest(data, isBinary);
+          debugWebSocketMessage(apiDebugLogger, debugEnabled, connectionId, "request", data, isBinary, apiDebugLogger?.bodyLimitBytes);
+          return rewriteDownstreamSubscriptionRequest(data, isBinary);
         },
         onUpstreamMessage(data: Dynamic, isBinary: Dynamic) {
           observer.onUpstreamMessage(data, isBinary);
+          debugWebSocketMessage(apiDebugLogger, debugEnabled, connectionId, "response", data, isBinary, apiDebugLogger?.bodyLimitBytes);
           return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
         }
       });
@@ -239,6 +281,7 @@ function createGatewayWebSocketGateway(options: Dynamic) {
       upstream?.terminate();
       if (!socket.destroyed) {
         const status = Number(error.statusCode || 502);
+        debugResponse(status, publicUpgradeError(error));
         rejectUpgrade(socket, status, publicUpgradeError(error));
       }
       logFailure(store, parsedUrl, firstAccount, connectionId, error, started);
@@ -273,6 +316,18 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     connectionId,
     started
   } = options;
+  const apiDebugLogger = runtime.apiDebugLogger;
+  const debugEnabled = Boolean(apiDebugLogger && settings.debug_api_logging === "true");
+  const debugResponse = (status: Dynamic, message: Dynamic = "", extra: Dynamic = {}) => {
+    writeApiDebugLog(apiDebugLogger, debugEnabled, connectionId, {
+      kind: "response",
+      transport: "websocket",
+      status: Number(status || 0),
+      message: String(message || ""),
+      durationMs: Date.now() - started,
+      ...extra
+    });
+  };
   const controller = new AbortController();
   runtime.activeWebSockets.add(controller);
   const onClientClosed = () => abortController(controller, "client_cancelled", "WebSocket client disconnected.");
@@ -306,6 +361,13 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       runtime.routing.observeResponse(routeContext, selected.account, selected.headers);
       store.saveSettings({ gateway_current_account_id: selected.account.id });
     }
+    debugResponse(101, "", {
+      headers: sanitizeHeaders(responseHeadersToObject(request.gatewayResponseHeaders)),
+      accountId: selected.account?.id || null,
+      targetId: selected.target?.id || null,
+      clientModel: selected.clientModel || null,
+      upstreamModel: selected.upstreamModel || null
+    });
     observer = createWebSocketObserver({
       store,
       hooks,
@@ -346,9 +408,13 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       controller,
       bufferHighWaterBytes: positiveSetting(settings.gateway_websocket_buffer_high_water_bytes, DEFAULT_BUFFER_HIGH_WATER_BYTES),
       takeInitialDownstreamMessages: pending.take,
-      onDownstreamMessage: transformDownstream,
+      onDownstreamMessage(data: Dynamic, isBinary: Dynamic) {
+        debugWebSocketMessage(apiDebugLogger, debugEnabled, connectionId, "request", data, isBinary, apiDebugLogger?.bodyLimitBytes);
+        return transformDownstream(data, isBinary);
+      },
       onUpstreamMessage(data: Dynamic, isBinary: Dynamic) {
         observer.onUpstreamMessage(data, isBinary);
+        debugWebSocketMessage(apiDebugLogger, debugEnabled, connectionId, "response", data, isBinary, apiDebugLogger?.bodyLimitBytes);
         if (selected.account) return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
         if (!externalQuotaSent) {
           externalQuotaSent = true;
@@ -380,10 +446,18 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     pending?.dispose();
     upstream?.terminate();
     if (downstream && downstream.readyState === WebSocket.OPEN) {
-      if (Number(error.statusCode) === 426) sendWebSocketHttpFallbackAndClose(downstream, error.code, publicPostUpgradeError(error));
-      else if (error.reconnectRequired) closeWebSocketForReconnect(downstream, "retry model transport");
-      else sendWebSocketErrorAndClose(downstream, error.code || "WEBSOCKET_ROUTE_FAILED", publicPostUpgradeError(error));
+      if (Number(error.statusCode) === 426) {
+        debugResponse(426, publicPostUpgradeError(error));
+        sendWebSocketHttpFallbackAndClose(downstream, error.code, publicPostUpgradeError(error));
+      } else if (error.reconnectRequired) {
+        debugResponse(1012, "retry model transport");
+        closeWebSocketForReconnect(downstream, "retry model transport");
+      } else {
+        debugResponse(Number(error.statusCode || 502), publicPostUpgradeError(error));
+        sendWebSocketErrorAndClose(downstream, error.code || "WEBSOCKET_ROUTE_FAILED", publicPostUpgradeError(error));
+      }
     } else if (!socket.destroyed) {
+      debugResponse(Number(error.statusCode || 502), publicUpgradeError(error));
       rejectUpgrade(socket, Number(error.statusCode || 502), publicUpgradeError(error));
     }
     logTargetFailure(store, parsedUrl, selected, connectionId, error, started);
@@ -613,8 +687,20 @@ function createDeferredMessageTransformer(options: Dynamic) {
         return false;
       }
     }
+    if (target.kind === "chatgpt_subscription_pool") return rewriteDownstreamSubscriptionRequest(data, false);
     return rewriteDownstreamCompactionRequest(data, false);
   };
+}
+
+function rewriteDownstreamSubscriptionRequest(data: Dynamic, isBinary: boolean) {
+  if (isBinary) return undefined;
+  const event = parseJson(data);
+  if (event?.type !== "response.create") return undefined;
+  const reasoning = rewriteSubscriptionReasoningRequest(event);
+  const compaction = rewriteGatewayCompactionRequest(reasoning.body);
+  if (compaction.adapted) return toWebSocketBuffer(compaction.body);
+  if (reasoning.adapted) return toWebSocketBuffer(reasoning.body);
+  return undefined;
 }
 
 function rewriteDownstreamCompactionRequest(data: Dynamic, isBinary: boolean) {
@@ -623,6 +709,11 @@ function rewriteDownstreamCompactionRequest(data: Dynamic, isBinary: boolean) {
   if (event?.type !== "response.create") return undefined;
   const rewritten = rewriteGatewayCompactionRequest(event);
   return rewritten.adapted ? Buffer.from(JSON.stringify(rewritten.body), "utf8") : undefined;
+}
+
+function toWebSocketBuffer(value: Dynamic) {
+  if (Buffer.isBuffer(value)) return value;
+  return Buffer.from(typeof value === "string" ? value : JSON.stringify(value), "utf8");
 }
 
 function selectFirstAccount(routing: Dynamic, routeContext: Dynamic, accounts: Dynamic) {
@@ -1068,6 +1159,68 @@ function sanitizeCloseReason(reason: Dynamic) {
     .toString("utf8")
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .slice(0, 256);
+}
+
+function writeApiDebugLog(logger: Dynamic, enabled: boolean, id: string, entry: Dynamic) {
+  if (!enabled || !logger) return;
+  logger.write({ ts: new Date().toISOString(), id, ...entry });
+}
+
+function debugWebSocketMessage(
+  logger: Dynamic,
+  enabled: boolean,
+  id: string,
+  kind: Dynamic,
+  data: Dynamic,
+  isBinary: Dynamic,
+  limitBytes: Dynamic
+) {
+  if (!enabled || !logger) return;
+  logger.write({
+    ts: new Date().toISOString(),
+    id,
+    kind,
+    transport: "websocket",
+    ...previewWebSocketMessage(data, isBinary, limitBytes)
+  });
+}
+
+function previewWebSocketMessage(data: Dynamic, isBinary: Dynamic, limitBytes: Dynamic) {
+  const buffer = rawDataToBuffer(data);
+  const limit = Number.isFinite(limitBytes) && Number(limitBytes) > 0
+    ? Math.trunc(Number(limitBytes))
+    : DEFAULT_API_DEBUG_BODY_LIMIT_BYTES;
+  const truncated = buffer.length > limit;
+  const kept = truncated ? buffer.subarray(0, limit) : buffer;
+  return {
+    message: kept.toString("utf8"),
+    messageBytes: buffer.length,
+    truncated,
+    binary: Boolean(isBinary)
+  };
+}
+
+function rawDataToBuffer(data: Dynamic): Buffer {
+  if (Array.isArray(data)) return Buffer.concat(data.map((item: Dynamic) => rawDataToBuffer(item)));
+  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof Uint8Array || data instanceof DataView) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  }
+  return Buffer.from(String(data), "utf8");
+}
+
+function responseHeadersToObject(entries: Dynamic): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const text = String(entry || "");
+    const index = text.indexOf(":");
+    if (index <= 0) continue;
+    const name = text.slice(0, index).trim();
+    const value = text.slice(index + 1).trim();
+    if (name) result[name] = value;
+  }
+  return result;
 }
 
 function pathFromUrl(value: Dynamic) {

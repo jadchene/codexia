@@ -186,7 +186,13 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     refreshAllUsage,
     ensureUsableAccounts: () => refreshAllUsage("gateway-no-usable-account"),
     refreshAccountToken: refreshGatewayAccountToken,
-    upstreamService
+    upstreamService,
+    onApiDebugModeChanged: (reason: Dynamic) => {
+      notifyDataChanged([
+        "settings",
+        ...(reason === "expired" ? ["apiDebugLoggingExpired"] : [])
+      ]);
+    }
   });
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
@@ -393,13 +399,18 @@ function registerIpc() {
     mcpGateway: mcpGateway.status(),
     paths: store.paths
   }));
-  handleIpc("settings:save", (_event, patch) => {
+  handleIpc("settings:save", async (_event, patch) => {
     const editablePatch = editableSettingsPatch(patch);
     if (!editablePatch.gateway_api_key) delete editablePatch.gateway_api_key;
-    const settings = store.saveSettings({
+    const requestedDebugLogging = editablePatch.debug_api_logging;
+    delete editablePatch.debug_api_logging;
+    let settings = store.saveSettings({
       ...editablePatch,
       ...runtimeProfile.settingsOverrides
     });
+    if (requestedDebugLogging !== undefined) {
+      settings = await gateway.setApiDebugLogging(requestedDebugLogging === "true");
+    }
     applyStartupLaunchSettings(settings);
     scheduleUsageRefresh("settings-save");
     syncTrayForSettings();
@@ -908,6 +919,19 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           action: "stop",
           status: "failed",
           message: `退出时关闭 API 服务失败：${stopError.message}`
+        });
+      }
+    }
+    try {
+      await gateway.shutdownApiDebugLogging();
+    } catch (debugLogError: Dynamic) {
+      if (store) {
+        store.addAppLog({
+          level: "warn",
+          scope: "api-debug",
+          action: "shutdown",
+          status: "failed",
+          message: `退出时清理 API 调试日志失败：${debugLogError.message}`
         });
       }
     }

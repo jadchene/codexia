@@ -52,6 +52,7 @@ type SettingsFormValues = Record<string, unknown> & {
   auto_start_gateway_enabled: boolean;
   auto_start_mcp_gateway_enabled: boolean;
   ignore_five_hour_limit_enabled: boolean;
+  debug_api_logging_enabled: boolean;
   gateway_websocket_reject_http_only_model_upgrade_enabled: boolean;
 };
 
@@ -231,6 +232,24 @@ export const SettingsPage = ({
           </div>
           <Form.Item name="auto_start_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>
+        <Flex align="center" justify="space-between" className="v1-setting-switch-row">
+          <div>
+            <Typography.Text strong>API 调试日志</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">记录完整 API 请求与响应，最多开启 10 分钟；关闭后自动清空。</Typography.Text>
+          </div>
+          <Form.Item name="debug_api_logging_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
+        </Flex>
+        <Form.Item noStyle shouldUpdate={(previous, current) => (
+          previous.debug_api_logging_enabled !== current.debug_api_logging_enabled
+        )}>
+          {({ getFieldValue }) => getFieldValue("debug_api_logging_enabled") ? (
+            <Alert
+              showIcon
+              type="warning"
+              title="调试日志会保存完整正文，其中可能包含对话、提示词、工具参数和其他敏感数据。保存配置后开始记录，10 分钟后自动关闭并删除全部调试日志。"
+            />
+          ) : null}
+        </Form.Item>
     </SettingsSection>
   );
 
@@ -499,6 +518,7 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
   values.auto_start_gateway_enabled = settings.auto_start_gateway === "true";
   values.auto_start_mcp_gateway_enabled = settings.auto_start_mcp_gateway === "true";
   values.ignore_five_hour_limit_enabled = settings.ignore_five_hour_limit === "true";
+  values.debug_api_logging_enabled = settings.debug_api_logging === "true";
   values.gateway_websocket_reject_http_only_model_upgrade_enabled = settings.gateway_websocket_reject_http_only_model_upgrade === "true";
   return values;
 };
@@ -528,6 +548,9 @@ export const formToSettings = (current: SettingsRecord, values: Partial<Settings
   }
   if (Object.prototype.hasOwnProperty.call(values, "ignore_five_hour_limit_enabled")) {
     next.ignore_five_hour_limit = values.ignore_five_hour_limit_enabled ? "true" : "false";
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "debug_api_logging_enabled")) {
+    next.debug_api_logging = values.debug_api_logging_enabled ? "true" : "false";
   }
   if (Object.prototype.hasOwnProperty.call(values, "gateway_websocket_reject_http_only_model_upgrade_enabled")) {
     next.gateway_websocket_reject_http_only_model_upgrade = values.gateway_websocket_reject_http_only_model_upgrade_enabled ? "true" : "false";

@@ -58,7 +58,7 @@ The **Services** page starts, stops, and restarts the local API service and the 
 | Area | Available settings |
 | --- | --- |
 | General | Launch with Windows, window-close behavior, theme, and interface density. |
-| API service | Listening address, port, access key, and automatic service start. |
+| API service | Listening address, port, access key, automatic service start, and an opt-in API debug request/response log. |
 | MCP service | Installation notice, automatic start, configuration file path, host, port, and HTTP path. |
 | Accounts and quotas | Refresh interval, refresh timeout, account-selection policy, sliding Session-affinity lifetime, account-failure cooldown, quota display, and an optional third-party fallback model for auto review. |
 | Logs and billing | Request-log retention, runtime-log retention, and billing currency. |
@@ -66,6 +66,10 @@ The **Services** page starts, stops, and restarts the local API service and the 
 | Advanced network | Connection and idle timeouts, request timeout, shutdown grace period, HTTP and WebSocket limits, payload and buffer limits, and automatic HTTP fallback for HTTP-only models. Defaults are suitable for normal use. |
 
 Some service settings take effect after the corresponding service is restarted.
+
+### API Debug Logs
+
+Disabled by default (Settings > API service). Enabling it displays a sensitive-data warning and records HTTP and WebSocket API requests and responses as JSON Lines in `data/logs/<yyyymmdd>.jsonl`. Sensitive headers are redacted, while bodies are retained for troubleshooting and capped at 1 MiB per entry. Debug mode runs for at most 10 minutes; all debug logs are deleted when it is disabled manually, expires automatically, or the app exits.
 
 ### Data and Backup
 

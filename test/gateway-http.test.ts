@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import { test } from "vitest";
 import { createGateway } from "../src/main/gateway.ts";
 
@@ -23,6 +26,46 @@ test("HTTP gateway streams SSE unchanged and preserves turn state", async () => 
       'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n'
     ].join(""));
     assert.equal(harness.tokenLogs.at(-1).total_tokens, 5);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("HTTP subscription gateway removes non-empty external reasoning items before replaying history", async () => {
+  const upstreamBodies = [];
+  const harness = await startHarness(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"type":"response.completed"}\n\n');
+  });
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("cross-provider-session", "gpt-return-turn"),
+      body: JSON.stringify({
+        model: "gpt-5.6-sol",
+        input: [
+          { type: "message", role: "user", content: [{ type: "input_text", text: "你好" }] },
+          { type: "reasoning", id: "rs_openai", summary: [], content: [], encrypted_content: "gAAAAA-openai" },
+          {
+            type: "reasoning",
+            summary: [],
+            content: [{ type: "reasoning_text", text: "provider-private reasoning" }],
+            encrypted_content: "deepseek-response-id-0"
+          },
+          { type: "message", role: "assistant", content: [{ type: "output_text", text: "你好" }] }
+        ]
+      })
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(upstreamBodies.length, 1);
+    assert.deepEqual(upstreamBodies[0].input, [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "你好" }] },
+      { type: "reasoning", id: "rs_openai", summary: [], content: [], encrypted_content: "gAAAAA-openai" },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "你好" }] }
+    ]);
   } finally {
     await harness.close();
   }
@@ -1172,6 +1215,66 @@ test("HTTP gateway estimates built-in subscription model cost from its configure
   }
 });
 
+test("HTTP gateway writes JSONL API debug logs when enabled", async () => {
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream", "x-codex-turn-state": "debug-state" });
+    res.end('data: {"type":"response.completed"}\n\n');
+  }, {
+    debug_api_logging: "true",
+    debug_api_logging_expires_at: String(Date.now() + 10 * 60 * 1000)
+  });
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("debug-session", "debug-turn"),
+      body: JSON.stringify({ model: "gpt-debug", input: "hello" })
+    });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'data: {"type":"response.completed"}\n\n');
+    const logDir = path.join(harness.store.paths.dataDir, "logs");
+    await waitFor(() => {
+      if (!fs.existsSync(logDir)) return false;
+      const files = fs.readdirSync(logDir);
+      if (files.length !== 1) return false;
+      return fs.readFileSync(path.join(logDir, files[0]), "utf8").trim().split("\n").length >= 2;
+    }, 1000);
+    const files = fs.readdirSync(logDir);
+    assert.equal(files.length, 1);
+    assert.equal(files[0], `${localDateKey(new Date())}.jsonl`);
+    const lines = fs.readFileSync(path.join(logDir, files[0]), "utf8").trim().split("\n");
+    assert.equal(lines.length, 2);
+    const requestEntry = JSON.parse(lines[0]);
+    assert.equal(requestEntry.kind, "request");
+    assert.equal(requestEntry.method, "POST");
+    assert.equal(requestEntry.path, "/v1/responses");
+    assert.equal(requestEntry.headers.authorization, "[REDACTED]");
+    assert.match(requestEntry.body, /gpt-debug/);
+    const responseEntry = JSON.parse(lines[1]);
+    assert.equal(responseEntry.kind, "response");
+    assert.equal(responseEntry.status, 200);
+    assert.match(responseEntry.body, /response.completed/);
+    assert.equal(responseEntry.id, requestEntry.id);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("HTTP gateway writes no debug logs when the setting is disabled", async () => {
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("plain-session", "plain-turn")
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(fs.existsSync(path.join(harness.store.paths.dataDir, "logs")), false);
+  } finally {
+    await harness.close();
+  }
+});
+
 function codexHeaders(sessionId, turnId) {
   return {
     authorization: "Bearer local-key",
@@ -1228,6 +1331,7 @@ async function startHarness(upstreamHandler, settingOverrides = {}, hooks = {}) 
   const upstream = http.createServer(upstreamHandler);
   await listen(upstream);
   const upstreamPort = upstream.address().port;
+  const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-gateway-test-"));
   const accounts = [
     account("a", "token-a", 10),
     account("b", "token-b", 20)
@@ -1251,6 +1355,10 @@ async function startHarness(upstreamHandler, settingOverrides = {}, hooks = {}) 
   const tokenLogs = [];
   const appLogs = [];
   const store = {
+    paths: {
+      dataDir: testDataDir,
+      dbPath: path.join(testDataDir, "codex-gateway.sqlite")
+    },
     getSettings: () => ({ ...settings }),
     saveSettings: (patch) => Object.assign(settings, patch),
     listAccounts: () => accounts,
@@ -1272,6 +1380,7 @@ async function startHarness(upstreamHandler, settingOverrides = {}, hooks = {}) 
     async close() {
       await gateway.stop();
       await closeServer(upstream);
+      fs.rmSync(testDataDir, { recursive: true, force: true });
     }
   };
 }
@@ -1346,4 +1455,11 @@ function withTimeout(promise, timeoutMs, message) {
     promise,
     new Promise((resolve, reject) => setTimeout(() => reject(new Error(message)), timeoutMs))
   ]);
+}
+
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }

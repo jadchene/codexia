@@ -240,6 +240,8 @@ function migrate(db: Db): void {
     gateway_last_daily_rebalance_date: "",
     gateway_affinity_state_json: "{}",
     ignore_five_hour_limit: "false",
+    debug_api_logging: "false",
+    debug_api_logging_expires_at: "",
     codex_bundled_override_enabled: "false",
     codex_bundled_override_json: "",
     billing_currency: "USD",

@@ -138,6 +138,13 @@ function App() {
               setAppLogs(await api.listAppLogs(appLogQueryRef.current || currentLogQuery(current)));
             }
           }
+          if (next.has("settings")) {
+            const data = await api.bootstrap();
+            setSettings(data.settings);
+          }
+          if (next.has("apiDebugLoggingExpired")) {
+            setMessage("API 调试日志已达到 10 分钟上限，已自动关闭并清空");
+          }
         } catch (error) {
           setMessage(`自动刷新失败：${errorMessage(error)}`);
         }
@@ -206,7 +213,10 @@ function App() {
     try {
       const quotaModeChanged = next.ignore_five_hour_limit !== settings.ignore_five_hour_limit;
       const restartRequired = (gateway.running || mcpGateway.running) && Object.entries(next).some(
-        ([key, value]) => value !== settings[key] && !key.startsWith("appearance_") && key !== "navigation_collapsed"
+        ([key, value]) => value !== settings[key]
+          && !key.startsWith("appearance_")
+          && key !== "navigation_collapsed"
+          && key !== "debug_api_logging"
       );
       const restartReminder = restartRequired ? "，请重启相关服务使配置生效" : "";
       const saved = await api.saveSettings(next);

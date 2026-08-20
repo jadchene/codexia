@@ -1,6 +1,7 @@
 type Dynamic = any;
 
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { pickGatewayAccount } from "./selection.ts";
 import { createGatewayRouting } from "./gateway-routing.ts";
 import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
@@ -8,6 +9,7 @@ import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
 import { adaptCompactionStream, isCompactionTriggerRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
+import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter.ts";
 import { AUTO_REVIEW_MODEL_ID, isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import {
   syncAccountUsageFromHeaders,
@@ -46,6 +48,14 @@ import {
   cancellationKind,
   cancellationMessage
 } from "./gateway-lifecycle.ts";
+import {
+  createApiDebugLogger,
+  createApiDebugModeController,
+  createBodyCapture,
+  captureResponse,
+  previewBody,
+  sanitizeHeaders
+} from "./api-debug-log.ts";
 
 const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 64 * 1024 * 1024;
 const DEFAULT_ERROR_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -62,6 +72,15 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
   const activeRequests = new Set<Dynamic>();
   const activeWebSockets = new Set<Dynamic>();
   const sockets = new Set<Dynamic>();
+  const apiDebugLogger = createApiDebugLogger({ dataDir: store?.paths?.dataDir, enabled: false });
+  const apiDebugMode = createApiDebugModeController({
+    logger: apiDebugLogger,
+    getSettings: () => store.getSettings(),
+    saveSettings: (patch) => store.saveSettings(patch),
+    addAppLog: (entry) => store.addAppLog?.(entry),
+    onChanged: hooks.onApiDebugModeChanged
+  });
+  const apiDebugInitialization = apiDebugMode.initialize();
   const routing = createGatewayRouting({
     snapshot: parseAffinitySnapshot(store.getSettings().gateway_affinity_state_json),
     getIgnoreFiveHourLimit: () => store.getSettings().ignore_five_hour_limit === "true",
@@ -74,13 +93,19 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
 
   async function start() {
     if (server) return status();
+    await apiDebugInitialization;
     const settings = store.getSettings();
     const host = settings.gateway_host || "127.0.0.1";
     const port = Number(settings.gateway_port || 1455);
     if (!isLoopbackHost(host) && !isStrongGatewayApiKey(settings.gateway_api_key)) {
       throw new Error("非回环监听地址必须配置至少 24 个字符的随机 API Key。");
     }
-    const runtime = { activeRequests, activeWebSockets, routing };
+    const runtime = {
+      activeRequests,
+      activeWebSockets,
+      routing,
+      apiDebugLogger
+    };
     server = http.createServer((req: Dynamic, res: Dynamic) => handleRequest(req, res, store, authService, hooks, runtime));
     websocketGateway = createGatewayWebSocketGateway({
       store,
@@ -184,7 +209,17 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     };
   }
 
-  return { start, stop, status };
+  async function setApiDebugLogging(enabled: boolean) {
+    await apiDebugInitialization;
+    return apiDebugMode.setEnabled(enabled);
+  }
+
+  async function shutdownApiDebugLogging() {
+    await apiDebugInitialization;
+    return apiDebugMode.disable();
+  }
+
+  return { start, stop, status, setApiDebugLogging, shutdownApiDebugLogging };
 }
 
 async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authService: Dynamic, hooks: Dynamic, runtime: Dynamic = {}) {
@@ -215,6 +250,15 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
   if (runtime.activeRequests?.size >= maxConcurrentRequests) {
     return sendJson(res, 503, { error: { message: "The gateway has reached its concurrent request limit." } });
   }
+  const debugLogger = runtime.apiDebugLogger;
+  const debugEnabled = Boolean(debugLogger && settings.debug_api_logging === "true");
+  const requestId = debugEnabled ? randomUUID() : "";
+  let debugCapture: Dynamic = null;
+  let debugRestoreResponse: Dynamic = null;
+  if (debugEnabled && debugLogger) {
+    debugCapture = createBodyCapture(debugLogger.bodyLimitBytes);
+    debugRestoreResponse = captureResponse(res, debugCapture);
+  }
 
   const lifecycle = createRequestLifecycle(req, res, runtime.activeRequests);
   const totalTimeoutMs = isStreamingResponsesPath(pathname)
@@ -230,6 +274,17 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
   try {
     const bodyLimit = positiveSetting(settings.gateway_request_body_limit_bytes, DEFAULT_REQUEST_BODY_LIMIT_BYTES);
     const rawIncomingBody = await readBody(req, bodyLimit, lifecycle.signal);
+    if (debugEnabled && debugLogger) {
+      debugLogger.write({
+        ts: new Date().toISOString(),
+        id: requestId,
+        kind: "request",
+        method: req.method,
+        path: `${pathname}${parsedUrl.search}`,
+        headers: sanitizeHeaders(req.headers),
+        ...previewBody(rawIncomingBody, debugLogger.bodyLimitBytes)
+      });
+    }
     const rewrittenCompactionRequest = pathname === "/v1/responses"
       ? rewriteGatewayCompactionRequest(rawIncomingBody)
       : { adapted: false, body: rawIncomingBody };
@@ -417,6 +472,21 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       res.end();
     }
   } finally {
+    if (debugEnabled && debugLogger && debugCapture) {
+      debugLogger.write({
+        ts: new Date().toISOString(),
+        id: requestId,
+        kind: "response",
+        status: Number(res.statusCode || 0),
+        headers: sanitizeHeaders(res.getHeaders()),
+        ...debugCapture.snapshot(),
+        durationMs: Date.now() - started,
+        accountId: accountForLog?.id || null,
+        targetId: targetForLog?.id || null,
+        upstreamUrl: routeResultForLog?.upstreamUrl || request?.upstreamUrl || ""
+      });
+      debugRestoreResponse?.();
+    }
     stopTotalTimeout();
     disposeUpstream();
     releaseAccountLoad();
@@ -522,7 +592,8 @@ function requestForSubscriptionTarget(request: Dynamic, settings: Dynamic, hooks
   } catch {
     // Keep the compatible settings fallback when the built-in target is unavailable.
   }
-  return { ...request, upstreamUrl: buildUpstreamUrl(baseUrl, request.originalPath) };
+  const rewritten = rewriteSubscriptionReasoningRequest(request.body);
+  return { ...request, body: rewritten.body, upstreamUrl: buildUpstreamUrl(baseUrl, request.originalPath) };
 }
 
 async function callDirectApiTarget(options: Dynamic) {
