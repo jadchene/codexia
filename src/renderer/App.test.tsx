@@ -7,7 +7,10 @@ import { MemoryRouter } from "react-router-dom";
 import type { CodexGatewayBridge } from "../preload";
 import App from "./App";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 it("refreshes the quota summary after the five-hour limit setting changes", async () => {
   const user = userEvent.setup();
@@ -65,4 +68,42 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
   await user.click(screen.getByText("运行概览"));
   expect(await screen.findByText("170.0%")).toBeTruthy();
   expect(screen.getByText("150.0%")).toBeTruthy();
+});
+
+it("refreshes the visible model channels when background data changes", async () => {
+  let dataChanged: ((types: string[]) => void) | undefined;
+  const listUpstreams = vi.fn().mockResolvedValue([]);
+  window.codexGateway = {
+    bootstrap: vi.fn().mockResolvedValue({
+      app: { version: "1.0.0" },
+      settings: { billing_currency: "USD" },
+      accounts: [],
+      tokenLogs: { items: [], total: 0, page: 1, pageSize: 10 },
+      tokenSummary: { total: {}, byAccount: [] },
+      quotaSummary: { primary: {}, secondary: {} },
+      appLogs: { items: [], total: 0, page: 1, pageSize: 10 },
+      gateway: { running: false },
+      mcpGateway: { running: false },
+      paths: { dataDir: "", dbPath: "" }
+    }),
+    listUpstreams,
+    onDataChanged: vi.fn((callback) => {
+      dataChanged = callback;
+      return () => undefined;
+    })
+  } as unknown as CodexGatewayBridge;
+
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  render(
+    <MemoryRouter initialEntries={["/upstreams"]}>
+      <QueryClientProvider client={queryClient}>
+        <AntApp><App /></AntApp>
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+
+  await screen.findByText("新增渠道");
+  await waitFor(() => expect(listUpstreams).toHaveBeenCalledOnce());
+  dataChanged?.(["upstreams"]);
+  await waitFor(() => expect(listUpstreams).toHaveBeenCalledTimes(2));
 });

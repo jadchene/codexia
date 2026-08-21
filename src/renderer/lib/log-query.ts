@@ -27,6 +27,27 @@ export const todayLogFilters = (): LogFilterValues => ({
   scope: ""
 });
 
+export const withTodayRange = (filters: LogFilterValues): LogFilterValues => {
+  const today = dayjs().startOf("day");
+  return { ...filters, range: [today, today] };
+};
+
+export const isTodayRange = (range: [Dayjs, Dayjs]): boolean => {
+  const today = dayjs().startOf("day");
+  return range[0].isSame(today, "day") && range[1].isSame(today, "day");
+};
+
+export const moveLogQueryToToday = (query: LogQuery, pageSize: number): LogQuery => {
+  const start = dayjs().startOf("day");
+  return {
+    ...query,
+    page: 1,
+    pageSize,
+    startAt: start.unix(),
+    endAt: start.add(1, "day").unix()
+  };
+};
+
 export const toLogQuery = (filters: LogFilterValues, page: number, pageSize: number): LogQuery => ({
   page,
   pageSize,

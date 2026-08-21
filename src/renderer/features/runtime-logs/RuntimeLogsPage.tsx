@@ -4,7 +4,8 @@ import type { TableColumnsType } from "antd";
 import { useState } from "react";
 import type { AppLog, AppLogPage } from "../../../shared/contracts/logs";
 import { formatTime } from "../../lib/formatters";
-import { todayLogFilters, toLogQuery, type LogFilterValues } from "../../lib/log-query";
+import { isTodayRange, todayLogFilters, toLogQuery, withTodayRange, type LogFilterValues } from "../../lib/log-query";
+import { useDayRollover } from "../../lib/use-day-rollover";
 
 interface RuntimeLogsPageProps {
   pageData: AppLogPage;
@@ -12,20 +13,31 @@ interface RuntimeLogsPageProps {
   newLogCount: number;
   onPausedChange: (paused: boolean) => void;
   onMessage: (message: string) => void;
-  onQuery: (query: ReturnType<typeof toLogQuery>) => Promise<void>;
+  onQuery: (query: ReturnType<typeof toLogQuery>, followsToday?: boolean) => Promise<void>;
 }
 
 export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange, onMessage, onQuery }: RuntimeLogsPageProps) => {
   const [filters, setFilters] = useState<LogFilterValues>(todayLogFilters);
+  const [followsToday, setFollowsToday] = useState(true);
   const [selectedLog, setSelectedLog] = useState<AppLog | null>(null);
 
-  const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters): Promise<void> => {
+  useDayRollover(() => {
+    if (followsToday) setFilters((current) => withTodayRange(current));
+  });
+
+  const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters, nextFollowsToday = followsToday): Promise<void> => {
     setFilters(nextFilters);
-    await onQuery(toLogQuery(nextFilters, page, pageSize));
+    setFollowsToday(nextFollowsToday);
+    await onQuery(toLogQuery(nextFilters, page, pageSize), nextFollowsToday);
   };
 
   const resetFilters = async (): Promise<void> => {
-    await runQuery(1, pageData.pageSize, todayLogFilters());
+    await runQuery(1, pageData.pageSize, todayLogFilters(), true);
+  };
+
+  const updateRange = (range: LogFilterValues["range"]): void => {
+    setFilters((current) => ({ ...current, range }));
+    setFollowsToday(isTodayRange(range));
   };
 
   const copyJson = async (log: AppLog): Promise<void> => {
@@ -68,7 +80,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
           <DatePicker.RangePicker
             allowClear={false}
             value={filters.range}
-            onChange={(range) => range?.[0] && range[1] && setFilters((current) => ({ ...current, range: [range[0]!, range[1]!] }))}
+            onChange={(range) => range?.[0] && range[1] && updateRange([range[0], range[1]])}
           />
         </div>
         <div>

@@ -31,7 +31,8 @@ import {
   formatTime,
   formatTokenNumber
 } from "../../lib/formatters";
-import { todayLogFilters, toLogQuery, type LogFilterValues } from "../../lib/log-query";
+import { isTodayRange, todayLogFilters, toLogQuery, withTodayRange, type LogFilterValues } from "../../lib/log-query";
+import { useDayRollover } from "../../lib/use-day-rollover";
 
 interface RequestAnalyticsPageProps {
   pageData: RequestLogPage;
@@ -39,7 +40,7 @@ interface RequestAnalyticsPageProps {
   accounts: PublicAccount[];
   settings: Settings;
   onMessage: (message: string) => void;
-  onQuery: (query: ReturnType<typeof toLogQuery>) => Promise<void>;
+  onQuery: (query: ReturnType<typeof toLogQuery>, followsToday?: boolean) => Promise<void>;
 }
 
 const ANALYTICS_COLUMN_OPTIONS = [
@@ -66,6 +67,7 @@ export const RequestAnalyticsPage = ({
   onQuery
 }: RequestAnalyticsPageProps) => {
   const [filters, setFilters] = useState<LogFilterValues>(todayLogFilters);
+  const [followsToday, setFollowsToday] = useState(true);
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null);
   const [accountPoolExpanded, setAccountPoolExpanded] = useState(false);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumnKeys);
@@ -78,14 +80,24 @@ export const RequestAnalyticsPage = ({
     localStorage.setItem(ANALYTICS_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnKeys));
   }, [visibleColumnKeys]);
 
-  const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters): Promise<void> => {
+  useDayRollover(() => {
+    if (followsToday) setFilters((current) => withTodayRange(current));
+  });
+
+  const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters, nextFollowsToday = followsToday): Promise<void> => {
     setFilters(nextFilters);
+    setFollowsToday(nextFollowsToday);
     setAccountPoolExpanded(false);
-    await onQuery(toLogQuery(nextFilters, page, pageSize));
+    await onQuery(toLogQuery(nextFilters, page, pageSize), nextFollowsToday);
   };
 
   const resetFilters = async (): Promise<void> => {
-    await runQuery(1, pageData.pageSize, todayLogFilters());
+    await runQuery(1, pageData.pageSize, todayLogFilters(), true);
+  };
+
+  const updateRange = (range: LogFilterValues["range"]): void => {
+    setFilters((current) => ({ ...current, range }));
+    setFollowsToday(isTodayRange(range));
   };
 
   const copyValue = async (value: unknown): Promise<void> => {
@@ -194,7 +206,7 @@ export const RequestAnalyticsPage = ({
             <DatePicker.RangePicker
               allowClear={false}
               value={filters.range}
-              onChange={(range) => range?.[0] && range[1] && setFilters((current) => ({ ...current, range: [range[0]!, range[1]!] }))}
+              onChange={(range) => range?.[0] && range[1] && updateRange([range[0], range[1]])}
             />
           </div>
           <div>

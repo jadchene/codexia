@@ -1386,8 +1386,12 @@ function formatTime(epochSeconds: Dynamic) {
   return new Date(Number(epochSeconds) * 1000).toLocaleString("zh-CN", { hour12: false });
 }
 
-function refreshAllUsage(reason: Dynamic = "manual") {
-  return usageRefreshCoordinator.refreshAll(reason);
+async function refreshAllUsage(reason: Dynamic = "manual") {
+  const results = await usageRefreshCoordinator.refreshAll(reason);
+  if (results.some((item: Dynamic) => item.kind === "balance")) {
+    notifyDataChanged(["upstreams"]);
+  }
+  return results;
 }
 
 function compactError(value: Dynamic) {

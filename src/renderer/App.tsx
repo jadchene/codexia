@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "./app/layout/AppShell";
 import { applyAppearancePreferences, appearanceFromSettings } from "./app/appearance";
@@ -6,7 +7,8 @@ import type { ConsumeResetCreditResult, PublicAccount } from "../shared/contract
 import type { BootstrapData } from "../shared/contracts/bootstrap";
 import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shared/contracts/logs";
 import type { RuntimePaths, ServiceStatus, Settings } from "../shared/contracts/settings";
-import { currentLogQuery } from "./lib/log-query";
+import { currentLogQuery, moveLogQueryToToday } from "./lib/log-query";
+import { useDayRollover } from "./lib/use-day-rollover";
 
 const UpstreamsPage = React.lazy(() => import("./features/upstreams/UpstreamsPage").then((module) => ({ default: module.UpstreamsPage })));
 const SettingsPage = React.lazy(() => import("./features/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
@@ -34,6 +36,7 @@ function App() {
   const api = window.codexGateway;
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const page = location.pathname.replace(/^\//, "") || "overview";
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState<Settings>({});
@@ -58,10 +61,42 @@ function App() {
   const appLogsRef = useRef(appLogs);
   const tokenLogQueryRef = useRef<LogQuery | null>(null);
   const appLogQueryRef = useRef<LogQuery | null>(null);
+  const tokenLogFollowsTodayRef = useRef(true);
+  const appLogFollowsTodayRef = useRef(true);
   const appLogsPausedRef = useRef(false);
   const [appLogsPaused, setAppLogsPaused] = useState(false);
   const [pendingAppLogBatches, setPendingAppLogBatches] = useState(0);
   const loginAttemptRef = useRef(0);
+
+  const refreshDailyData = async (): Promise<void> => {
+    try {
+      const tasks: Promise<void>[] = [
+        api.tokenSummary().then(setDashboardSummary)
+      ];
+      if (tokenLogFollowsTodayRef.current) {
+        const query = moveLogQueryToToday(
+          tokenLogQueryRef.current || currentLogQuery(tokenLogsRef.current),
+          tokenLogsRef.current.pageSize || 10
+        );
+        tokenLogQueryRef.current = query;
+        tasks.push(Promise.all([api.listTokenLogs(query), api.tokenSummary(query)]).then(([logs, summary]) => {
+          setTokenLogs(logs);
+          setTokenSummary(summary);
+        }));
+      }
+      if (appLogFollowsTodayRef.current) {
+        const query = moveLogQueryToToday(
+          appLogQueryRef.current || currentLogQuery(appLogsRef.current),
+          appLogsRef.current.pageSize || 10
+        );
+        appLogQueryRef.current = query;
+        tasks.push(api.listAppLogs(query).then(setAppLogs));
+      }
+      await Promise.all(tasks);
+    } catch (error) {
+      setMessage(`跨日刷新失败：${errorMessage(error)}`);
+    }
+  };
 
   async function reload() {
     const data = await api.bootstrap();
@@ -93,6 +128,10 @@ function App() {
   useEffect(() => {
     appLogsRef.current = appLogs;
   }, [appLogs]);
+
+  useDayRollover(() => {
+    void refreshDailyData();
+  });
 
   useEffect(() => {
     if (!api.onGatewayStatusChanged) return undefined;
@@ -137,6 +176,9 @@ function App() {
               const current = appLogsRef.current || {};
               setAppLogs(await api.listAppLogs(appLogQueryRef.current || currentLogQuery(current)));
             }
+          }
+          if (next.has("upstreams") || next.has("upstreamModels")) {
+            await queryClient.invalidateQueries({ queryKey: ["upstreams"] });
           }
           if (next.has("settings")) {
             const data = await api.bootstrap();
@@ -541,10 +583,11 @@ function App() {
             accounts={accounts}
             settings={settings}
             onMessage={setMessage}
-            onQuery={async (query) => {
+            onQuery={async (query, followsToday = false) => {
               try {
                 const result = await api.listTokenLogs(query);
                 tokenLogQueryRef.current = query;
+                tokenLogFollowsTodayRef.current = followsToday;
                 setTokenLogs(result);
                 setTokenSummary(await api.tokenSummary(query));
               } catch (error) {
@@ -569,10 +612,11 @@ function App() {
               }
             }}
             onMessage={setMessage}
-            onQuery={async (query) => {
+            onQuery={async (query, followsToday = false) => {
               try {
                 const result = await api.listAppLogs(query);
                 appLogQueryRef.current = query;
+                appLogFollowsTodayRef.current = followsToday;
                 setAppLogs(result);
               } catch (error) {
                 setMessage(`查询运行日志失败：${errorMessage(error)}`);
