@@ -7,7 +7,7 @@ import { createWebSocketObserver } from "./gateway-websocket-observer.ts";
 import { rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
 import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter.ts";
 import { isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
-import { stripSubscriptionHeaders } from "./gateway/protocol.ts";
+import { buildSubscriptionRoutingHint, replaceSubscriptionRoutingHint, stripSubscriptionHeaders } from "./gateway/protocol.ts";
 import { DEFAULT_API_DEBUG_BODY_LIMIT_BYTES, sanitizeHeaders } from "./api-debug-log.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
@@ -400,6 +400,7 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       hooks,
       target: selected.target,
       clientModel: selected.clientModel,
+      routingHint: selected.routingHint,
       modelRewrite: selected.autoReviewFallbackModel
     });
     bridgeWebSockets({
@@ -473,6 +474,7 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
 async function selectDeferredResponsesRoute(options: Dynamic) {
   const { firstMessage, hooks, runtime, store, settings, helpers, request, signal, routeContext } = options;
   const modelId = String(firstMessage.event.model || "").trim();
+  const routingHint = buildSubscriptionRoutingHint(firstMessage.event);
 
   const upstream = modelId ? hooks.upstreamService?.findRuntimeByModel?.(modelId) : null;
   if (upstream) {
@@ -527,6 +529,7 @@ async function selectDeferredResponsesRoute(options: Dynamic) {
       routing: runtime.routing,
       routeContext,
       firstAccount,
+      routingHint,
       signal
     });
     return {
@@ -540,6 +543,7 @@ async function selectDeferredResponsesRoute(options: Dynamic) {
       },
       clientModel: modelId,
       upstreamModel: modelId,
+      routingHint,
       attemptCount: 1,
       attemptChain: []
     };
@@ -682,8 +686,10 @@ function createDeferredMessageTransformer(options: Dynamic) {
       }
       const owner = hooks.upstreamService?.findRuntimeByModel?.(modelId) || null;
       const expectedTargetId = owner?.id || "builtin-chatgpt-subscription-pool";
-      if (modelId !== clientModel || expectedTargetId !== target.id) {
-        closeWebSocketForReconnect(downstream, "model or channel changed");
+      const routingHintChanged = target.kind === "chatgpt_subscription_pool"
+        && buildSubscriptionRoutingHint(event) !== options.routingHint;
+      if (modelId !== clientModel || expectedTargetId !== target.id || routingHintChanged) {
+        closeWebSocketForReconnect(downstream, "model, tier, or channel changed");
         return false;
       }
     }
@@ -732,7 +738,7 @@ async function connectWithFailover(options: Dynamic) {
     routing.reserveSession(routeContext, account);
     let result: Dynamic;
     try {
-      result = await openUpstream(request, account, settings, hooks, helpers, signal);
+      result = await openUpstream(request, account, settings, hooks, helpers, signal, options.routingHint);
       if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
       return { account, ...result };
     } catch (error: Dynamic) {
@@ -757,7 +763,7 @@ async function connectWithFailover(options: Dynamic) {
         if (refreshedAccount) {
           account = refreshedAccount;
           try {
-            result = await openUpstream(request, account, settings, hooks, helpers, signal);
+            result = await openUpstream(request, account, settings, hooks, helpers, signal, options.routingHint);
             if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
             return { account, ...result };
           } catch (retryError: Dynamic) {
@@ -805,9 +811,10 @@ async function connectWithFailover(options: Dynamic) {
   throw lastError || statusError(503, "No enabled GPT account with an access token is available.");
 }
 
-function openUpstream(request: Dynamic, account: Dynamic, settings: Dynamic, hooks: Dynamic, helpers: Dynamic, signal: Dynamic) {
+function openUpstream(request: Dynamic, account: Dynamic, settings: Dynamic, hooks: Dynamic, helpers: Dynamic, signal: Dynamic, routingHint = "") {
   const upstreamUrl = helpers.buildUpstreamUrl(subscriptionBaseUrl(settings, hooks), request.url);
   const headers = buildUpstreamWebSocketHeaders(request.headers, account, request.url, helpers);
+  replaceSubscriptionRoutingHint(headers, routingHint);
   return openUpstreamSocket(request, upstreamUrl, headers, settings, signal);
 }
 

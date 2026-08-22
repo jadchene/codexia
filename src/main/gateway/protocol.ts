@@ -144,6 +144,30 @@ export function setHeader(headers: HeaderMap, name: string, value: string): void
   headers[existing || name] = value;
 }
 
+export function buildSubscriptionRoutingHint(payload: unknown): string {
+  if (!isRecord(payload)) return "";
+  const model = routingHintValue(payload.model);
+  if (!model) return "";
+  if (payload.service_tier === undefined || payload.service_tier === null || payload.service_tier === "") {
+    return `model=${model}`;
+  }
+  const tier = routingHintValue(payload.service_tier);
+  return tier ? `model=${model};tier=${tier}` : "";
+}
+
+export function setSubscriptionRoutingHint(headers: HeaderMap, payload: unknown): string {
+  const hint = buildSubscriptionRoutingHint(payload);
+  replaceSubscriptionRoutingHint(headers, hint);
+  return hint;
+}
+
+export function replaceSubscriptionRoutingHint(headers: HeaderMap, hint: string): void {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === "x-codex-routing-hint") delete headers[key];
+  }
+  if (hint) setHeader(headers, "x-codex-routing-hint", hint);
+}
+
 export function stripSubscriptionHeaders(headers: HeaderMap): void {
   for (const key of Object.keys(headers)) {
     const lower = key.toLowerCase();
@@ -160,4 +184,10 @@ export function stripSubscriptionHeaders(headers: HeaderMap): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function routingHintValue(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.trim();
+  return normalized && /^[\x20-\x7e]+$/.test(normalized) ? normalized : "";
 }

@@ -55,7 +55,8 @@ test("WebSocket gateway proxies compressed Responses messages and keeps upstream
     const { websocket, response } = await connectGateway(harness, "/v1/responses?stream=true", {
       "session-id": "session-1",
       "thread-id": "thread-1",
-      "openai-beta": "responses_websockets=2026-02-06"
+      "openai-beta": "responses_websockets=2026-02-06",
+      "x-codex-routing-hint": "stale-client-hint"
     });
     assert.match(websocket.extensions, /permessage-deflate/);
     assert.equal(response.headers["x-codex-turn-state"], undefined);
@@ -65,7 +66,7 @@ test("WebSocket gateway proxies compressed Responses messages and keeps upstream
     websocket.ping("health");
     await pong;
     const messagesPromise = nextMessages(websocket, 2);
-    const requestMessage = JSON.stringify({ type: "response.create", model: "gpt-test" });
+    const requestMessage = JSON.stringify({ type: "response.create", model: "gpt-test", service_tier: "priority" });
     websocket.send(requestMessage);
     await withTimeout(upstreamPong, 1_000, "gateway did not answer the upstream ping");
     const messages = await messagesPromise;
@@ -80,6 +81,7 @@ test("WebSocket gateway proxies compressed Responses messages and keeps upstream
     assert.equal(requests[0].headers["chatgpt-account-id"], "account-a");
     assert.equal(requests[0].headers["session-id"], "session-1");
     assert.equal(requests[0].headers["openai-beta"], "responses_websockets=2026-02-06");
+    assert.equal(requests[0].headers["x-codex-routing-hint"], "model=gpt-test;tier=priority");
     assert.match(harness.settings.gateway_affinity_state_json, /ws-state-a/);
     assert.match(harness.settings.gateway_affinity_state_json, /session-1/);
     await waitFor(() => harness.tokenLogs.length > 0, 1_000);
@@ -449,7 +451,8 @@ test("Responses WebSocket selects an external channel by its exact model ID with
       "session-id": "native-api-session",
       "openai-beta": "responses_websockets=2026-02-06",
       "x-codex-turn-metadata": JSON.stringify({ turn_id: "external-turn" }),
-      "chatgpt-account-id": "must-not-leak"
+      "chatgpt-account-id": "must-not-leak",
+      "x-codex-routing-hint": "must-not-leak"
     });
     assert.equal(upstreamRequests.length, 0);
 
@@ -478,6 +481,7 @@ test("Responses WebSocket selects an external channel by its exact model ID with
     assert.equal(upstreamRequests.length, 1);
     assert.equal(upstreamRequests[0].headers.authorization, "Bearer api-secret");
     assert.equal(upstreamRequests[0].headers["chatgpt-account-id"], undefined);
+    assert.equal(upstreamRequests[0].headers["x-codex-routing-hint"], undefined);
     assert.equal(upstreamRequests[0].headers["openai-beta"], undefined);
     assert.equal(upstreamRequests[0].headers["x-codex-turn-metadata"], undefined);
     assert.equal(upstreamRequests[0].headers["session-id"], undefined);
@@ -568,6 +572,34 @@ test("Responses WebSocket closes for reconnect before forwarding a changed model
     assert.equal((await closed).code, 1012);
     assert.equal(upstreamMessages.length, 1);
     assert.equal(upstreamMessages[0].model, "gpt-5");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("Responses WebSocket reconnects before changing the subscription routing tier", async () => {
+  const upstreamMessages = [];
+  const upstreamRequests = [];
+  const harness = await startHarness({
+    onConnection(websocket, request) {
+      upstreamRequests.push(request);
+      websocket.on("message", (data) => {
+        upstreamMessages.push(JSON.parse(data.toString()));
+        websocket.send(JSON.stringify({ type: "response.completed", response: { model: "gpt-5" } }));
+      });
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "switch-subscription-tier" });
+    const firstCompleted = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-5", service_tier: "priority" }));
+    assert.match((await firstCompleted).toString(), /response\.completed/);
+    assert.equal(upstreamRequests[0].headers["x-codex-routing-hint"], "model=gpt-5;tier=priority");
+
+    const closed = nextCloseDetail(websocket);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-5", service_tier: "flex" }));
+    assert.equal((await closed).code, 1012);
+    assert.equal(upstreamMessages.length, 1);
   } finally {
     await harness.close();
   }

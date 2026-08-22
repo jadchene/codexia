@@ -5,6 +5,7 @@ import { createGatewayRouting, sessionIdFromHeaders, turnIdFromHeaders } from ".
 import { buildAuthorizeUrl } from "../src/main/auth.ts";
 import { gatewayProviderBlock, insertProviderBlockIntoConfig, nextGatewayConfig, replaceGatewayProviderBlock } from "../src/main/codex-cli-auth.ts";
 import { buildMcpGatewayCommand, mcpGatewayPath, mcpGatewayUrl } from "../src/main/mcp-gateway-service.ts";
+import { buildSubscriptionRoutingHint, setSubscriptionRoutingHint } from "../src/main/gateway/protocol.ts";
 import {
   buildCodexQuotaHeaders,
   buildCodexQuotaSnapshot,
@@ -571,6 +572,22 @@ test("gateway routing keeps new turns on their active session account while turn
   assert.equal(nextTurn.established, false);
   assert.equal(nextTurn.sessionPreferred, true);
   assert.equal(routing.findPreferredAccount(nextTurn, accounts).id, "a");
+});
+
+test("buildSubscriptionRoutingHint uses the model and optional service tier", () => {
+  assert.equal(buildSubscriptionRoutingHint({ model: "gpt-5.6-sol" }), "model=gpt-5.6-sol");
+  assert.equal(
+    buildSubscriptionRoutingHint({ model: "gpt-5.6-sol", service_tier: "priority" }),
+    "model=gpt-5.6-sol;tier=priority"
+  );
+  assert.equal(buildSubscriptionRoutingHint({ service_tier: "priority" }), "");
+  assert.equal(buildSubscriptionRoutingHint({ model: "gpt-test\ninvalid" }), "");
+  assert.equal(buildSubscriptionRoutingHint({ model: "gpt-测试" }), "");
+  assert.equal(buildSubscriptionRoutingHint({ model: "gpt-test", service_tier: "bad\rvalue" }), "");
+
+  const headers = { "X-Codex-Routing-Hint": "stale-client-hint" };
+  assert.equal(setSubscriptionRoutingHint(headers, { model: "bad\nmodel" }), "");
+  assert.equal(Object.keys(headers).length, 0);
 });
 
 test("gateway routing uses a sliding session affinity TTL based on successful use", () => {

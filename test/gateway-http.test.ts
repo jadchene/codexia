@@ -71,6 +71,43 @@ test("HTTP subscription gateway removes non-empty external reasoning items befor
   }
 });
 
+test("HTTP subscription gateway adds model routing hints for Responses and Compact", async () => {
+  const upstreamRequests = [];
+  const harness = await startHarness(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    upstreamRequests.push({ url: req.url, headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+    if (req.url.endsWith("/compact")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"type":"response.completed"}\n\n');
+  });
+  try {
+    const requests = [
+      ["/v1/responses", { model: "gpt-test", input: "hello" }, "model=gpt-test"],
+      ["/v1/responses/compact", { model: "gpt-test", service_tier: "priority", input: [] }, "model=gpt-test;tier=priority"]
+    ];
+    for (const [path, body] of requests) {
+      const response = await gatewayFetch(harness, path, {
+        headers: { ...codexHeaders(`routing-${path}`, `turn-${path}`), "x-codex-routing-hint": "stale-client-hint" },
+        body: JSON.stringify(body)
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+    }
+    assert.deepEqual(upstreamRequests.map((request) => request.headers["x-codex-routing-hint"]), requests.map((item) => item[2]));
+    assert.equal(upstreamRequests[0].headers.authorization, "Bearer token-a");
+    assert.equal(upstreamRequests[0].headers["chatgpt-account-id"], "account-a");
+    assert.equal(upstreamRequests[0].headers.session_id, "routing-/v1/responses");
+    assert.deepEqual(upstreamRequests.map((request) => request.body.model), ["gpt-test", "gpt-test"]);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("HTTP gateway rewrites account quota headers with the aggregate pool quota", async () => {
   const harness = await startHarness((_req, res) => {
     res.writeHead(200, {
@@ -670,7 +707,8 @@ test("HTTP gateway routes an external model directly to its owning API channel",
       headers: {
         ...codexHeaders("direct-model", "turn-1"),
         "openai-beta": "responses=2026",
-        "chatgpt-account-id": "must-not-leak"
+        "chatgpt-account-id": "must-not-leak",
+        "x-codex-routing-hint": "must-not-leak"
       },
       body: JSON.stringify({ model: "third-party", input: "hello" })
     });
@@ -681,6 +719,7 @@ test("HTTP gateway routes an external model directly to its owning API channel",
     assert.equal(apiRequests[0].authorization, "Bearer provider-key");
     assert.equal(apiRequests[0].headers["openai-beta"], undefined);
     assert.equal(apiRequests[0].headers["chatgpt-account-id"], undefined);
+    assert.equal(apiRequests[0].headers["x-codex-routing-hint"], undefined);
     assert.equal(apiRequests[0].headers["x-codex-turn-metadata"], undefined);
     assert.equal(apiRequests[0].headers.session_id, undefined);
     assert.equal(apiRequests[0].body.model, "third-party");

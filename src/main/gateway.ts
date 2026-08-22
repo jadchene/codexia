@@ -29,6 +29,7 @@ import {
   pathFromUrl,
   gatewayErrorMessage,
   buildUpstreamHeaders,
+  setSubscriptionRoutingHint,
   setHeader,
   stripSubscriptionHeaders,
   positiveSetting,
@@ -943,11 +944,15 @@ async function callUpstream(req: Dynamic, request: Dynamic, account: Dynamic, se
   const attempt = createLinkedAbortController(parentSignal);
   const stopTimeout = scheduleAbort(attempt.controller, timeoutMs, "connect_timeout", "Upstream connection timed out.");
   const hasBody = request.body.length > 0 && req.method !== "GET" && req.method !== "HEAD";
+  const headers = buildUpstreamHeaders(req.headers, account, hasBody, request.path);
+  if (request.path === "/v1/responses" || request.path === "/v1/responses/compact") {
+    setSubscriptionRoutingHint(headers, parseResponsesPayload(request.body));
+  }
   let handedOff = false;
   try {
     const upstream = await fetch(request.upstreamUrl, {
       method: req.method,
-      headers: buildUpstreamHeaders(req.headers, account, hasBody, request.path) as HeadersInit,
+      headers: headers as HeadersInit,
       body: hasBody ? request.body : undefined,
       signal: attempt.signal
     });
