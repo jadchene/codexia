@@ -142,7 +142,8 @@ export const AccountsPage = ({
     {
       title: "令牌续期",
       dataIndex: "last_refresh",
-      width: 160,
+      width: 180,
+      className: "v1-nowrap",
       render: (value) => value ? new Date(value).toLocaleString() : "暂无"
     },
     {
