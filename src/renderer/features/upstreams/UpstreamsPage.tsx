@@ -1,4 +1,7 @@
 import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  ControlOutlined,
   DeleteOutlined,
   EditOutlined,
   MoreOutlined,
@@ -33,6 +36,7 @@ import type { MenuProps, TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
 import type {
   BundledModelOverride,
+  ModelManagementItem,
   ModelPricing,
   SaveResponsesApiUpstreamInput,
   UpstreamModel,
@@ -71,6 +75,9 @@ export const UpstreamsPage = () => {
   const [pricingUpstream, setPricingUpstream] = useState<UpstreamSummary | null>(null);
   const [pricingModels, setPricingModels] = useState<UpstreamModel[]>([]);
   const [bundledOverrideOpen, setBundledOverrideOpen] = useState(false);
+  const [modelManagementOpen, setModelManagementOpen] = useState(false);
+  const [modelManagementLoading, setModelManagementLoading] = useState(false);
+  const [managedModels, setManagedModels] = useState<ModelManagementItem[]>([]);
   const watchedCatalog = Form.useWatch("modelCatalogJson", form) || EMPTY_CATALOG;
 
   const upstreamsQuery = useQuery({ queryKey: ["upstreams"], queryFn: () => window.codexGateway.listUpstreams() });
@@ -132,6 +139,21 @@ export const UpstreamsPage = () => {
       });
     },
     onError: (error) => message.error({ key: "save-bundled-override", content: `保存失败：${readableError(error)}`, duration: 8 })
+  });
+  const modelManagementMutation = useMutation({
+    mutationFn: () => window.codexGateway.saveModelManagement(managedModels.map((model) => ({
+      slug: model.slug,
+      displayName: model.displayName.trim(),
+      enabled: model.enabled
+    }))),
+    onMutate: () => { message.loading({ key: "save-model-management", content: "正在保存模型配置...", duration: 0 }); },
+    onSuccess: async (result) => {
+      await invalidate();
+      setManagedModels(result.models);
+      setModelManagementOpen(false);
+      message.success({ key: "save-model-management", content: `已保存 ${result.models.length} 个模型的配置` });
+    },
+    onError: (error) => message.error({ key: "save-model-management", content: `保存失败：${readableError(error)}`, duration: 8 })
   });
   const healthMutation = useMutation({
     mutationFn: (id: string) => window.codexGateway.testUpstreamConnection(id),
@@ -200,6 +222,32 @@ export const UpstreamsPage = () => {
     } catch (error) {
       message.error(`读取 Bundled 覆盖失败：${readableError(error)}`);
     }
+  };
+
+  const openModelManagement = async () => {
+    setModelManagementLoading(true);
+    try {
+      setManagedModels(await window.codexGateway.getModelManagement());
+      setModelManagementOpen(true);
+    } catch (error) {
+      message.error(`读取模型配置失败：${readableError(error)}`);
+    } finally {
+      setModelManagementLoading(false);
+    }
+  };
+
+  const moveModel = (index: number, offset: number) => {
+    setManagedModels((models) => {
+      const target = index + offset;
+      if (target < 0 || target >= models.length) return models;
+      const next = [...models];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next.map((model, priority) => ({ ...model, priority: priority + 1 }));
+    });
+  };
+
+  const updateManagedModel = (index: number, patch: Partial<ModelManagementItem>) => {
+    setManagedModels((models) => models.map((model, modelIndex) => modelIndex === index ? { ...model, ...patch } : model));
   };
 
   const save = async (values: FormValues) => {
@@ -305,12 +353,77 @@ export const UpstreamsPage = () => {
 
   return <section className="v1-page-card v1-page-fill v1-upstreams-page">
     <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
+      <Button aria-label="模型管理" icon={<ControlOutlined />} loading={modelManagementLoading} onClick={() => void openModelManagement()}>模型管理</Button>
       <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增渠道</Button>
     </Flex>
     <Table
       rowKey="id" columns={columns} dataSource={upstreamsQuery.data ?? []} loading={upstreamsQuery.isLoading}
       pagination={false} scroll={{ x: 1120 }} sticky={{ offsetHeader: 0 }}
     />
+
+    <Modal
+      title="模型管理"
+      width={900}
+      open={modelManagementOpen}
+      okText="保存配置"
+      confirmLoading={modelManagementMutation.isPending}
+      okButtonProps={{ disabled: managedModels.length === 0 || managedModels.some((model) => !model.displayName.trim()) }}
+      onCancel={() => setModelManagementOpen(false)}
+      onOk={() => modelManagementMutation.mutate()}
+    >
+      <Alert
+        showIcon
+        type="info"
+        title="模型禁用后会从模型列表移除，可能导致自动审查等内部调用失败"
+        style={{ marginBottom: 16 }}
+      />
+      <Table
+        rowKey="slug"
+        pagination={false}
+        size="small"
+        dataSource={managedModels}
+        scroll={{ y: 480 }}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有可排序的模型" /> }}
+        columns={[
+          {
+            title: "模型 ID",
+            dataIndex: "slug",
+            width: 220,
+            render: (slug) => <Typography.Text className="v1-mono">{slug}</Typography.Text>
+          },
+          {
+            title: "显示名称",
+            key: "displayName",
+            render: (_, model, index) => <Input
+              aria-label={`${model.slug} 显示名称`}
+              value={model.displayName}
+              maxLength={256}
+              placeholder={model.sourceDisplayName}
+              onChange={(event) => updateManagedModel(index, { displayName: event.target.value })}
+            />
+          },
+          {
+            title: "启用",
+            key: "enabled",
+            width: 80,
+            render: (_, model, index) => <Switch
+              aria-label={`启用 ${model.slug}`}
+              checked={model.enabled}
+              onChange={(enabled) => updateManagedModel(index, { enabled })}
+            />
+          },
+          {
+            title: "排序",
+            key: "actions",
+            width: 110,
+            render: (_, _model, index) => <Space size={4}>
+              <Button aria-label={`上移 ${_model.slug}`} icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => moveModel(index, -1)} />
+              <Button aria-label={`下移 ${_model.slug}`} icon={<ArrowDownOutlined />} disabled={index === managedModels.length - 1} onClick={() => moveModel(index, 1)} />
+            </Space>
+          }
+        ]}
+      />
+    </Modal>
 
     <Modal
       title="Codex Bundled 覆盖"

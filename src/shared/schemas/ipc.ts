@@ -13,6 +13,11 @@ const bundledModelOverride = z.object({
   enabled: z.boolean(),
   modelCatalogJson: z.string().max(16 * 1024 * 1024)
 }).strict();
+const modelManagement = z.array(z.object({
+  slug: id,
+  displayName: z.string().trim().min(1).max(256),
+  enabled: z.boolean()
+}).strict()).max(1000).refine((models) => new Set(models.map((model) => model.slug)).size === models.length);
 const logQuery = z.object({
   page: z.number().int().min(1),
   pageSize: z.number().int().min(1).max(500),
@@ -43,6 +48,8 @@ export const ipcArgumentSchemas = {
   "upstreams:bundledOverride": empty,
   "upstreams:saveBundledOverride": z.tuple([bundledModelOverride]),
   "upstreams:refreshBuiltinModels": empty,
+  "upstreams:modelManagement": empty,
+  "upstreams:saveModelManagement": z.tuple([modelManagement]),
   "upstreams:saveModelPricing": z.tuple([id, z.record(id, pricing)]),
   "upstreams:testConnection": z.tuple([id]),
   "upstreams:testInvocation": z.tuple([id, id]),

@@ -11,6 +11,8 @@ describe("IPC runtime argument schemas", () => {
     expect(channels).toContain("upstreams:bundledOverride");
     expect(channels).toContain("upstreams:saveBundledOverride");
     expect(channels).toContain("upstreams:refreshBuiltinModels");
+    expect(channels).toContain("upstreams:modelManagement");
+    expect(channels).toContain("upstreams:saveModelManagement");
     expect(channels.some((channel) => channel.startsWith("modelMappings:"))).toBe(false);
     expect(channels.some((channel) => channel.startsWith("routing:"))).toBe(false);
     expect(channels.some((channel) => channel.startsWith("sessions:"))).toBe(false);
@@ -21,5 +23,9 @@ describe("IPC runtime argument schemas", () => {
     expect(ipcArgumentSchemas["upstreams:testInvocation"].safeParse(["upstream-a", ""]).success).toBe(false);
     expect(ipcArgumentSchemas["upstreams:saveBundledOverride"].safeParse([{ enabled: true, modelCatalogJson: "{}" }]).success).toBe(true);
     expect(ipcArgumentSchemas["upstreams:saveBundledOverride"].safeParse([{ enabled: "true", modelCatalogJson: "{}" }]).success).toBe(false);
+    const model = { slug: "model-a", displayName: "Model A", enabled: true };
+    expect(ipcArgumentSchemas["upstreams:saveModelManagement"].safeParse([[model]]).success).toBe(true);
+    expect(ipcArgumentSchemas["upstreams:saveModelManagement"].safeParse([[model, model]]).success).toBe(false);
+    expect(ipcArgumentSchemas["upstreams:saveModelManagement"].safeParse([[{ ...model, displayName: "" }]]).success).toBe(false);
   });
 });

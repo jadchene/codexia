@@ -279,6 +279,42 @@ describe("Ant Design pages", () => {
     }));
   });
 
+  it("manages model names, order, and enabled state", async () => {
+    const user = userEvent.setup();
+    vi.mocked(window.codexGateway.getModelManagement).mockResolvedValue([
+      { slug: "model-a", sourceDisplayName: "Model A", displayName: "Model A", enabled: true, priority: 1 },
+      { slug: "model-b", sourceDisplayName: "Model B", displayName: "Model B", enabled: true, priority: 2 }
+    ]);
+    vi.mocked(window.codexGateway.saveModelManagement).mockResolvedValue({
+      models: [
+        { slug: "model-b", sourceDisplayName: "Model B", displayName: "Model B Custom", enabled: true, priority: 1 },
+        { slug: "model-a", sourceDisplayName: "Model A", displayName: "Model A", enabled: false, priority: 2 }
+      ],
+      catalog: {
+        path: "D:/data/models.json",
+        bundledCachePath: "D:/data/codex-bundled-models.json",
+        bundledSource: "cache",
+        bundledCount: 2,
+        externalCount: 0,
+        totalCount: 2
+      }
+    });
+    renderWithQueries(<UpstreamsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "模型管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "模型管理" });
+    await user.click(within(dialog).getByRole("button", { name: "下移 model-a" }));
+    const displayName = within(dialog).getByRole("textbox", { name: "model-b 显示名称" });
+    await user.clear(displayName);
+    await user.type(displayName, "Model B Custom");
+    await user.click(within(dialog).getByRole("switch", { name: "启用 model-a" }));
+    await user.click(within(dialog).getByRole("button", { name: "保存配置" }));
+    await waitFor(() => expect(window.codexGateway.saveModelManagement).toHaveBeenCalledWith([
+      { slug: "model-b", displayName: "Model B Custom", enabled: true },
+      { slug: "model-a", displayName: "Model A", enabled: false }
+    ]));
+  });
+
   it("starts the gateway from service management", async () => {
     const user = userEvent.setup();
     const onToggleGateway = vi.fn().mockResolvedValue(undefined);
@@ -470,6 +506,8 @@ function createBridge(): CodexGatewayBridge {
     getBundledModelOverride: vi.fn().mockResolvedValue({ enabled: false, modelCatalogJson: "" }),
     saveBundledModelOverride: vi.fn(),
     refreshBuiltinModels: vi.fn(),
+    getModelManagement: vi.fn().mockResolvedValue([]),
+    saveModelManagement: vi.fn(),
     bootstrap: vi.fn().mockResolvedValue({ settings: { billing_currency: "USD" } })
   } as unknown as CodexGatewayBridge;
 }

@@ -244,6 +244,7 @@ function migrate(db: Db): void {
     debug_api_logging_expires_at: "",
     codex_bundled_override_enabled: "false",
     codex_bundled_override_json: "",
+    model_management_json: "[]",
     billing_currency: "USD",
     request_log_retention_days: "30",
     app_log_retention_days: "14"

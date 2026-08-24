@@ -175,7 +175,8 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   modelCatalogService = createCodexModelCatalogService({
     db: store.db,
     dataDir: store.paths.dataDir,
-    getBundledOverride: bundledModelOverride
+    getBundledOverride: bundledModelOverride,
+    getModelManagement: configuredModelManagement
   });
   try {
     modelCatalogService.refreshBundled(true);
@@ -454,6 +455,11 @@ function registerIpc() {
     notifyDataChanged(["upstreams", "upstreamModels"]);
     return result;
   });
+  handleIpc("upstreams:modelManagement", () => {
+    modelCatalogService.refresh();
+    return modelCatalogService.listModels();
+  });
+  handleIpc("upstreams:saveModelManagement", (_event, models) => saveModelManagement(models));
   handleIpc("upstreams:saveModelPricing", (_event, upstreamId, pricing) => {
     const result = upstreamService.saveModelPricing(upstreamId, pricing);
     notifyDataChanged(["upstreams", "upstreamModels"]);
@@ -579,6 +585,44 @@ function bundledModelOverride() {
     enabled: settings.codex_bundled_override_enabled === "true",
     modelCatalogJson: String(settings.codex_bundled_override_json || "")
   };
+}
+
+function configuredModelManagement() {
+  try {
+    const value = JSON.parse(String(store.getSettings().model_management_json || "[]"));
+    if (!Array.isArray(value)) return [];
+    const slugs = new Set<string>();
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const slug = String(item.slug || "").trim();
+      const displayName = String(item.displayName || "").trim();
+      if (!slug || !displayName || slugs.has(slug)) return [];
+      slugs.add(slug);
+      return [{ slug, displayName, enabled: item.enabled !== false && item.visible !== false }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function saveModelManagement(models: Dynamic[]) {
+  modelCatalogService.refresh();
+  const current = modelCatalogService.listModels().map((model: Dynamic) => model.slug);
+  if (models.length !== current.length || models.some((model) => !current.includes(model.slug))) {
+    throw new Error("模型列表已发生变化，请重新打开模型管理后再保存。");
+  }
+  const previous = String(store.getSettings().model_management_json || "[]");
+  store.saveSettings({ model_management_json: JSON.stringify(models) });
+  try {
+    const catalog = modelCatalogService.refresh();
+    const savedModels = modelCatalogService.listModels();
+    notifyDataChanged(["upstreams", "upstreamModels"]);
+    return { models: savedModels, catalog };
+  } catch (error) {
+    store.saveSettings({ model_management_json: previous });
+    modelCatalogService.refresh();
+    throw error;
+  }
 }
 
 function saveBundledModelOverride(input: Dynamic) {

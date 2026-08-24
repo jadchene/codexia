@@ -106,6 +106,22 @@ export interface ModelCatalogBuildResult {
   totalCount: number;
 }
 
+export interface ModelManagementInput {
+  slug: string;
+  displayName: string;
+  enabled: boolean;
+}
+
+export interface ModelManagementItem extends ModelManagementInput {
+  sourceDisplayName: string;
+  priority: number;
+}
+
+export interface SaveModelManagementResult {
+  models: ModelManagementItem[];
+  catalog: ModelCatalogBuildResult;
+}
+
 export interface SaveBundledModelOverrideResult {
   override: BundledModelOverride;
   catalog: ModelCatalogBuildResult;

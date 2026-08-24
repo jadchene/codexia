@@ -43,6 +43,48 @@ test("cached bundled and external channel catalogs merge without rerunning Codex
   }
 });
 
+test("model management overrides names and priorities, hides models, and appends new models", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-management-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  let bundledCatalog = JSON.stringify({ models: [{ slug: "built-in", display_name: "Built In", priority: 90 }] });
+  const management = [
+    { slug: "external", displayName: "External Custom", enabled: true },
+    { slug: "built-in", displayName: "Built In Disabled", enabled: false }
+  ];
+  try {
+    const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
+    upstreams.save({
+      name: "Third Party", baseUrl: "https://api.example.test/v1", enabled: true,
+      supportsWebSocket: false, balanceQueryType: "none",
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "external", priority: 40 }] }),
+      modelPricing: {}
+    });
+    const catalogs = createCodexModelCatalogService({
+      db: store.db,
+      dataDir: directory,
+      runBundledModels: () => bundledCatalog,
+      getModelManagement: () => management
+    });
+    let result = catalogs.refreshBundled();
+    let models = JSON.parse(fs.readFileSync(result.path, "utf8")).models;
+    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external"]);
+    assert.equal(models[0].display_name, "External Custom");
+    assert.equal(models[0].priority, 1);
+    assert.deepEqual(catalogs.listModels().map((model) => [model.slug, model.enabled]), [
+      ["external", true], ["built-in", false]
+    ]);
+
+    bundledCatalog = JSON.stringify({ models: [{ slug: "built-in" }, { slug: "new-model", priority: 5 }] });
+    result = catalogs.refreshBundled();
+    models = JSON.parse(fs.readFileSync(result.path, "utf8")).models;
+    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external", "new-model"]);
+    assert.deepEqual(models.map((model: { priority: number }) => model.priority), [1, 2]);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("enabled bundled override skips Codex and merges the manual catalog with external models", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-override-"));
   const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });

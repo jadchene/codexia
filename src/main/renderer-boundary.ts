@@ -78,6 +78,7 @@ export function publicSettings(settings: Settings): Settings {
     gateway_api_key: _gatewayApiKey,
     codex_bundled_override_enabled: _bundledOverrideEnabled,
     codex_bundled_override_json: _bundledOverrideJson,
+    model_management_json: _modelManagementJson,
     ...safe
   } = settings;
   return {

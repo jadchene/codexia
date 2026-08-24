@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { BundledModelOverride, ModelCatalogBuildResult } from "../shared/contracts/upstreams.ts";
+import type {
+  BundledModelOverride,
+  ModelCatalogBuildResult,
+  ModelManagementInput,
+  ModelManagementItem
+} from "../shared/contracts/upstreams.ts";
 import { writeFilesTransaction } from "./codex-cli-auth.ts";
 import { BUILTIN_SUBSCRIPTION_ID } from "./upstreams/upstream-service.ts";
 
@@ -14,11 +19,13 @@ interface CatalogServiceOptions {
   dataDir: string;
   runBundledModels?: () => string;
   getBundledOverride?: () => BundledModelOverride;
+  getModelManagement?: () => ModelManagementInput[];
 }
 
 export function createCodexModelCatalogService(options: CatalogServiceOptions) {
   const catalogPath = path.join(options.dataDir, "models.json");
   const bundledCachePath = path.join(options.dataDir, "codex-bundled-models.json");
+  let sourceCatalog: Catalog | null = null;
   const rebuild = (refreshBundled: boolean, allowCachedFallback: boolean): ModelCatalogBuildResult => {
     const override = options.getBundledOverride?.() || { enabled: false, modelCatalogJson: "" };
     let bundled: Catalog;
@@ -41,7 +48,8 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
       bundledSource = "cache";
     }
     const external = enabledExternalModels(options.db);
-    const merged = mergeCatalogs(bundled, external);
+    sourceCatalog = mergeCatalogs(bundled, external);
+    const merged = applyModelManagement(sourceCatalog, options.getModelManagement?.() || []);
     syncBundledModels(options.db, bundled.models);
     writeFilesTransaction([{ file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` }], () => {
       parseCatalog(fs.readFileSync(catalogPath, "utf8"), "生成的模型目录");
@@ -58,7 +66,11 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
   return {
     path: catalogPath,
     refresh: () => rebuild(false, false),
-    refreshBundled: (allowCachedFallback = false) => rebuild(true, allowCachedFallback)
+    refreshBundled: (allowCachedFallback = false) => rebuild(true, allowCachedFallback),
+    listModels: (): ModelManagementItem[] => buildModelManagement(
+      sourceCatalog || parseCatalog(fs.readFileSync(catalogPath, "utf8"), "生成的模型目录"),
+      options.getModelManagement?.() || []
+    )
   };
 }
 
@@ -108,6 +120,43 @@ export function mergeCatalogs(bundled: Catalog, external: ModelEntry[]): Catalog
     models.push(model);
   }
   return { ...bundled, models };
+}
+
+export function applyModelManagement(catalog: Catalog, management: ModelManagementInput[]): Catalog {
+  if (management.length === 0) return catalog;
+  const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
+  const models = buildModelManagement(catalog, management)
+    .filter((model) => model.enabled)
+    .map((managed, index) => ({
+      ...bySlug.get(managed.slug)!,
+      display_name: managed.displayName,
+      priority: index + 1
+    }));
+  return { ...catalog, models };
+}
+
+export function buildModelManagement(catalog: Catalog, management: ModelManagementInput[]): ModelManagementItem[] {
+  const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
+  const ordered: ModelEntry[] = [];
+  const configured = new Map(management.map((model) => [model.slug, model]));
+  for (const item of management) {
+    const model = bySlug.get(item.slug);
+    if (!model) continue;
+    ordered.push(model);
+    bySlug.delete(item.slug);
+  }
+  ordered.push(...bySlug.values());
+  return ordered.map((model, index) => {
+    const sourceDisplayName = String(model.display_name || model.slug);
+    const saved = configured.get(model.slug);
+    return {
+      slug: model.slug,
+      sourceDisplayName,
+      displayName: saved?.displayName || sourceDisplayName,
+      enabled: saved?.enabled ?? true,
+      priority: index + 1
+    };
+  });
 }
 
 function enabledExternalModels(db: DatabaseSync): ModelEntry[] {
