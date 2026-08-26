@@ -109,7 +109,7 @@ export interface ModelCatalogBuildResult {
 export interface ModelManagementInput {
   slug: string;
   displayName: string;
-  enabled: boolean;
+  visible: boolean;
 }
 
 export interface ModelManagementItem extends ModelManagementInput {

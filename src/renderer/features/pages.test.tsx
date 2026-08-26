@@ -279,16 +279,16 @@ describe("Ant Design pages", () => {
     }));
   });
 
-  it("manages model names, order, and enabled state", async () => {
+  it("manages model names, order, and visibility", async () => {
     const user = userEvent.setup();
     vi.mocked(window.codexGateway.getModelManagement).mockResolvedValue([
-      { slug: "model-a", sourceDisplayName: "Model A", displayName: "Model A", enabled: true, priority: 1 },
-      { slug: "model-b", sourceDisplayName: "Model B", displayName: "Model B", enabled: true, priority: 2 }
+      { slug: "model-a", sourceDisplayName: "Model A", displayName: "Model A", visible: true, priority: 1 },
+      { slug: "model-b", sourceDisplayName: "Model B", displayName: "Model B", visible: true, priority: 2 }
     ]);
     vi.mocked(window.codexGateway.saveModelManagement).mockResolvedValue({
       models: [
-        { slug: "model-b", sourceDisplayName: "Model B", displayName: "Model B Custom", enabled: true, priority: 1 },
-        { slug: "model-a", sourceDisplayName: "Model A", displayName: "Model A", enabled: false, priority: 2 }
+        { slug: "model-b", sourceDisplayName: "Model B", displayName: "Model B Custom", visible: true, priority: 1 },
+        { slug: "model-a", sourceDisplayName: "Model A", displayName: "Model A", visible: false, priority: 2 }
       ],
       catalog: {
         path: "D:/data/models.json",
@@ -307,11 +307,11 @@ describe("Ant Design pages", () => {
     const displayName = within(dialog).getByRole("textbox", { name: "model-b 显示名称" });
     await user.clear(displayName);
     await user.type(displayName, "Model B Custom");
-    await user.click(within(dialog).getByRole("switch", { name: "启用 model-a" }));
+    await user.click(within(dialog).getByRole("switch", { name: "显示 model-a" }));
     await user.click(within(dialog).getByRole("button", { name: "保存配置" }));
     await waitFor(() => expect(window.codexGateway.saveModelManagement).toHaveBeenCalledWith([
-      { slug: "model-b", displayName: "Model B Custom", enabled: true },
-      { slug: "model-a", displayName: "Model A", enabled: false }
+      { slug: "model-b", displayName: "Model B Custom", visible: true },
+      { slug: "model-a", displayName: "Model A", visible: false }
     ]));
   });
 

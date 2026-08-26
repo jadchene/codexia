@@ -144,7 +144,7 @@ export const UpstreamsPage = () => {
     mutationFn: () => window.codexGateway.saveModelManagement(managedModels.map((model) => ({
       slug: model.slug,
       displayName: model.displayName.trim(),
-      enabled: model.enabled
+      visible: model.visible
     }))),
     onMutate: () => { message.loading({ key: "save-model-management", content: "正在保存模型配置...", duration: 0 }); },
     onSuccess: async (result) => {
@@ -374,7 +374,7 @@ export const UpstreamsPage = () => {
       <Alert
         showIcon
         type="info"
-        title="模型禁用后会从模型列表移除，可能导致自动审查等内部调用失败"
+        title="隐藏后模型不会出现在模型列表中，但仍可被自动审查等内部功能调用"
         style={{ marginBottom: 16 }}
       />
       <Table
@@ -403,13 +403,13 @@ export const UpstreamsPage = () => {
             />
           },
           {
-            title: "启用",
-            key: "enabled",
+            title: "显示",
+            key: "visible",
             width: 80,
             render: (_, model, index) => <Switch
-              aria-label={`启用 ${model.slug}`}
-              checked={model.enabled}
-              onChange={(enabled) => updateManagedModel(index, { enabled })}
+              aria-label={`显示 ${model.slug}`}
+              checked={model.visible}
+              onChange={(visible) => updateManagedModel(index, { visible })}
             />
           },
           {

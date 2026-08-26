@@ -126,11 +126,11 @@ export function applyModelManagement(catalog: Catalog, management: ModelManageme
   if (management.length === 0) return catalog;
   const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
   const models = buildModelManagement(catalog, management)
-    .filter((model) => model.enabled)
     .map((managed, index) => ({
       ...bySlug.get(managed.slug)!,
       display_name: managed.displayName,
-      priority: index + 1
+      priority: index + 1,
+      visibility: managed.visible ? "list" : "hide"
     }));
   return { ...catalog, models };
 }
@@ -148,12 +148,13 @@ export function buildModelManagement(catalog: Catalog, management: ModelManageme
   ordered.push(...bySlug.values());
   return ordered.map((model, index) => {
     const sourceDisplayName = String(model.display_name || model.slug);
+    const sourceVisible = String(model.visibility || "list") === "list";
     const saved = configured.get(model.slug);
     return {
       slug: model.slug,
       sourceDisplayName,
       displayName: saved?.displayName || sourceDisplayName,
-      enabled: saved?.enabled ?? true,
+      visible: saved?.visible ?? sourceVisible,
       priority: index + 1
     };
   });

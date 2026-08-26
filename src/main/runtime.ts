@@ -12,6 +12,7 @@ import { createSecretCodec } from "./secret-codec.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "./renderer-boundary.ts";
 import { createUsageRefreshCoordinator } from "./usage-refresh-coordinator.ts";
 import { startStartupUsageRefresh } from "./startup-usage-refresh.ts";
+import { MAX_USAGE_RESET_REFRESH_ATTEMPTS, usageResetRefreshDelay } from "./usage-reset-refresh.ts";
 import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
@@ -29,6 +30,7 @@ import {
 } from "./reset-credit.ts";
 import { applyGatewayMode, applyAccountMode, detectCodexAuthMode, ensureProviderConfig, resolveCodexHome } from "./codex-cli-auth.ts";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc.ts";
+import type { ModelManagementInput } from "../shared/contracts/upstreams.ts";
 import { ipcArgumentSchemas } from "../shared/schemas/ipc.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +66,7 @@ let usageRefreshCoordinator: Dynamic = null;
 let maintenanceTimer: Dynamic = null;
 let singleInstanceServer: Dynamic = null;
 const usageResetTimers = new Map<Dynamic, Dynamic>();
+const usageResetRefreshAttempts = new Map<Dynamic, { resetAt: number; count: number }>();
 let shuttingDown = false;
 let runtimeReady = false;
 let showWindowWhenReady = false;
@@ -587,18 +590,18 @@ function bundledModelOverride() {
   };
 }
 
-function configuredModelManagement() {
+function configuredModelManagement(): ModelManagementInput[] {
   try {
     const value = JSON.parse(String(store.getSettings().model_management_json || "[]"));
     if (!Array.isArray(value)) return [];
     const slugs = new Set<string>();
-    return value.flatMap((item) => {
+    return value.flatMap<ModelManagementInput>((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const slug = String(item.slug || "").trim();
       const displayName = String(item.displayName || "").trim();
-      if (!slug || !displayName || slugs.has(slug)) return [];
+      if (!slug || !displayName || typeof item.visible !== "boolean" || slugs.has(slug)) return [];
       slugs.add(slug);
-      return [{ slug, displayName, enabled: item.enabled !== false && item.visible !== false }];
+      return [{ slug, displayName, visible: item.visible }];
     });
   } catch {
     return [];
@@ -1360,14 +1363,27 @@ function scheduleUsageResetRefresh(account: Dynamic, reason: Dynamic = "usage-re
       message: `账号 5 小时额度重置刷新任务已重新计划：${label}，${formatTime(resetAt)} 后 1 分钟`
     });
   }
-  const delayMs = Math.max(1000, resetAt * 1000 + 60_000 - Date.now());
+  const attemptState = usageResetRefreshAttempts.get(account.id);
+  const completedAttempts = attemptState?.resetAt === resetAt ? attemptState.count : 0;
+  const delayMs = usageResetRefreshDelay(resetAt, Date.now(), completedAttempts);
+  if (delayMs === null) {
+    store.addAppLog({
+      scope: "usage",
+      action: "reset-refresh-limit",
+      status: reason,
+      message: `账号额度仍未更新，已停止自动重试：${label}。后续将按正常间隔刷新，也可以手动刷新。`
+    });
+    return;
+  }
+  const attemptNumber = completedAttempts + 1;
   const timer = setTimeout(() => {
     usageResetTimers.delete(account.id);
+    usageResetRefreshAttempts.set(account.id, { resetAt, count: attemptNumber });
     store.addAppLog({
       scope: "usage",
       action: "reset-refresh-run",
       status: "start",
-      message: `开始执行 5 小时额度重置后账号刷新：${label}`
+      message: `开始执行额度重置后自动刷新：${label}（${attemptNumber}/${MAX_USAGE_RESET_REFRESH_ATTEMPTS}）`
     });
     refreshUsage(account.id)
       .then((refreshed) => {
@@ -1393,15 +1409,20 @@ function scheduleUsageResetRefresh(account: Dynamic, reason: Dynamic = "usage-re
     scope: "usage",
     action: "reset-refresh-schedule",
     status: reason,
-    message: `账号 5 小时额度已用满，已计划在重置时间后 1 分钟自动刷新：${label}，${formatTime(resetAt)}`
+    message: completedAttempts > 0
+      ? `账号额度仍未更新，将在 5 分钟后自动重试：${label}（${attemptNumber}/${MAX_USAGE_RESET_REFRESH_ATTEMPTS}）`
+      : `账号 5 小时额度已用满，已计划在重置时间后 1 分钟自动刷新：${label}，${formatTime(resetAt)}`
   });
 }
 
 function clearUsageResetTimer(accountId: Dynamic, reason: Dynamic = "clear") {
   const existing = usageResetTimers.get(accountId);
+  if (existing) {
+    clearTimeout(existing.timer);
+    usageResetTimers.delete(accountId);
+  }
+  usageResetRefreshAttempts.delete(accountId);
   if (!existing) return;
-  clearTimeout(existing.timer);
-  usageResetTimers.delete(accountId);
   if (store) {
     store.addAppLog({
       scope: "usage",
@@ -1416,6 +1437,7 @@ function clearAllUsageResetTimers(reason: Dynamic = "shutdown") {
   const count = usageResetTimers.size;
   for (const { timer } of usageResetTimers.values()) clearTimeout(timer);
   usageResetTimers.clear();
+  usageResetRefreshAttempts.clear();
   if (store && count > 0) {
     store.addAppLog({
       scope: "usage",

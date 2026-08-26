@@ -43,13 +43,13 @@ test("cached bundled and external channel catalogs merge without rerunning Codex
   }
 });
 
-test("model management overrides names and priorities, hides models, and appends new models", () => {
+test("model management overrides names, priorities, and visibility without removing models", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-management-"));
   const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
   let bundledCatalog = JSON.stringify({ models: [{ slug: "built-in", display_name: "Built In", priority: 90 }] });
   const management = [
-    { slug: "external", displayName: "External Custom", enabled: true },
-    { slug: "built-in", displayName: "Built In Disabled", enabled: false }
+    { slug: "external", displayName: "External Custom", visible: true },
+    { slug: "built-in", displayName: "Built In Hidden", visible: false }
   ];
   try {
     const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
@@ -67,18 +67,22 @@ test("model management overrides names and priorities, hides models, and appends
     });
     let result = catalogs.refreshBundled();
     let models = JSON.parse(fs.readFileSync(result.path, "utf8")).models;
-    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external"]);
+    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external", "built-in"]);
     assert.equal(models[0].display_name, "External Custom");
     assert.equal(models[0].priority, 1);
-    assert.deepEqual(catalogs.listModels().map((model) => [model.slug, model.enabled]), [
+    assert.deepEqual(models.map((model: { visibility: string }) => model.visibility), ["list", "hide"]);
+    assert.deepEqual(catalogs.listModels().map((model) => [model.slug, model.visible]), [
       ["external", true], ["built-in", false]
     ]);
 
-    bundledCatalog = JSON.stringify({ models: [{ slug: "built-in" }, { slug: "new-model", priority: 5 }] });
+    bundledCatalog = JSON.stringify({ models: [{ slug: "built-in" }, { slug: "new-model", priority: 5, visibility: "hide" }] });
     result = catalogs.refreshBundled();
     models = JSON.parse(fs.readFileSync(result.path, "utf8")).models;
-    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external", "new-model"]);
-    assert.deepEqual(models.map((model: { priority: number }) => model.priority), [1, 2]);
+    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external", "built-in", "new-model"]);
+    assert.deepEqual(models.map((model: { priority: number }) => model.priority), [1, 2, 3]);
+    assert.deepEqual(catalogs.listModels().map((model) => [model.slug, model.visible]), [
+      ["external", true], ["built-in", false], ["new-model", false]
+    ]);
   } finally {
     store.db.close();
     fs.rmSync(directory, { recursive: true, force: true });

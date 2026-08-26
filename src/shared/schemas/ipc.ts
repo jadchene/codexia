@@ -16,7 +16,7 @@ const bundledModelOverride = z.object({
 const modelManagement = z.array(z.object({
   slug: id,
   displayName: z.string().trim().min(1).max(256),
-  enabled: z.boolean()
+  visible: z.boolean()
 }).strict()).max(1000).refine((models) => new Set(models.map((model) => model.slug)).size === models.length);
 const logQuery = z.object({
   page: z.number().int().min(1),
