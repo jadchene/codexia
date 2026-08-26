@@ -843,7 +843,7 @@ test("Responses WebSocket does not replay a request after an upstream error on a
   }
 });
 
-test("WebSocket rate-limit events update usage and quota errors affect only the next connection", async () => {
+test("WebSocket quota errors reconnect before output and switch the same turn to another account", async () => {
   const attempts = [];
   let firstConnection = true;
   const harness = await startHarness({
@@ -867,25 +867,77 @@ test("WebSocket rate-limit events update usage and quota errors affect only the 
     }
   });
   try {
-    const first = await connectGateway(harness, "/v1/responses", { "session-id": "session-quota-event" });
-    const messages = nextMessages(first.websocket, 2);
+    const headers = {
+      "session-id": "session-quota-event",
+      "x-codex-turn-metadata": JSON.stringify({ turn_id: "quota-turn" })
+    };
+    const first = await connectGateway(harness, "/v1/responses", headers);
+    const messages = [];
+    first.websocket.on("message", (data) => messages.push(JSON.parse(data.toString())));
+    const firstClosed = nextCloseDetail(first.websocket);
     first.websocket.send(JSON.stringify({ type: "response.create" }));
-    const received = await messages;
-    const rateLimits = JSON.parse(received[0].toString());
+    const closeDetail = await firstClosed;
+    assert.equal(closeDetail.code, 1012);
+    assert.equal(messages.some((event) => event.type === "error"), false);
+    const rateLimits = messages.find((event) => event.type === "codex.rate_limits");
     assert.equal(rateLimits.rate_limits.primary.used_percent, 50);
     assert.equal(rateLimits.rate_limits.secondary.used_percent, 25);
-    assert.equal(first.websocket.readyState, WebSocket.OPEN);
-    first.websocket.close();
-    await nextClose(first.websocket);
     assert.equal(harness.accounts[0].quota_5h_used_percent, 50);
     assert.equal(harness.accounts[0].quota_7d_used_percent, 25);
 
-    const second = await connectGateway(harness, "/v1/responses", { "session-id": "session-quota-event" });
+    const second = await connectGateway(harness, "/v1/responses", headers);
     second.websocket.send(JSON.stringify({ type: "response.create" }));
     await waitFor(() => attempts.length === 2, 1_000);
     second.websocket.close();
     await nextClose(second.websocket);
     assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-b"]);
+    assert.equal(harness.appLogs.some((entry) => entry.action === "quota-reconnect"), true);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket quota errors remain visible when no other account is available", async () => {
+  const harness = await startHarness({
+    onConnection(websocket) {
+      websocket.once("message", () => {
+        websocket.send(JSON.stringify({ type: "error", error: { code: "usage_limit_reached", message: "quota exceeded" } }));
+      });
+    }
+  });
+  try {
+    harness.accounts[1].enabled = false;
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "quota-no-alternative" });
+    const messagePromise = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: "response.create" }));
+    const message = JSON.parse((await messagePromise).toString());
+    websocket.close();
+    await nextClose(websocket);
+    assert.equal(message.error.code, "usage_limit_reached");
+    assert.equal(harness.appLogs.some((entry) => entry.action === "quota-reconnect"), false);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket quota errors are not retried after response output starts", async () => {
+  const harness = await startHarness({
+    onConnection(websocket) {
+      websocket.once("message", () => {
+        websocket.send(JSON.stringify({ type: "response.output_text.delta", delta: "partial" }));
+        websocket.send(JSON.stringify({ type: "error", error: { code: "usage_limit_reached", message: "quota exceeded" } }));
+      });
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "quota-after-output" });
+    const messagesPromise = nextMessages(websocket, 2);
+    websocket.send(JSON.stringify({ type: "response.create" }));
+    const messages = (await messagesPromise).map((data) => JSON.parse(data.toString()));
+    websocket.close();
+    await nextClose(websocket);
+    assert.deepEqual(messages.map((event) => event.type), ["response.output_text.delta", "error"]);
+    assert.equal(harness.appLogs.some((entry) => entry.action === "quota-reconnect"), false);
   } finally {
     await harness.close();
   }

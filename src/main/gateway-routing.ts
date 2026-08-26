@@ -207,6 +207,18 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     cooldowns.delete(accountId);
   }
 
+  function releaseQuotaBinding(routeContext: RouteContext | null | undefined, accountId: string): void {
+    if (!routeContext || !accountId) return;
+    if (routeContext.turnId && turnBindings.get(routeContext.turnId)?.accountId === accountId) {
+      turnBindings.delete(routeContext.turnId);
+    }
+    if (routeContext.turnState && stateBindings.get(routeContext.turnState)?.accountId === accountId) {
+      stateBindings.delete(routeContext.turnState);
+    }
+    releaseSessionReservation(routeContext, accountId);
+    options.onChanged?.(snapshot());
+  }
+
   function prune(ttlMs = DEFAULT_TURN_TTL_MS): void {
     const cutoff = now() - Math.max(1, Number(ttlMs) || DEFAULT_TURN_TTL_MS);
     for (const [key, binding] of turnBindings) {
@@ -256,6 +268,7 @@ export function createGatewayRouting(options: RoutingOptions = {}) {
     observeTargetResponse,
     setCooldown,
     clearCooldown,
+    releaseQuotaBinding,
     prune,
     snapshot,
     cooldowns

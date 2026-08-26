@@ -60,6 +60,10 @@ interface CurrentRequest {
   clientModel: string;
   upstreamModel: string;
   usage: TokenUsage;
+  outputStarted: boolean;
+}
+interface UpstreamObservation {
+  reconnectForQuota: boolean;
 }
 type JsonEvent = Record<string, any>;
 
@@ -80,19 +84,22 @@ export function createWebSocketObserver(options: ObserverOptions) {
       prewarm: event.generate === false,
       clientModel: modelFromEvent(event),
       upstreamModel: modelFromEvent(event),
-      usage: emptyUsage()
+      usage: emptyUsage(),
+      outputStarted: false
     };
     armIdleTimer();
   }
 
-  function onUpstreamMessage(data: RawData, isBinary: boolean): void {
+  function onUpstreamMessage(data: RawData, isBinary: boolean): UpstreamObservation {
     if (currentRequest) armIdleTimer();
-    if (isBinary) return;
+    if (isBinary) return { reconnectForQuota: false };
     const event = parseJson(data);
-    if (!event) return;
+    if (!event) return { reconnectForQuota: false };
     observeRateLimits(event);
-    observeQuotaError(event, data);
-    if (!currentRequest) return;
+    const quotaExhausted = observeQuotaError(event, data);
+    const reconnectForQuota = Boolean(quotaExhausted && currentRequest && !currentRequest.outputStarted);
+    if (!currentRequest) return { reconnectForQuota };
+    if (!quotaExhausted && !retryNeutralEvent(event)) currentRequest.outputStarted = true;
     const observedModel = modelFromEvent(event);
     if (observedModel) {
       currentRequest.clientModel ||= observedModel;
@@ -102,6 +109,7 @@ export function createWebSocketObserver(options: ObserverOptions) {
     if (hasUsage(usage)) currentRequest.usage = usage;
     if (event.type === "response.completed") finishRequest(200, null);
     else if (isTerminalError(event)) finishRequest(errorStatus(event), errorMessage(event));
+    return { reconnectForQuota };
   }
 
   function onClose(code: number, reason: Buffer): void {
@@ -154,10 +162,11 @@ export function createWebSocketObserver(options: ObserverOptions) {
     store.updateUsage?.(account.id, usage);
   }
 
-  function observeQuotaError(event: JsonEvent, data: RawData): void {
-    if (!account || !isTerminalError(event) || !helpers.isQuotaExhaustedResponse(429, data)) return;
+  function observeQuotaError(event: JsonEvent, data: RawData): boolean {
+    if (!account || !isTerminalError(event) || !helpers.isQuotaExhaustedResponse(429, data)) return false;
     options.routing.setCooldown(account.id, positiveSetting(settings.gateway_quota_cooldown_ms, DEFAULT_QUOTA_COOLDOWN_MS));
     scheduleUsageRefresh(account, options.hooks, options.routing, store);
+    return true;
   }
 
   function armIdleTimer(): void {
@@ -199,6 +208,13 @@ function errorStatus(event: JsonEvent): number {
 function errorMessage(event: JsonEvent): string {
   const message = event?.error?.message || event?.message || event?.error?.code || event?.code || "WebSocket response failed.";
   return String(message).slice(0, 1000);
+}
+
+function retryNeutralEvent(event: JsonEvent): boolean {
+  return event.type === "codex.rate_limits"
+    || event.type === "response.created"
+    || event.type === "response.in_progress"
+    || isTerminalError(event);
 }
 
 function parseJson(data: RawData): JsonEvent | null {

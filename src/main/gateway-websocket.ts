@@ -414,8 +414,22 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
         return transformDownstream(data, isBinary);
       },
       onUpstreamMessage(data: Dynamic, isBinary: Dynamic) {
-        observer.onUpstreamMessage(data, isBinary);
+        const observation = observer.onUpstreamMessage(data, isBinary);
         debugWebSocketMessage(apiDebugLogger, debugEnabled, connectionId, "response", data, isBinary, apiDebugLogger?.bodyLimitBytes);
+        if (observation.reconnectForQuota && selected.account) {
+          const alternative = runtime.routing.selectNewAccount(store.listAccounts(), [selected.account.id]);
+          if (alternative) {
+            runtime.routing.releaseQuotaBinding(routeContext, selected.account.id);
+            store.addAppLog?.({
+              scope: "gateway-websocket",
+              action: "quota-reconnect",
+              status: "retry",
+              message: `[${connectionId}] 当前账号额度已用尽，正在切换账号并重试本次请求。`
+            });
+            closeWebSocketForReconnect(downstream, "subscription account quota exhausted");
+            return false;
+          }
+        }
         if (selected.account) return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
         if (!externalQuotaSent) {
           externalQuotaSent = true;
