@@ -4,6 +4,7 @@ export interface GatewayAccount {
   status?: string;
   access_token?: string;
   priority?: number;
+  has_five_hour_quota?: number | boolean | null;
   quota_5h_used_percent?: number;
   quota_5h_reset_at?: number;
   quota_7d_used_percent?: number;
@@ -73,7 +74,7 @@ export function pickGatewayAccount(accounts: GatewayAccount[], currentAccountId 
     return current;
   }
 
-  const ordered = sortAccounts(candidates).map(({ account }) => account);
+  const ordered = sortAccounts(candidates, { ignoreFiveHourLimit }).map(({ account }) => account);
   const picked = pickNextAccount(ordered);
   if (picked) lastSelectedAccountId = picked.id;
   return picked;
@@ -92,6 +93,9 @@ export function pickBalancedGatewayAccount(accounts: GatewayAccount[], excludeId
     .filter(({ account }) => !excluded.has(account.id))
     .filter(({ account }) => Number(cooldowns.get(account.id) || 0) <= nowMs)
     .sort((left, right) => {
+      const fiveHourAvailabilityDiff = fiveHourAvailabilityRank(left.account, ignoreFiveHourLimit)
+        - fiveHourAvailabilityRank(right.account, ignoreFiveHourLimit);
+      if (fiveHourAvailabilityDiff !== 0) return fiveHourAvailabilityDiff;
       const weeklyDiff = usedPercent(left.account.quota_7d_used_percent) - usedPercent(right.account.quota_7d_used_percent);
       if (weeklyDiff !== 0) return weeklyDiff;
       const activeDiff = Number(activeRequests.get(left.account.id) || 0) - Number(activeRequests.get(right.account.id) || 0);
@@ -103,9 +107,12 @@ export function pickBalancedGatewayAccount(accounts: GatewayAccount[], excludeId
   return candidates.at(0)?.account || null;
 }
 
-function sortAccounts(accounts: IndexedAccount[]): IndexedAccount[] {
+function sortAccounts(accounts: IndexedAccount[], options: SelectionOptions = {}): IndexedAccount[] {
   return accounts
     .sort((left, right) => {
+      const fiveHourAvailabilityDiff = fiveHourAvailabilityRank(left.account, options.ignoreFiveHourLimit === true)
+        - fiveHourAvailabilityRank(right.account, options.ignoreFiveHourLimit === true);
+      if (fiveHourAvailabilityDiff !== 0) return fiveHourAvailabilityDiff;
       const priorityDiff = Number(left.account.priority || 100) - Number(right.account.priority || 100);
       if (priorityDiff !== 0) return priorityDiff;
       return left.index - right.index;
@@ -115,6 +122,9 @@ function sortAccounts(accounts: IndexedAccount[]): IndexedAccount[] {
 function sortAccountsBySevenDayQuota(accounts: IndexedAccount[], options: SelectionOptions = {}): IndexedAccount[] {
   return accounts
     .sort((left, right) => {
+      const fiveHourAvailabilityDiff = fiveHourAvailabilityRank(left.account, options.ignoreFiveHourLimit === true)
+        - fiveHourAvailabilityRank(right.account, options.ignoreFiveHourLimit === true);
+      if (fiveHourAvailabilityDiff !== 0) return fiveHourAvailabilityDiff;
       const weeklyDiff = usedPercent(left.account.quota_7d_used_percent) - usedPercent(right.account.quota_7d_used_percent);
       if (weeklyDiff !== 0) return weeklyDiff;
       if (!options.ignoreFiveHourLimit) {
@@ -136,6 +146,14 @@ function pickNextAccount(accounts: GatewayAccount[]): GatewayAccount | null {
 function usedPercent(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0;
+}
+
+function fiveHourAvailabilityRank(account: GatewayAccount, ignoreFiveHourLimit: boolean): number {
+  if (ignoreFiveHourLimit) return 0;
+  if (account.has_five_hour_quota === null || account.has_five_hour_quota === undefined) return 1;
+  if (account.has_five_hour_quota === true || Number(account.has_five_hour_quota) === 1) return 0;
+  if (account.has_five_hour_quota === false || Number(account.has_five_hour_quota) === 0) return 2;
+  return 1;
 }
 
 export function resetSelectionState(): void {

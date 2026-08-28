@@ -130,6 +130,7 @@ function migrate(db: Db): void {
       priority INTEGER NOT NULL DEFAULT 100,
       subscription_plan TEXT,
       subscription_expires_at INTEGER,
+      has_five_hour_quota INTEGER,
       quota_5h_used_percent REAL NOT NULL DEFAULT 0,
       quota_5h_reset_at INTEGER,
       quota_7d_used_percent REAL NOT NULL DEFAULT 0,
@@ -198,6 +199,7 @@ function migrate(db: Db): void {
   addColumnIfMissing(db, "accounts", "reset_credits_available_count", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "accounts", "reset_credits_next_expires_at", "INTEGER");
   addColumnIfMissing(db, "accounts", "reset_credits_json", "TEXT");
+  addColumnIfMissing(db, "accounts", "has_five_hour_quota", "INTEGER");
   const defaults = {
     gateway_host: "localhost",
     gateway_port: "8436",
@@ -592,12 +594,12 @@ function saveAccount(db: Db, input: Row, secretCodec: SecretCodec): Row {
   db.prepare(`
     INSERT INTO accounts (
       id, name, email, id_token, access_token, refresh_token, last_refresh, account_id, workspace_id, status, enabled, priority,
-      subscription_plan, subscription_expires_at, quota_5h_used_percent, quota_5h_reset_at,
+      subscription_plan, subscription_expires_at, has_five_hour_quota, quota_5h_used_percent, quota_5h_reset_at,
       quota_7d_used_percent, quota_7d_reset_at, reset_credits_available_count, reset_credits_next_expires_at,
       reset_credits_json, raw_usage_json, note, created_at, updated_at
     ) VALUES (
       @id, @name, @email, @id_token, @access_token, @refresh_token, @last_refresh, @account_id, @workspace_id, @status, @enabled, @priority,
-      @subscription_plan, @subscription_expires_at, @quota_5h_used_percent, @quota_5h_reset_at,
+      @subscription_plan, @subscription_expires_at, @has_five_hour_quota, @quota_5h_used_percent, @quota_5h_reset_at,
       @quota_7d_used_percent, @quota_7d_reset_at, @reset_credits_available_count, @reset_credits_next_expires_at,
       @reset_credits_json, @raw_usage_json, @note, @created_at, @updated_at
     )
@@ -615,6 +617,7 @@ function saveAccount(db: Db, input: Row, secretCodec: SecretCodec): Row {
       priority = excluded.priority,
       subscription_plan = excluded.subscription_plan,
       subscription_expires_at = excluded.subscription_expires_at,
+      has_five_hour_quota = excluded.has_five_hour_quota,
       quota_5h_used_percent = excluded.quota_5h_used_percent,
       quota_5h_reset_at = excluded.quota_5h_reset_at,
       quota_7d_used_percent = excluded.quota_7d_used_percent,
@@ -645,6 +648,9 @@ function normalizeAccount(input: Row): Row {
     priority: Number(input.priority || 100),
     subscription_plan: input.subscription_plan || null,
     subscription_expires_at: input.subscription_expires_at || null,
+    has_five_hour_quota: input.has_five_hour_quota === null || input.has_five_hour_quota === undefined
+      ? null
+      : Number(Number(input.has_five_hour_quota) === 1),
     quota_5h_used_percent: Number(input.quota_5h_used_percent || 0),
     quota_5h_reset_at: input.quota_5h_reset_at || null,
     quota_7d_used_percent: Number(input.quota_7d_used_percent || 0),
@@ -675,7 +681,10 @@ function decodeAccountSecrets(account: Row, secretCodec: SecretCodec): Row {
     id_token: secretCodec.decrypt(account.id_token),
     access_token: secretCodec.decrypt(account.access_token),
     refresh_token: secretCodec.decrypt(account.refresh_token),
-    enabled: Boolean(account.enabled)
+    enabled: Boolean(account.enabled),
+    has_five_hour_quota: account.has_five_hour_quota === null || account.has_five_hour_quota === undefined
+      ? null
+      : Boolean(account.has_five_hour_quota)
   };
 }
 
@@ -683,6 +692,7 @@ function updateUsage(db: Db, id: string, usage: Row): void {
   const params = {
     quota_5h_used_percent: null,
     quota_5h_reset_at: null,
+    has_five_hour_quota: null,
     quota_7d_used_percent: null,
     quota_7d_reset_at: null,
     reset_credits_available_count: null,
@@ -697,6 +707,7 @@ function updateUsage(db: Db, id: string, usage: Row): void {
     UPDATE accounts SET
       quota_5h_used_percent = COALESCE(@quota_5h_used_percent, quota_5h_used_percent),
       quota_5h_reset_at = COALESCE(@quota_5h_reset_at, quota_5h_reset_at),
+      has_five_hour_quota = COALESCE(@has_five_hour_quota, has_five_hour_quota),
       quota_7d_used_percent = COALESCE(@quota_7d_used_percent, quota_7d_used_percent),
       quota_7d_reset_at = COALESCE(@quota_7d_reset_at, quota_7d_reset_at),
       reset_credits_available_count = COALESCE(@reset_credits_available_count, reset_credits_available_count),

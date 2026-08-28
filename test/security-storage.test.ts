@@ -80,6 +80,22 @@ test("safe storage codec encrypts account and PKCE secrets at rest and migrates 
   }
 });
 
+test("account store persists the detected five-hour quota marker", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-five-hour-marker-"));
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    const saved = store.saveAccount({ name: "Account", access_token: "access" });
+    assert.equal(saved.has_five_hour_quota, null);
+    store.updateUsage(saved.id, { has_five_hour_quota: 0 });
+    assert.equal(store.listAccounts()[0].has_five_hour_quota, false);
+    store.updateUsage(saved.id, { has_five_hour_quota: 1 });
+    assert.equal(store.listAccounts()[0].has_five_hour_quota, true);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("store retention removes expired logs and OAuth sessions", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-retention-"));
   const database = path.join(directory, "test.sqlite");

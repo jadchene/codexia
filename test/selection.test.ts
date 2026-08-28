@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScore } from "../src/main/selection.ts";
+import { pickBalancedGatewayAccount, pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScore } from "../src/main/selection.ts";
 import { createGatewayRouting, sessionIdFromHeaders, turnIdFromHeaders } from "../src/main/gateway-routing.ts";
 import { buildAuthorizeUrl } from "../src/main/auth.ts";
 import { gatewayProviderBlock, insertProviderBlockIntoConfig, nextGatewayConfig, replaceGatewayProviderBlock } from "../src/main/codex-cli-auth.ts";
@@ -572,6 +572,25 @@ test("gateway routing keeps new turns on their active session account while turn
   assert.equal(nextTurn.established, false);
   assert.equal(nextTurn.sessionPreferred, true);
   assert.equal(routing.findPreferredAccount(nextTurn, accounts).id, "a");
+});
+
+test("account selection prefers real five-hour quota while the limit is enforced", () => {
+  resetSelectionState();
+  const accounts = [
+    { id: "weekly-only", enabled: true, access_token: "a", status: "active", has_five_hour_quota: false, quota_7d_used_percent: 5 },
+    { id: "unknown", enabled: true, access_token: "b", status: "active", quota_7d_used_percent: 20 },
+    { id: "five-hour", enabled: true, access_token: "c", status: "active", has_five_hour_quota: true, quota_7d_used_percent: 80 }
+  ];
+  assert.equal(pickBalancedGatewayAccount(accounts)?.id, "five-hour");
+  assert.equal(pickBalancedGatewayAccount(accounts, ["five-hour"])?.id, "unknown");
+});
+
+test("account selection ignores the five-hour marker when the limit is ignored", () => {
+  const account = pickBalancedGatewayAccount([
+    { id: "weekly-only", enabled: true, access_token: "a", status: "active", has_five_hour_quota: false, quota_7d_used_percent: 5 },
+    { id: "five-hour", enabled: true, access_token: "b", status: "active", has_five_hour_quota: true, quota_7d_used_percent: 80 }
+  ], [], { ignoreFiveHourLimit: true });
+  assert.equal(account?.id, "weekly-only");
 });
 
 test("buildSubscriptionRoutingHint uses the model and optional service tier", () => {

@@ -2,6 +2,7 @@ type JsonObject = Record<string, any>;
 
 export interface NormalizedUsage {
   raw_usage_json: string;
+  has_five_hour_quota?: number;
   quota_5h_used_percent?: number;
   quota_5h_reset_at?: number;
   quota_7d_used_percent?: number;
@@ -60,7 +61,10 @@ export function normalizeUsagePayload(payload: any): NormalizedUsage {
   }
 
   const usage: NormalizedUsage = {
-    raw_usage_json: JSON.stringify(payload ?? {})
+    raw_usage_json: JSON.stringify(payload ?? {}),
+    ...(hasFiveHourQuota || sevenDayUsed !== null || sevenDayResetAt !== null
+      ? { has_five_hour_quota: hasFiveHourQuota ? 1 : 0 }
+      : {})
   };
   if (fiveHourUsed !== null && Number.isFinite(fiveHourUsed)) usage.quota_5h_used_percent = fiveHourUsed;
   if (fiveHourResetAt !== null) usage.quota_5h_reset_at = fiveHourResetAt;

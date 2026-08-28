@@ -26,6 +26,7 @@ test("normalizeUsagePayload extracts 5h and 7d quota windows", () => {
   assert.equal(usage.quota_7d_used_percent, 50);
   assert.equal(usage.quota_5h_reset_at, 100);
   assert.equal(usage.quota_7d_reset_at, 200);
+  assert.equal(usage.has_five_hour_quota, 1);
 });
 
 test("normalizeUsagePayload does not exhaust 7d quota for rate_limit limit_reached", () => {
@@ -72,6 +73,7 @@ test("normalizeUsagePayload uses the 7d quota when the 5h window is absent", () 
   assert.equal(usage.quota_5h_reset_at, 200);
   assert.equal(usage.quota_7d_used_percent, 12);
   assert.equal(usage.quota_7d_reset_at, 200);
+  assert.equal(usage.has_five_hour_quota, 0);
 });
 
 test("normalizeUsagePayload ignores empty quota windows instead of writing zero", () => {
@@ -93,6 +95,7 @@ test("normalizeUsagePayload ignores empty quota windows instead of writing zero"
   assert.equal("quota_5h_reset_at" in usage, false);
   assert.equal("quota_7d_used_percent" in usage, false);
   assert.equal("quota_7d_reset_at" in usage, false);
+  assert.equal("has_five_hour_quota" in usage, false);
 });
 
 test("external API channels report both quota windows as fully available", () => {

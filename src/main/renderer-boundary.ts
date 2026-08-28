@@ -65,7 +65,14 @@ const ENUM_SETTINGS = {
 
 export function publicAccount(account: Record<string, unknown> | null | undefined): PublicAccount | null | undefined {
   if (!account) return account;
-  const { id_token: _idToken, access_token, refresh_token, raw_usage_json: _rawUsage, ...safe } = account;
+  const {
+    id_token: _idToken,
+    access_token,
+    refresh_token,
+    raw_usage_json: _rawUsage,
+    has_five_hour_quota: _hasFiveHourQuota,
+    ...safe
+  } = account;
   return {
     ...(safe as unknown as Omit<PublicAccount, "has_access_token" | "has_refresh_token">),
     has_access_token: Boolean(access_token),
