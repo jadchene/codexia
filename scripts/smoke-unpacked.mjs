@@ -350,17 +350,28 @@ function verifyPackageResources(applicationRoot) {
   const appRoot = path.join(applicationRoot, "resources", "app");
   const rendererRoot = path.join(appRoot, "dist", "renderer");
   const html = fs.readFileSync(path.join(rendererRoot, "index.html"), "utf8");
+  const mainBundle = fs.readFileSync(path.join(appRoot, "dist", "main", "main.mjs"), "utf8");
   const packagedFiles = listFiles(appRoot).map((file) => path.relative(appRoot, file).replaceAll("\\", "/"));
   const forbidden = packagedFiles.filter((file) => /(^|\/)(?:test|tests|fixtures|backups)(\/|$)|\.(?:sqlite|db|bak|env)$/i.test(file));
   if (forbidden.length > 0) throw new Error(`Packaged application contains forbidden files: ${forbidden.join(", ")}`);
   if (/(?:src|href)=["']https?:\/\//i.test(html)) throw new Error("Packaged renderer references a remote script, style, font, or image.");
-  const fonts = packagedFiles.filter((file) => /\.(?:woff2?|ttf|otf)$/i.test(file));
-  if (fonts.length === 0) throw new Error("Packaged renderer is missing its local font assets.");
-  if (!fonts.some((file) => file.includes("MiSans-Medium"))) throw new Error("Packaged renderer is missing MiSans Medium.");
+  const rendererScripts = listFiles(rendererRoot)
+    .filter((file) => file.endsWith(".js"))
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("\n");
+  if (!mainBundle.includes("app:listSystemFonts") || !mainBundle.includes("CurrentVersion\\\\Fonts")) {
+    throw new Error("Packaged main process is missing system font discovery.");
+  }
+  if (!rendererScripts.includes("appearance_font_family") || !rendererScripts.includes("选择系统字体")) {
+    throw new Error("Packaged renderer is missing the system font selector.");
+  }
+  if (packagedFiles.some((file) => file.includes("MiSans-Medium"))) {
+    throw new Error("Packaged application still contains the obsolete bundled MiSans font.");
+  }
   if (!fs.existsSync(path.join(appRoot, "node_modules", "ws", "index.js"))) {
     throw new Error("Packaged application is missing the externalized ws dependency.");
   }
-  return { fileCount: packagedFiles.length, localFontCount: fonts.length, externalizedWs: true };
+  return { fileCount: packagedFiles.length, systemFontSelection: true, externalizedWs: true };
 }
 
 function listFiles(directory) {
