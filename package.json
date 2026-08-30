@@ -30,7 +30,7 @@
     "typecheck": "tsc --noEmit",
     "build:main": "tsup --config tsup.main.config.ts && node scripts/check-main-bundle.mjs",
     "build:preload": "tsup --config tsup.preload.config.ts",
-    "build:renderer": "vite build",
+    "build:renderer": "node scripts/clean-renderer.mjs && vite build",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "pack:unpacked": "npm run build && node scripts/pack-unpacked.mjs",
     "smoke:unpacked": "node scripts/smoke-unpacked.mjs",

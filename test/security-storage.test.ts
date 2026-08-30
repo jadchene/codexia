@@ -278,10 +278,12 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
   assert.deepEqual(editableSettingsPatch({
     appearance_theme: "dark",
     appearance_density: "compact",
+    appearance_font_family: "Example Sans",
     navigation_collapsed: "true"
   }), {
     appearance_theme: "dark",
     appearance_density: "compact",
+    appearance_font_family: "Example Sans",
     navigation_collapsed: "true"
   });
   const safeSettings = publicSettings({
@@ -296,6 +298,7 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
   assert.equal(safeSettings.gateway_api_key_configured, "true");
   assert.match(safeSettings.gateway_api_key_fingerprint, /^[a-f0-9]{12}$/);
   assert.throws(() => editableSettingsPatch({ appearance_theme: "midnight" }), /取值无效/);
+  assert.throws(() => editableSettingsPatch({ appearance_font_family: `Bad\nFont` }), /字体名称格式无效/);
   assert.deepEqual(editableSettingsPatch({ codex_config_use_openai_base_url: "false" }), { codex_config_use_openai_base_url: "false" });
   assert.throws(() => editableSettingsPatch({ codex_config_use_openai_base_url: "maybe" }), /取值无效/);
   assert.deepEqual(editableSettingsPatch({ auto_review_upstream_model: "deepseek-model" }), {

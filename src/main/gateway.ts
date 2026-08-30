@@ -58,9 +58,9 @@ import {
   sanitizeHeaders
 } from "./api-debug-log.ts";
 
-const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 64 * 1024 * 1024;
+const DEFAULT_REQUEST_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_ERROR_BODY_LIMIT_BYTES = 1024 * 1024;
-const DEFAULT_COMPACTION_RESPONSE_LIMIT_BYTES = 64 * 1024 * 1024;
+const DEFAULT_COMPACTION_RESPONSE_LIMIT_BYTES = 32 * 1024 * 1024;
 const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_UNARY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -82,12 +82,23 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     onChanged: hooks.onApiDebugModeChanged
   });
   const apiDebugInitialization = apiDebugMode.initialize();
+  const routingPersistence = createDebouncedPersistence(
+    (value) => store.saveSettings({ gateway_affinity_state_json: value }),
+    Number(hooks.routingPersistenceDebounceMs ?? 500),
+    (error) => store.addAppLog?.({
+      level: "error",
+      scope: "gateway",
+      action: "persist-routing",
+      status: "failed",
+      message: `保存会话路由状态失败：${gatewayErrorMessage(error)}`
+    })
+  );
   const routing = createGatewayRouting({
     snapshot: parseAffinitySnapshot(store.getSettings().gateway_affinity_state_json),
     getIgnoreFiveHourLimit: () => store.getSettings().ignore_five_hour_limit === "true",
     getSessionAffinityTtlMs: () => positiveSetting(store.getSettings().gateway_session_affinity_ttl_hours, 168) * 60 * 60 * 1000,
     onChanged(snapshot: Dynamic) {
-      store.saveSettings({ gateway_affinity_state_json: JSON.stringify(snapshot) });
+      routingPersistence.schedule(JSON.stringify(snapshot));
     }
   });
   let websocketGateway: Dynamic = null;
@@ -164,6 +175,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
 
   async function stop() {
     if (!server) {
+      routingPersistence.flush();
       state = { running: false, url: "", error: "" };
       return status();
     }
@@ -188,6 +200,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     });
     await Promise.race([closePromise, forcePromise]);
     await closingWebsocketGateway?.close();
+    routingPersistence.flush();
     if (forceTimer) clearTimeout(forceTimer);
     if (forcedSocketCount > 0 && store.addAppLog) {
       store.addAppLog({
@@ -221,6 +234,37 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
   }
 
   return { start, stop, status, setApiDebugLogging, shutdownApiDebugLogging };
+}
+
+export function createDebouncedPersistence(
+  write: (value: string) => void,
+  delayMs: number,
+  onError: (error: unknown) => void
+) {
+  let pending: string | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (pending === null) return;
+    const value = pending;
+    pending = null;
+    try {
+      write(value);
+    } catch (error) {
+      onError(error);
+    }
+  };
+  return {
+    schedule(value: string) {
+      pending = value;
+      if (!Number.isFinite(delayMs) || delayMs <= 0) return flush();
+      if (timer) return;
+      timer = setTimeout(flush, delayMs);
+      timer.unref?.();
+    },
+    flush
+  };
 }
 
 async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authService: Dynamic, hooks: Dynamic, runtime: Dynamic = {}) {

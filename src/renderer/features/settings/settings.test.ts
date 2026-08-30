@@ -5,6 +5,7 @@ import { createElement } from "react";
 import {
   APPEARANCE_CHANGED_EVENT,
   applyAppearancePreferences,
+  appearanceFontStack,
   appearanceFromSettings,
   loadAppearancePreferences
 } from "../../app/appearance";
@@ -17,16 +18,21 @@ describe("settings appearance and display units", () => {
   it("persists normalized theme and density while notifying the provider", () => {
     const listener = vi.fn();
     window.addEventListener(APPEARANCE_CHANGED_EVENT, listener);
-    applyAppearancePreferences({ theme: "dark", density: "compact" });
+    applyAppearancePreferences({ theme: "dark", density: "compact", fontFamily: "Inter" });
 
-    expect(loadAppearancePreferences()).toEqual({ theme: "dark", density: "compact" });
+    expect(loadAppearancePreferences()).toEqual({ theme: "dark", density: "compact", fontFamily: "Inter" });
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener(APPEARANCE_CHANGED_EVENT, listener);
   });
 
   it("normalizes unsupported stored appearance values", () => {
     expect(appearanceFromSettings({ appearance_theme: "unknown", appearance_density: "wide" }))
-      .toEqual({ theme: "system", density: "comfortable" });
+      .toEqual({ theme: "system", density: "comfortable", fontFamily: "system" });
+  });
+
+  it("quotes a selected system font safely and keeps platform fallbacks", () => {
+    expect(appearanceFontStack("Example Sans")).toBe('"Example Sans", system-ui, sans-serif');
+    expect(appearanceFontStack('Example "UI"')).toBe('"Example \\"UI\\"", system-ui, sans-serif');
   });
 
   it("round-trips user-facing seconds and MiB to persisted integer values", () => {

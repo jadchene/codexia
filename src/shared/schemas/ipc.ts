@@ -35,6 +35,7 @@ const logQuery = z.object({
 }).strict();
 export const ipcArgumentSchemas = {
   "app:bootstrap": empty,
+  "app:listSystemFonts": empty,
   "settings:save": z.tuple([z.record(z.string(), z.unknown())]),
   "accounts:setEnabled": z.tuple([id, z.boolean()]),
   "accounts:delete": z.tuple([id]),

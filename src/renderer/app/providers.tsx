@@ -8,6 +8,7 @@ import zhCN from "antd/locale/zh_CN";
 import { useEffect, useMemo, useState } from "react";
 import {
   APPEARANCE_CHANGED_EVENT,
+  appearanceFontStack,
   loadAppearancePreferences,
   type AppearancePreferences
 } from "./appearance";
@@ -56,7 +57,7 @@ export const AppProviders = ({ children }: PropsWithChildren) => {
             colorWarning: "#d97706",
             colorError: "#dc2626",
             borderRadius: 12,
-            fontFamily: '"MiSans", "Microsoft YaHei UI", "PingFang SC", sans-serif'
+            fontFamily: appearanceFontStack(appearance.fontFamily)
           },
           components: {
             Layout: { headerBg: "transparent", siderBg: "transparent" },
@@ -64,7 +65,12 @@ export const AppProviders = ({ children }: PropsWithChildren) => {
           }
         }}
       >
-        <div className="v1-app-root" data-theme={isDark ? "dark" : "light"} data-density={appearance.density}>
+        <div
+          className="v1-app-root"
+          data-theme={isDark ? "dark" : "light"}
+          data-density={appearance.density}
+          style={{ fontFamily: appearanceFontStack(appearance.fontFamily) }}
+        >
           <App>{children}</App>
         </div>
       </ConfigProvider>

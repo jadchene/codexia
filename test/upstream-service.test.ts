@@ -72,6 +72,18 @@ test("model IDs are globally unique across channels", () => {
   } finally { fixture.close(); }
 });
 
+test("editing an upstream cannot retain encrypted credentials while switching to remote HTTP", () => {
+  const fixture = createFixture();
+  try {
+    const service = createUpstreamService({ db: fixture.store.db, secretCodec: codec });
+    const saved = service.save({ ...input("Secure API", "secure-model"), apiKey: "secret" });
+    assert.throws(() => service.save({
+      ...input("Secure API", "secure-model"), id: saved.id, baseUrl: "http://api.example.test/v1"
+    }), /远程上游必须使用 HTTPS/);
+    assert.equal(service.getRuntime(saved.id).baseUrl, "https://api.example.test/v1");
+  } finally { fixture.close(); }
+});
+
 test("gateway model options exclude the subscription pool and keep only third-party channel models", () => {
   const fixture = createFixture();
   try {

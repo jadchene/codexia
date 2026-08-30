@@ -28,4 +28,27 @@ describe("saveResponsesApiUpstreamSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("requires HTTPS for credential-bearing remote upstreams but permits loopback HTTP", () => {
+    const common = {
+      name: "Local API", enabled: true, supportsWebSocket: false,
+      balanceQueryType: "none", modelCatalogJson, modelPricing: {}
+    } as const;
+    expect(saveResponsesApiUpstreamSchema.safeParse({
+      ...common, baseUrl: "http://api.example.com/v1", apiKey: "secret"
+    }).success).toBe(false);
+    expect(saveResponsesApiUpstreamSchema.safeParse({
+      ...common, baseUrl: "http://127.0.0.1:8080/v1", apiKey: "secret"
+    }).success).toBe(true);
+  });
+
+  it("rejects credential-like names in plaintext public headers", () => {
+    const result = saveResponsesApiUpstreamSchema.safeParse({
+      name: "Primary API", baseUrl: "https://api.example.com/v1", enabled: true,
+      supportsWebSocket: false, balanceQueryType: "none", modelCatalogJson, modelPricing: {},
+      publicHeaders: { "X-API-Key": "must-not-be-plaintext" }
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0]?.message).toContain("加密请求头");
+  });
 });

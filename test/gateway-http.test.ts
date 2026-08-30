@@ -1407,7 +1407,7 @@ async function startHarness(upstreamHandler, settingOverrides = {}, hooks = {}) 
     addTokenLog: (entry) => tokenLogs.push(entry),
     addAppLog: (entry) => appLogs.push(entry)
   };
-  const gateway = createGateway(store, null, hooks);
+  const gateway = createGateway(store, null, { routingPersistenceDebounceMs: 0, ...hooks });
   await gateway.start();
   return {
     gateway,

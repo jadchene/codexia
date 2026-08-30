@@ -20,7 +20,7 @@ const EDITABLE_SETTING_KEYS = new Set([
   "debug_api_logging",
   "auto_review_upstream_model",
   "billing_currency", "request_log_retention_days", "app_log_retention_days",
-  "appearance_theme", "appearance_density", "navigation_collapsed"
+  "appearance_theme", "appearance_density", "appearance_font_family", "navigation_collapsed"
 ]);
 
 const INTEGER_SETTINGS: Record<string, readonly [number, number]> = {
@@ -108,6 +108,9 @@ export function editableSettingsPatch(patch: unknown): Settings {
     if (integerRange) validateIntegerSetting(key, text, integerRange);
     if (enumValues && !enumValues.includes(text)) throw new Error(`设置项取值无效：${key}`);
     if (key === "gateway_api_key" && /[\u0000-\u001f\u007f]/.test(text)) throw new Error("API Key 不能包含控制字符。");
+    if (key === "appearance_font_family" && (text.length > 200 || /[\u0000-\u001f\u007f]/.test(text))) {
+      throw new Error("字体名称格式无效。");
+    }
     result[key] = text;
   }
   validateHost("gateway_host", result.gateway_host);

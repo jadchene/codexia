@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isSensitiveHeaderName, usesInsecureRemoteTransport } from "../../shared/security/upstream.ts";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   BalanceQueryType,
@@ -250,6 +251,16 @@ function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveRespo
   const existing = input.id ? requireUpstream(db, input.id) : null;
   if (existing?.kind === "chatgpt_subscription_pool") {
     throw upstreamError("BUILTIN_UPSTREAM_READ_ONLY", "内置订阅账号池不能通过 API 上游表单修改。");
+  }
+  const retainsApiKey = Boolean(input.apiKey || existing?.api_key_encrypted);
+  const retainsSecretHeaders = input.secretHeaders === undefined
+    ? Boolean(existing?.custom_headers_encrypted_json)
+    : Object.keys(input.secretHeaders).length > 0;
+  if ((retainsApiKey || retainsSecretHeaders) && usesInsecureRemoteTransport(input.baseUrl)) {
+    throw upstreamError(
+      "INSECURE_UPSTREAM_TRANSPORT",
+      "携带 API Key 或机密请求头的远程上游必须使用 HTTPS；HTTP 仅允许 localhost 或回环地址。"
+    );
   }
   const id = String(existing?.id || randomUUID());
   assertUniqueModelOwners(db, id, models.map((model) => model.slug));
@@ -565,7 +576,7 @@ function normalizeInput(input: SaveResponsesApiUpstreamInput) {
     supportsWebSocket: Boolean(input.supportsWebSocket),
     compactAdaptEnabled: input.compactAdaptEnabled !== false,
     balanceQueryType: balanceQueryType(input.balanceQueryType),
-    publicHeaders: normalizeHeaderMap(input.publicHeaders, "公开请求头"),
+    publicHeaders: normalizeHeaderMap(input.publicHeaders, "公开请求头", false),
     secretHeaders: input.secretHeaders === undefined ? undefined : normalizeHeaderMap(input.secretHeaders, "机密请求头"),
     modelCatalogJson: String(input.modelCatalogJson || "").trim(),
     modelPricing: isObject(input.modelPricing) ? input.modelPricing as Record<string, ModelPricing> : {}
@@ -634,7 +645,7 @@ function normalizeHttpUrl(value: unknown, label: string): string {
 
 const FORBIDDEN_HEADERS = new Set(["authorization", "content-length", "cookie", "host", "connection", "upgrade", "chatgpt-account-id"]);
 
-function normalizeHeaderMap(value: unknown, label: string): Record<string, string> {
+function normalizeHeaderMap(value: unknown, label: string, allowSensitive = true): Record<string, string> {
   if (value === undefined || value === null) return {};
   if (!isObject(value)) throw upstreamError("INVALID_UPSTREAM_HEADERS", `${label}必须是对象。`);
   const result: Record<string, string> = {};
@@ -642,6 +653,9 @@ function normalizeHeaderMap(value: unknown, label: string): Record<string, strin
     const name = rawName.trim();
     if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || FORBIDDEN_HEADERS.has(name.toLowerCase())) {
       throw upstreamError("INVALID_UPSTREAM_HEADERS", `请求头 ${name || rawName} 无效或由网关管理。`);
+    }
+    if (!allowSensitive && isSensitiveHeaderName(name)) {
+      throw upstreamError("SENSITIVE_PUBLIC_HEADER", `请求头 ${name} 可能包含凭据，请改放到加密请求头。`);
     }
     const text = String(rawValue ?? "").trim();
     if (!text || text.length > 4096 || /[\r\n]/.test(text)) throw upstreamError("INVALID_UPSTREAM_HEADERS", `请求头 ${name} 的值无效。`);

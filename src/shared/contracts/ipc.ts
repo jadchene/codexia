@@ -35,6 +35,7 @@ interface ApplyAuthResult { providerChanged?: boolean; providerRemoved?: boolean
 
 export type IpcContract = {
   "app:bootstrap": IpcSpec<[], BootstrapData>;
+  "app:listSystemFonts": IpcSpec<[], string[]>;
   "settings:save": IpcSpec<[patch: Record<string, unknown>], Settings>;
   "accounts:setEnabled": IpcSpec<[id: string, enabled: boolean], PublicAccount[]>;
   "accounts:delete": IpcSpec<[id: string], PublicAccount[]>;

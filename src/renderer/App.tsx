@@ -9,6 +9,8 @@ import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shar
 import type { RuntimePaths, ServiceStatus, Settings } from "../shared/contracts/settings";
 import { currentLogQuery, moveLogQueryToToday } from "./lib/log-query";
 import { useDayRollover } from "./lib/use-day-rollover";
+import { clientReachableUrl, localServiceUrl } from "./lib/service-url";
+import { settingsRestartReminder } from "./lib/settings-restart";
 
 const UpstreamsPage = React.lazy(() => import("./features/upstreams/UpstreamsPage").then((module) => ({ default: module.UpstreamsPage })));
 const SettingsPage = React.lazy(() => import("./features/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
@@ -248,19 +250,13 @@ function App() {
     };
   }, [loginId]);
 
-  const gatewayBase = `${gateway.url || `http://${settings.gateway_host || "localhost"}:${settings.gateway_port || "8436"}`}/v1`;
-  const mcpGatewayUrl = mcpGateway.url || mcpGatewayBaseUrl(settings);
+  const gatewayBase = `${clientReachableUrl(gateway.url || localServiceUrl("http", settings.gateway_host, settings.gateway_port || "8436"))}/v1`;
+  const mcpGatewayUrl = clientReachableUrl(mcpGateway.url || mcpGatewayBaseUrl(settings));
 
   async function saveSettings(next: Settings): Promise<Settings> {
     try {
       const quotaModeChanged = next.ignore_five_hour_limit !== settings.ignore_five_hour_limit;
-      const restartRequired = (gateway.running || mcpGateway.running) && Object.entries(next).some(
-        ([key, value]) => value !== settings[key]
-          && !key.startsWith("appearance_")
-          && key !== "navigation_collapsed"
-          && key !== "debug_api_logging"
-      );
-      const restartReminder = restartRequired ? "，请重启相关服务使配置生效" : "";
+      const restartReminder = settingsRestartReminder(settings, next, gateway.running, mcpGateway.running);
       const saved = await api.saveSettings(next);
       setSettings(saved);
       applyAppearancePreferences(appearanceFromSettings(saved));
@@ -635,7 +631,7 @@ function mcpGatewayBaseUrl(settings: Settings = {}): string {
   const host = cleanMcpGatewayText(settings.mcp_gateway_host);
   const port = cleanMcpGatewayPort(settings.mcp_gateway_port);
   if (!host || !port) return "";
-  return `http://${host}:${port}${cleanMcpGatewayPath(settings.mcp_gateway_path)}`;
+  return localServiceUrl("http", host, port, cleanMcpGatewayPath(settings.mcp_gateway_path));
 }
 
 function mcpGatewayCommand(settings: Settings = {}): string {

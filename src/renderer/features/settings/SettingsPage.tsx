@@ -88,6 +88,8 @@ export const SettingsPage = ({
   const [activeSection, setActiveSection] = useState("general");
   const [dirty, setDirty] = useState(false);
   const [autoReviewModelOptions, setAutoReviewModelOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [fontsLoading, setFontsLoading] = useState(false);
 
   useEffect(() => {
     form.setFieldsValue(settingsToForm(settings));
@@ -139,8 +141,23 @@ export const SettingsPage = ({
     setDirty(true);
     applyAppearancePreferences(appearanceFromSettings({
       appearance_theme: values.appearance_theme,
-      appearance_density: values.appearance_density
+      appearance_density: values.appearance_density,
+      appearance_font_family: values.appearance_font_family
     }));
+  };
+
+  const loadSystemFonts = async (): Promise<void> => {
+    if (fontsLoading || systemFonts.length > 0) return;
+    setFontsLoading(true);
+    try {
+      const fonts = await window.codexGateway.listSystemFonts();
+      setSystemFonts(fonts);
+      if (fonts.length === 0) onMessage("未能读取系统字体列表，将继续使用系统默认字体。");
+    } catch (error) {
+      onMessage(`读取系统字体失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setFontsLoading(false);
+    }
   };
 
   const discard = (): void => {
@@ -168,7 +185,7 @@ export const SettingsPage = ({
           </Form.Item>
         </div>
       </SettingsSection>
-      <SettingsSection title="外观" description="选择界面主题和显示密度。">
+      <SettingsSection title="外观" description="选择界面主题、显示密度和本机已安装字体。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="appearance_theme" label="主题">
             <Segmented block options={[
@@ -182,6 +199,16 @@ export const SettingsPage = ({
               { label: "舒适", value: "comfortable" },
               { label: "紧凑", value: "compact" }
             ]} />
+          </Form.Item>
+          <Form.Item name="appearance_font_family" label="界面字体" extra="打开下拉框时读取当前系统已安装字体。">
+            <Select
+              showSearch
+              loading={fontsLoading}
+              onOpenChange={(open) => { if (open) void loadSystemFonts(); }}
+              optionFilterProp="label"
+              options={fontOptions(systemFonts, String(settings.appearance_font_family || "system"))}
+              placeholder="选择系统字体"
+            />
           </Form.Item>
         </div>
       </SettingsSection>
@@ -508,6 +535,7 @@ const NumberField = ({
 export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => {
   const values = { ...settings } as SettingsFormValues;
   values.gateway_api_key = "";
+  values.appearance_font_family = settings.appearance_font_family || "system";
   values.gateway_session_affinity_ttl_hours = settings.gateway_session_affinity_ttl_hours || "168";
   for (const [formKey, settingKey] of Object.entries(SECOND_FIELDS)) {
     values[formKey] = formatNumber(Number(settings[settingKey] || 0) / 1000);
@@ -565,6 +593,15 @@ const formatNumber = (value: number): string => (
 const isLoopbackHost = (host: unknown): boolean => {
   const value = String(host || "").trim().toLowerCase();
   return value === "localhost" || value === "127.0.0.1" || value === "::1" || value === "[::1]";
+};
+
+const fontOptions = (fonts: string[], current: string): Array<{ value: string; label: string }> => {
+  const installed = new Set(fonts);
+  const options = [{ value: "system", label: "跟随系统" }];
+  if (current && current !== "system" && !installed.has(current)) {
+    options.push({ value: current, label: `${current}（当前字体未检测到）` });
+  }
+  return options.concat(fonts.map((font) => ({ value: font, label: font })));
 };
 
 const generateApiKey = (): string => {

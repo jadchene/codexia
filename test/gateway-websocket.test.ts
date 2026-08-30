@@ -1314,6 +1314,7 @@ async function startHarness(options, settingOverrides = {}) {
     addAppLog: (entry) => appLogs.push(entry)
   };
   const gateway = createGateway(store, null, {
+    routingPersistenceDebounceMs: 0,
     readCurrentCodexModel: () => "",
     ...(options.hooks || {})
   });

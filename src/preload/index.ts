@@ -42,6 +42,7 @@ const onStatusChanged = (channel: string, callback: StatusChangedListener): (() 
 
 const api = {
   bootstrap: (): Promise<BootstrapData> => invoke("app:bootstrap"),
+  listSystemFonts: (): Promise<string[]> => invoke("app:listSystemFonts"),
   saveSettings: (patch: Record<string, unknown>): Promise<Settings> => invoke("settings:save", patch),
   setAccountEnabled: (id: string, enabled: boolean): Promise<PublicAccount[]> => invoke("accounts:setEnabled", id, enabled),
   deleteAccount: (id: string): Promise<PublicAccount[]> => invoke("accounts:delete", id),

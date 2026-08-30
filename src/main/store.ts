@@ -11,7 +11,7 @@ type Db = any;
 type Row = Record<string, any>;
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-const LATEST_SCHEMA_VERSION = 4;
+const LATEST_SCHEMA_VERSION = 5;
 const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite(?:\.enc)?$/;
 const PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
@@ -78,6 +78,7 @@ export function createStore(options: StoreOptions = {}): Store {
     migrateV2(db, options.migrationHooks);
     migrateV3(db, options.migrationHooks);
     migrateV4(db, options.migrationHooks);
+    migrateV5(db, options.migrationHooks);
     migrateSecrets(db, secretCodec);
   } catch (error) {
     db.close();
@@ -210,14 +211,14 @@ function migrate(db: Db): void {
     gateway_stream_idle_timeout_ms: "120000",
     gateway_unary_timeout_ms: "300000",
     gateway_shutdown_grace_ms: "2000",
-    gateway_request_body_limit_bytes: "67108864",
+    gateway_request_body_limit_bytes: "16777216",
     gateway_error_body_limit_bytes: "1048576",
-    gateway_compaction_response_limit_bytes: "67108864",
+    gateway_compaction_response_limit_bytes: "33554432",
     gateway_max_concurrent_requests: "16",
-    gateway_websocket_max_connections: "128",
-    gateway_websocket_max_payload_bytes: "134217728",
-    gateway_websocket_buffer_high_water_bytes: "4194304",
-    gateway_websocket_pending_queue_limit_bytes: "4194304",
+    gateway_websocket_max_connections: "64",
+    gateway_websocket_max_payload_bytes: "33554432",
+    gateway_websocket_buffer_high_water_bytes: "2097152",
+    gateway_websocket_pending_queue_limit_bytes: "2097152",
     gateway_websocket_idle_timeout_ms: "120000",
     gateway_websocket_reject_http_only_model_upgrade: "true",
     gateway_quota_cooldown_ms: "60000",
@@ -404,6 +405,34 @@ function migrateV4(db: Db, hooks: MigrationHooks = {}): void {
   }
 }
 
+function migrateV5(db: Db, hooks: MigrationHooks = {}): void {
+  if (schemaVersion(db) >= 5) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created ON request_logs(upstream_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_request_logs_status_created ON request_logs(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_request_logs_session_created ON request_logs(session_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_app_logs_level_created ON app_logs(level, created_at);
+      CREATE INDEX IF NOT EXISTS idx_app_logs_scope_created ON app_logs(scope, created_at);
+    `);
+    replaceDefaultSetting(db, "gateway_request_body_limit_bytes", "67108864", "16777216");
+    replaceDefaultSetting(db, "gateway_compaction_response_limit_bytes", "67108864", "33554432");
+    replaceDefaultSetting(db, "gateway_websocket_max_connections", "128", "64");
+    replaceDefaultSetting(db, "gateway_websocket_max_payload_bytes", "134217728", "33554432");
+    replaceDefaultSetting(db, "gateway_websocket_buffer_high_water_bytes", "4194304", "2097152");
+    replaceDefaultSetting(db, "gateway_websocket_pending_queue_limit_bytes", "4194304", "2097152");
+    insertDefaultSetting(db, "appearance_font_family", "system");
+    hooks.beforeMigrationCommit?.({ db, version: 5 });
+    db.prepare("INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(5, now());
+    db.exec("PRAGMA user_version = 5");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function schemaVersion(db: Db): number {
   return Number(db.prepare("PRAGMA user_version").get()?.user_version || 0);
 }
@@ -519,6 +548,10 @@ function validateEncryptedMigrationBackup(file: string, secretCodec: SecretCodec
 
 function insertDefaultSetting(db: Db, key: string, value: string): void {
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+}
+
+function replaceDefaultSetting(db: Db, key: string, previous: string, next: string): void {
+  db.prepare("UPDATE settings SET value = ? WHERE key = ? AND value = ?").run(next, key, previous);
 }
 
 function randomGatewayApiKey(): string {
@@ -997,6 +1030,7 @@ function runMaintenance(db: Db, targetDataDir: string): { requestLogsDeleted: nu
     .run(current - 7 * 86400);
   removeExpiredMigrationBackups(targetDataDir);
   db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+  db.exec("PRAGMA optimize");
   return {
     requestLogsDeleted: Number(requestResult.changes || 0),
     appLogsDeleted: Number(appResult.changes || 0),

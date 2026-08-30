@@ -22,7 +22,7 @@ test("migrations create a verified backup, model pricing storage, and remove obs
       dataDir: fixture.directory,
       dbPath: fixture.database
     });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 4);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 5);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     const compactColumn = store.db.prepare("PRAGMA table_info(upstreams)").all()
       .find((column) => column.name === "compact_adapt_enabled");
@@ -38,6 +38,12 @@ test("migrations create a verified backup, model pricing storage, and remove obs
       }
     );
     assert.equal(store.db.prepare("PRAGMA table_info(upstream_models)").all().some((column) => column.name === "pricing_json"), true);
+    assert.equal(
+      store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_request_logs_upstream_created'").get()?.name,
+      "idx_request_logs_upstream_created"
+    );
+    assert.equal(store.getSettings().gateway_websocket_max_connections, "64");
+    assert.equal(store.getSettings().appearance_font_family, "system");
     assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_mappings'").get(), undefined);
     assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'routing_policies'").get(), undefined);
     assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'codex_sessions'").get(), undefined);
@@ -76,7 +82,7 @@ test("current migration upgrades an existing v1 database with its own verified b
   const fixture = createV1Fixture();
   try {
     const store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 4);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 5);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     store.db.close();
     const backups = backupFiles(fixture.directory);

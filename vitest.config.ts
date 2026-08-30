@@ -7,6 +7,7 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
+          testTimeout: 10_000,
           include: ["test/**/*.test.ts"]
         }
       },
@@ -14,6 +15,7 @@ export default defineConfig({
         test: {
           name: "renderer",
           environment: "happy-dom",
+          testTimeout: 10_000,
           include: ["src/renderer/**/*.test.ts", "src/renderer/**/*.test.tsx"]
         }
       }

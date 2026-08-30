@@ -2,6 +2,7 @@ type Dynamic = any;
 
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import fs from "node:fs";
+import type { Server } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserDataDir } from "./paths.ts";
@@ -10,6 +11,7 @@ import { acquireSingleInstanceChannel, closeSingleInstanceChannel } from "./sing
 import { createStore } from "./store.ts";
 import { createSecretCodec } from "./secret-codec.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "./renderer-boundary.ts";
+import { listSystemFontFamilies } from "./system-fonts.ts";
 import { createUsageRefreshCoordinator } from "./usage-refresh-coordinator.ts";
 import { startStartupUsageRefresh } from "./startup-usage-refresh.ts";
 import { MAX_USAGE_RESET_REFRESH_ATTEMPTS, usageResetRefreshDelay } from "./usage-reset-refresh.ts";
@@ -52,21 +54,21 @@ const hasSingleInstanceLock = runtimeProfile.useSingleInstance
   : true;
 if (!hasSingleInstanceLock) app.quit();
 
-let mainWindow: Dynamic;
-let store: Dynamic;
-let gateway: Dynamic;
-let mcpGateway: Dynamic;
-let authService: Dynamic;
-let upstreamService: Dynamic;
-let modelCatalogService: Dynamic;
-let tray: Dynamic;
+let mainWindow: BrowserWindow | null = null;
+let store!: ReturnType<typeof createStore>;
+let gateway!: ReturnType<typeof createGateway>;
+let mcpGateway!: ReturnType<typeof createMcpGatewayService>;
+let authService!: ReturnType<typeof createAuthService>;
+let upstreamService!: ReturnType<typeof createUpstreamService>;
+let modelCatalogService!: ReturnType<typeof createCodexModelCatalogService>;
+let tray: Tray | null = null;
 let creatingTray = false;
-let usageRefreshTimer: Dynamic = null;
-let usageRefreshCoordinator: Dynamic = null;
-let maintenanceTimer: Dynamic = null;
-let singleInstanceServer: Dynamic = null;
-const usageResetTimers = new Map<Dynamic, Dynamic>();
-const usageResetRefreshAttempts = new Map<Dynamic, { resetAt: number; count: number }>();
+let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
+let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+let singleInstanceServer: Server | null = null;
+const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
+const usageResetRefreshAttempts = new Map<string, { resetAt: number; count: number }>();
 let shuttingDown = false;
 let runtimeReady = false;
 let showWindowWhenReady = false;
@@ -91,8 +93,8 @@ async function createWindow() {
   const windowOptions = {
     width: bounds.width || 1180,
     height: bounds.height || 760,
-    minWidth: 980,
-    minHeight: 640,
+    minWidth: 760,
+    minHeight: 560,
     icon: await loadAppIcon(32),
     title: runtimeProfile.windowTitle,
     webPreferences: {
@@ -159,7 +161,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   scheduleMaintenance();
   upstreamService = createUpstreamService({ db: store.db, secretCodec });
   usageRefreshCoordinator = createUsageRefreshCoordinator({
-    listAccounts: () => store.listAccounts(),
+    listAccounts: () => store.listAccounts() as Parameters<typeof createUsageRefreshCoordinator>[0]["listAccounts"] extends () => infer Accounts ? Accounts : never,
     refreshAccount: refreshUsage,
     listBalanceUpstreams: () => upstreamService.list().filter(
       (upstream: Dynamic) => upstream.kind === "responses_api" && upstream.enabled && upstream.balanceQueryType !== "none"
@@ -174,7 +176,11 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   applyStartupLaunchSettings(store.getSettings());
   await waitForStartupDelay();
   if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) syncDetectedCodexAuthMode();
-  authService = createAuthService(store, () => gateway.start(), refreshUsage);
+  authService = createAuthService(
+    store as unknown as Parameters<typeof createAuthService>[0],
+    () => gateway.start(),
+    async (id) => await refreshUsage(id) as Awaited<ReturnType<NonNullable<Parameters<typeof createAuthService>[2]>>>
+  );
   modelCatalogService = createCodexModelCatalogService({
     db: store.db,
     dataDir: store.paths.dataDir,
@@ -403,6 +409,7 @@ function registerIpc() {
     mcpGateway: mcpGateway.status(),
     paths: store.paths
   }));
+  handleIpc("app:listSystemFonts", () => listSystemFontFamilies());
   handleIpc("settings:save", async (_event, patch) => {
     const editablePatch = editableSettingsPatch(patch);
     if (!editablePatch.gateway_api_key) delete editablePatch.gateway_api_key;
@@ -523,7 +530,7 @@ function registerIpc() {
   handleIpc("codexAuth:applyAccountMode", (_event, accountId) => {
     const account = store.listAccounts().find((item: Dynamic) => item.id === accountId);
     if (!account) throw new Error("账号不存在。");
-    const result = applyAccountMode(account, codexAccessOptions(runtimeProfile));
+    const result = applyAccountMode(account as Parameters<typeof applyAccountMode>[0], codexAccessOptions(runtimeProfile));
     store.saveSettings({ codex_auth_mode: "account", codex_selected_account_id: account.id });
     store.addAppLog({ scope: "auth", action: "apply-account", status: "success", message: `已写入 Codex 账号模式认证：${account.name}` });
     return result;
@@ -577,7 +584,7 @@ function publicAccounts() {
 
 function gatewayQuotaSummary() {
   const settings = store.getSettings();
-  return buildAccountPoolQuotaSummary(store.listAccounts(), undefined, {
+  return buildAccountPoolQuotaSummary(store.listAccounts() as Parameters<typeof buildAccountPoolQuotaSummary>[0], undefined, {
     ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true"
   });
 }
@@ -879,7 +886,11 @@ function requestAppExit(reason: Dynamic) {
 
 function syncDetectedCodexAuthMode() {
   const accounts = store.listAccounts();
-  const detected = detectCodexAuthMode(store.getSettings(), accounts, codexAccessOptions(runtimeProfile));
+  const detected = detectCodexAuthMode(
+    store.getSettings(),
+    accounts as Parameters<typeof detectCodexAuthMode>[1],
+    codexAccessOptions(runtimeProfile)
+  );
   store.saveSettings({
     codex_auth_mode: detected.mode,
     codex_selected_account_id: detected.accountId || ""
@@ -1237,6 +1248,7 @@ async function refreshUsage(id: Dynamic) {
         };
         store.updateUsage(id, usage);
         const refreshed = store.listAccounts().find((item: Dynamic) => item.id === id);
+        if (!refreshed) throw new Error("Account disappeared after refreshing usage.");
         scheduleUsageResetRefresh(refreshed, "usage-refresh");
         return refreshed;
       } catch (error) {
@@ -1453,6 +1465,7 @@ function formatTime(epochSeconds: Dynamic) {
 }
 
 async function refreshAllUsage(reason: Dynamic = "manual") {
+  if (!usageRefreshCoordinator) throw new Error("额度刷新服务尚未初始化。");
   const results = await usageRefreshCoordinator.refreshAll(reason);
   if (results.some((item: Dynamic) => item.kind === "balance")) {
     notifyDataChanged(["upstreams"]);

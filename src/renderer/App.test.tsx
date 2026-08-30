@@ -57,13 +57,15 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
     </MemoryRouter>
   );
 
-  await user.click(await screen.findByRole("menuitem", { name: "账号与额度" }));
+  await screen.findByText("应用行为", {}, { timeout: 5000 });
+  await user.click(screen.getByText("账号与额度"));
   await screen.findByText("忽略 5 小时限制");
   expect(screen.queryByText("重启服务后生效")).toBeNull();
   await user.click(screen.getByRole("switch"));
   await user.click(screen.getByRole("button", { name: /保存设置/ }));
   await waitFor(() => expect(quotaSummary).toHaveBeenCalledOnce());
-  expect(screen.getByRole("status").textContent).toContain("配置已保存，请重启相关服务使配置生效");
+  expect(screen.getByRole("status").textContent).toContain("配置已保存");
+  expect(screen.getByRole("status").textContent).not.toContain("重启");
 
   await user.click(screen.getByText("运行概览"));
   expect(await screen.findByText("170.0%")).toBeTruthy();
