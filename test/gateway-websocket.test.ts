@@ -307,10 +307,41 @@ test("WebSocket gateway caps queued bytes while the upstream handshake is pendin
     const errorMessage = nextMessage(websocket);
     const closed = nextCloseDetail(websocket);
     websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
-    websocket.send("x".repeat(128));
+    websocket.send("x".repeat(129));
     const payload = JSON.parse((await errorMessage).toString());
     assert.equal(payload.error.code, "WEBSOCKET_PENDING_QUEUE_LIMIT");
+    assert.match(payload.error.message, /129 bytes incoming/);
     assert.equal((await closed).code, 1008);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket gateway allows a large first response.create while the upstream handshake is pending", async () => {
+  const upstreamMessages = [];
+  const harness = await startHarness({
+    onUpgrade(_request, _socket, _head, accept) {
+      setTimeout(accept, 250);
+    },
+    onConnection(websocket) {
+      websocket.once("message", (data) => {
+        upstreamMessages.push(JSON.parse(data.toString()));
+        websocket.send(JSON.stringify({ type: "response.completed", response: {} }));
+      });
+    }
+  }, {
+    gateway_websocket_max_payload_bytes: "4096",
+    gateway_websocket_pending_queue_limit_bytes: "128"
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "session-large-first-message" });
+    const completed = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test", input: "x".repeat(1024) }));
+    assert.match((await completed).toString(), /response\.completed/);
+    assert.equal(upstreamMessages.length, 1);
+    assert.equal(upstreamMessages[0].input.length, 1024);
+    websocket.close();
+    await nextClose(websocket);
   } finally {
     await harness.close();
   }
@@ -327,9 +358,10 @@ test("WebSocket gateway caps queued message count while the upstream handshake i
     const errorMessage = nextMessage(websocket);
     const closed = nextCloseDetail(websocket);
     websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
-    for (let index = 0; index < 1024; index += 1) websocket.send("{}");
+    for (let index = 0; index < 1025; index += 1) websocket.send("{}");
     const payload = JSON.parse((await errorMessage).toString());
     assert.equal(payload.error.code, "WEBSOCKET_PENDING_QUEUE_LIMIT");
+    assert.match(payload.error.message, /1024-message limit/);
     assert.equal((await closed).code, 1008);
   } finally {
     await harness.close();

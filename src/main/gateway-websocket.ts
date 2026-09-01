@@ -621,6 +621,8 @@ function createPendingDownstreamMessages(
   const signal = controller.signal;
   const messages: Dynamic[] = [];
   let queuedBytes = 0;
+  let queuedMessages = 0;
+  let receivedFirstMessage = false;
   let settled = false;
   let resolveFirst: Dynamic;
   let rejectFirst: Dynamic;
@@ -635,24 +637,37 @@ function createPendingDownstreamMessages(
   };
   const onMessage = (data: Dynamic, isBinary: Dynamic) => {
     const messageBytes = rawDataByteLength(data);
-    if (messages.length >= maxMessages || queuedBytes + messageBytes > maxBytes) {
+    if (!receivedFirstMessage) {
+      receivedFirstMessage = true;
+      messages.push({ data, isBinary });
+      if (isBinary) return fail(routeError(400, "INVALID_FIRST_WEBSOCKET_EVENT", "The first WebSocket message must be a JSON response.create event."));
+      const event = parseJson(data);
+      if (event?.type !== "response.create") {
+        return fail(routeError(400, "INVALID_FIRST_WEBSOCKET_EVENT", "The first WebSocket message must be a response.create event."));
+      }
+      settled = true;
+      resolveFirst({ data, isBinary, event });
+      return;
+    }
+    if (queuedMessages >= maxMessages) {
       abortController(
         controller,
         "WEBSOCKET_PENDING_QUEUE_LIMIT",
-        `WebSocket messages queued during the upstream handshake exceed the ${maxBytes}-byte or ${maxMessages}-message limit.`
+        `WebSocket messages queued after response.create during the upstream handshake exceed the ${maxMessages}-message limit.`
+      );
+      return;
+    }
+    if (queuedBytes + messageBytes > maxBytes) {
+      abortController(
+        controller,
+        "WEBSOCKET_PENDING_QUEUE_LIMIT",
+        `WebSocket messages queued after response.create during the upstream handshake exceed the ${maxBytes}-byte limit (${queuedBytes} bytes queued, ${messageBytes} bytes incoming).`
       );
       return;
     }
     messages.push({ data, isBinary });
     queuedBytes += messageBytes;
-    if (settled) return;
-    if (isBinary) return fail(routeError(400, "INVALID_FIRST_WEBSOCKET_EVENT", "The first WebSocket message must be a JSON response.create event."));
-    const event = parseJson(data);
-    if (event?.type !== "response.create") {
-      return fail(routeError(400, "INVALID_FIRST_WEBSOCKET_EVENT", "The first WebSocket message must be a response.create event."));
-    }
-    settled = true;
-    resolveFirst({ data, isBinary, event });
+    queuedMessages += 1;
   };
   const onClose = () => fail(abortError("client_cancelled", "WebSocket client disconnected before response.create."));
   const onError = (error: Dynamic) => fail(error);
