@@ -330,7 +330,7 @@ function verifyLegacyUpgrade(databasePath, applicationRoot) {
       }
     });
     const browserMarkerPreserved = fs.existsSync(path.join(applicationRoot, "data", "browser", "v0-browser-marker.txt"));
-    if (version !== 4 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
+    if (version !== 5 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
       || !compactAdaptColumn || legacyRoutingTableCount !== 0 || encryptedBackups.length < 1 || !browserMarkerPreserved) {
       throw new Error("Packaged legacy upgrade did not preserve data, reach the current schema, or create an encrypted backup.");
     }

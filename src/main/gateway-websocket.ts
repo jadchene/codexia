@@ -401,7 +401,16 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       target: selected.target,
       clientModel: selected.clientModel,
       routingHint: selected.routingHint,
-      modelRewrite: selected.autoReviewFallbackModel
+      modelRewrite: selected.autoReviewFallbackModel,
+      isSubscriptionAccountAvailable: () => !selected.account || Boolean(runtime.routing.findBoundAccount({
+        accountId: selected.account.id
+      }, store.listAccounts())),
+      onSubscriptionAccountUnavailable: () => store.addAppLog?.({
+        scope: "gateway-websocket",
+        action: "account-disabled-reconnect",
+        status: "retry",
+        message: `账号 ${selected.account?.email || selected.account?.name || selected.account?.id || ""} 已停用，将为下一轮请求重新选择账号。`
+      })
     });
     bridgeWebSockets({
       downstream,
@@ -708,6 +717,11 @@ function createDeferredMessageTransformer(options: Dynamic) {
     if (isBinary) return undefined;
     const event = parseJson(data);
     if (event?.type !== "response.create") return undefined;
+    if (target.kind === "chatgpt_subscription_pool" && !options.isSubscriptionAccountAvailable?.()) {
+      options.onSubscriptionAccountUnavailable?.();
+      closeWebSocketForReconnect(downstream, "subscription account disabled");
+      return false;
+    }
     const modelId = String(event.model || "").trim();
     if (modelId) {
       if (modelRewrite && modelId === clientModel && target.kind === "responses_api") {

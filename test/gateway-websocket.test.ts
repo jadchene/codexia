@@ -272,6 +272,40 @@ test("WebSocket gateway reuses one upstream connection for sequential and binary
   }
 });
 
+test("Responses WebSocket reconnects before the next turn when its account is disabled", async () => {
+  const authorizations = [];
+  const harness = await startHarness({
+    onConnection(websocket, request) {
+      authorizations.push(request.headers.authorization);
+      websocket.on("message", () => {
+        websocket.send(JSON.stringify({ type: "response.completed", response: {} }));
+      });
+    }
+  });
+  try {
+    const first = await connectGateway(harness, "/v1/responses", { "session-id": "session-account-disabled" });
+    const firstCompleted = nextMessage(first.websocket);
+    first.websocket.send(JSON.stringify({ type: "response.create", input: "first turn" }));
+    assert.match((await firstCompleted).toString(), /response\.completed/);
+
+    harness.accounts[0].enabled = false;
+    const reconnect = nextCloseDetail(first.websocket);
+    first.websocket.send(JSON.stringify({ type: "response.create", input: "next turn" }));
+    assert.deepEqual(await reconnect, { code: 1012, reason: "subscription account disabled" });
+
+    const second = await connectGateway(harness, "/v1/responses", { "session-id": "session-account-disabled" });
+    const secondCompleted = nextMessage(second.websocket);
+    second.websocket.send(JSON.stringify({ type: "response.create", input: "next turn" }));
+    assert.match((await secondCompleted).toString(), /response\.completed/);
+    assert.deepEqual(authorizations, ["Bearer token-a", "Bearer token-b"]);
+    assert.equal(harness.appLogs.some((entry) => entry.action === "account-disabled-reconnect"), true);
+    second.websocket.close();
+    await nextClose(second.websocket);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("WebSocket gateway enforces its independent connection and message-size limits", async () => {
   const concurrencyHarness = await startHarness({}, { gateway_websocket_max_connections: "1" });
   try {
