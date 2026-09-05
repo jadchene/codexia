@@ -50,13 +50,15 @@ const ANALYTICS_COLUMN_OPTIONS = [
   { label: "路径", value: "path" },
   { label: "状态", value: "status" },
   { label: "耗时", value: "duration" },
+  { label: "输出速度", value: "outputSpeed" },
   { label: "Token", value: "tokens" },
   { label: "估算", value: "cost" }
 ] as const;
 const DEFAULT_ANALYTICS_COLUMN_KEYS = ANALYTICS_COLUMN_OPTIONS
   .filter((item) => item.value !== "path")
   .map((item) => item.value);
-const ANALYTICS_COLUMN_STORAGE_KEY = "codexia:request-analytics:visible-columns";
+const LEGACY_ANALYTICS_COLUMN_STORAGE_KEY = "codexia:request-analytics:visible-columns";
+const ANALYTICS_COLUMN_STORAGE_KEY = `${LEGACY_ANALYTICS_COLUMN_STORAGE_KEY}:v2`;
 
 export const RequestAnalyticsPage = ({
   pageData,
@@ -153,6 +155,14 @@ export const RequestAnalyticsPage = ({
       render: (value) => <Tag color={Number(value) >= 200 && Number(value) < 300 ? "success" : "error"}>{value || "-"}</Tag>
     },
     { key: "duration", title: "耗时", dataIndex: "duration_ms", width: 110, render: (value) => value ? `${formatTokenNumber(value)} ms` : "-" },
+    {
+      key: "outputSpeed",
+      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度</Tooltip>,
+      width: 150,
+      align: "center",
+      className: "v1-nowrap",
+      render: (_, log) => formatOutputSpeed(log)
+    },
     {
       title: "Token（输入 / 缓存输入 / 输出）",
       key: "tokens",
@@ -440,12 +450,27 @@ const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
   }).map(([key, value]) => ({ key, label: key, children: String(value) }));
 };
 
+const formatOutputSpeed = (log: RequestLog): string => {
+  const status = Number(log.status);
+  const duration = Number(log.duration_ms);
+  const output = Number(log.output_tokens);
+  if (!(status >= 200 && status < 300)
+    || !Number.isFinite(duration) || duration <= 0
+    || !Number.isFinite(output) || output <= 0
+    || log.message?.startsWith("WebSocket prewarm")) return "—";
+  const speed = output / duration * 1000;
+  return Number.isFinite(speed) ? speed.toFixed(1) : "—";
+};
+
 const loadVisibleColumnKeys = (): string[] => {
   try {
-    const stored = JSON.parse(localStorage.getItem(ANALYTICS_COLUMN_STORAGE_KEY) || "null");
+    const current = localStorage.getItem(ANALYTICS_COLUMN_STORAGE_KEY);
+    const stored = JSON.parse(current ?? localStorage.getItem(LEGACY_ANALYTICS_COLUMN_STORAGE_KEY) ?? "null");
     if (!Array.isArray(stored)) return [...DEFAULT_ANALYTICS_COLUMN_KEYS];
     const validKeys = new Set(ANALYTICS_COLUMN_OPTIONS.map((item) => item.value));
-    return stored.filter((value): value is string => typeof value === "string" && validKeys.has(value as typeof ANALYTICS_COLUMN_OPTIONS[number]["value"]));
+    const keys = stored.filter((value): value is string => typeof value === "string" && validKeys.has(value as typeof ANALYTICS_COLUMN_OPTIONS[number]["value"]));
+    if (current === null && !keys.includes("outputSpeed")) keys.push("outputSpeed");
+    return keys;
   } catch {
     return [...DEFAULT_ANALYTICS_COLUMN_KEYS];
   }

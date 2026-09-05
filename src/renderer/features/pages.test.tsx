@@ -350,6 +350,8 @@ describe("Ant Design pages", () => {
         input_tokens: 1234,
         cached_input_tokens: 234,
         output_tokens: 56,
+        status: 200,
+        duration_ms: 2000,
         estimated_cost: 0.1234
       }]
     };
@@ -365,6 +367,8 @@ describe("Ant Design pages", () => {
     expect(screen.getAllByText("估算成本（人民币）").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Token（输入 / 缓存输入 / 输出）").length).toBeGreaterThanOrEqual(1);
     const rowToken = screen.getByText("1,234 / 234 / 56");
+    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
+    expect(screen.getByText("28.0")).toBeTruthy();
     expect(rowToken.getAttribute("title")).toBeNull();
     await user.hover(rowToken);
     expect(await screen.findByText("缓存命中率：19.0%")).toBeTruthy();
@@ -400,6 +404,7 @@ describe("Ant Design pages", () => {
 
   it("keeps request analytics column settings after the page remounts", async () => {
     const user = userEvent.setup();
+    localStorage.setItem("codexia:request-analytics:visible-columns", JSON.stringify(["time", "duration", "tokens"]));
     const props = {
       pageData: emptyRequestPage,
       summary: emptySummary,
@@ -409,14 +414,18 @@ describe("Ant Design pages", () => {
       onQuery: vi.fn().mockResolvedValue(undefined)
     };
     const view = renderWithQueries(<RequestAnalyticsPage {...props} />);
+    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "模型" })).toBeNull();
     await user.click(screen.getByRole("button", { name: /列设置/ }));
     await user.click(screen.getByRole("checkbox", { name: "路径" }));
+    await user.click(screen.getByRole("checkbox", { name: "输出速度" }));
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
-    await waitFor(() => expect(localStorage.getItem("codexia:request-analytics:visible-columns")).toContain("path"));
+    await waitFor(() => expect(localStorage.getItem("codexia:request-analytics:visible-columns:v2")).toContain("path"));
 
     view.unmount();
     renderWithQueries(<RequestAnalyticsPage {...props} />);
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "输出速度" })).toBeNull();
   });
 
   it("pauses runtime logs", async () => {
