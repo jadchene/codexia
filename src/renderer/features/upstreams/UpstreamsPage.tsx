@@ -493,7 +493,7 @@ export const UpstreamsPage = () => {
             name="compactAdaptEnabled"
             label="适配远程压缩"
             valuePropName="checked"
-            tooltip="解决第三方模型可能不支持远程压缩的问题。"
+            tooltip="通过生成交接摘要兼容远程压缩，支持 HTTP 和 WS。渠道原生支持远程压缩时可关闭。"
           >
             <Switch />
           </Form.Item>

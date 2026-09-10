@@ -8,7 +8,7 @@ import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
 import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
-import { adaptCompactionStream, isCompactionTriggerRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
+import { adaptCompactionStream, isCompactionTriggerRequest, prepareCompactionSummaryRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
 import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter.ts";
 import { AUTO_REVIEW_MODEL_ID, isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import {
@@ -651,7 +651,9 @@ async function callDirectApiTarget(options: Dynamic) {
     const result = await callApiUpstream({
       req,
       request,
-      body: incomingBody,
+      body: request.path === "/v1/responses" && upstream.compactAdaptEnabled === true
+        ? prepareCompactionSummaryRequest(incomingBody).body
+        : incomingBody,
       upstream,
       settings,
       signal

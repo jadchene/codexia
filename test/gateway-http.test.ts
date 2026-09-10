@@ -1005,7 +1005,11 @@ test("HTTP gateway wraps compaction responses for API channels with the adaptati
     });
     assert.equal(response.status, 200);
     const body = await response.text();
-    assert.equal(apiRequests[0].input.some((item) => item.type === "compaction_trigger"), true);
+    assert.equal(apiRequests[0].input.some((item) => item.type === "compaction_trigger"), false);
+    assert.equal(apiRequests[0].input.at(-1).role, "developer");
+    assert.match(apiRequests[0].input.at(-1).content[0].text, /handoff summary/);
+    assert.equal(apiRequests[0].tool_choice, "none");
+    assert.deepEqual(apiRequests[0].tools, []);
     const events = body.split(/\n{2,}/).filter(Boolean).map((block) => JSON.parse(block.replace(/^data:\s*/, "")));
     const compactionDones = events.filter((event) => event.type === "response.output_item.done" && event.item?.type === "compaction");
     assert.equal(compactionDones.length, 1);
@@ -1015,6 +1019,20 @@ test("HTTP gateway wraps compaction responses for API channels with the adaptati
       < events.findIndex((event) => event.type === "response.completed"));
     assert.equal(harness.tokenLogs.at(-1).total_tokens, 14);
     assert.equal(harness.tokenLogs.at(-1).upstream_id, "api-owner");
+    for (const compactAgain of [false, true]) {
+      const next = await gatewayFetch(harness, "/v1/responses", {
+        headers: codexHeaders("compact-adapt", compactAgain ? "turn-3" : "turn-2"),
+        body: JSON.stringify({ model: "deepseek-model", input: [
+          compactionDones[0].item,
+          ...(compactAgain ? [{ type: "compaction_trigger" }] : [{ type: "message", role: "user", content: [{ type: "input_text", text: "继续" }] }])
+        ] })
+      });
+      const nextBody = await next.text();
+      assert.equal(next.status, 200);
+      assert.equal(apiRequests.at(-1).input[0].type, "message");
+      assert.equal(apiRequests.at(-1).input[0].content[0].text, "Summarized history.");
+      assert.equal(nextBody.includes('"type":"compaction"'), compactAgain);
+    }
   } finally {
     await harness.close();
     await closeServer(apiUpstream);

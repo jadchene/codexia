@@ -1,7 +1,7 @@
 import { WebSocket, type RawData } from "ws";
 
 interface QueuedMessage { data: RawData; isBinary: boolean }
-type MessageTransform = (data: RawData, isBinary: boolean) => RawData | false | null | undefined;
+type MessageTransform = (data: RawData, isBinary: boolean) => RawData | { messages: RawData[] } | false | null | undefined;
 
 interface BridgeWebSocketsOptions {
   downstream: WebSocket;
@@ -31,15 +31,25 @@ export function bridgeWebSockets(options: BridgeWebSocketsOptions): void {
   let closing = false;
 
   const forward = (source: WebSocket, destination: WebSocket, transform?: MessageTransform) => (data: RawData, isBinary: boolean): void => {
-    const replacement = transform?.(data, isBinary);
+    let replacement: ReturnType<MessageTransform>;
+    try {
+      replacement = transform?.(data, isBinary);
+    } catch (error) {
+      abortController(controller, "websocket_forward_error", error instanceof Error ? error.message : String(error));
+      return;
+    }
     if (replacement === false) return;
-    const outgoingData = replacement ?? data;
+    const messages = replacement && typeof replacement === "object" && "messages" in replacement
+      ? replacement.messages
+      : [replacement ?? data];
     if (destination.readyState !== WebSocket.OPEN) return;
-    if (destination.bufferedAmount >= bufferHighWaterBytes) source.pause();
-    destination.send(outgoingData, { binary: isBinary }, (error?: Error) => {
-      if (source.isPaused && destination.bufferedAmount < bufferHighWaterBytes) source.resume();
-      if (error) abortController(controller, "websocket_forward_error", error.message);
-    });
+    for (const outgoingData of messages) {
+      if (destination.bufferedAmount >= bufferHighWaterBytes) source.pause();
+      destination.send(outgoingData, { binary: isBinary }, (error?: Error) => {
+        if (source.isPaused && destination.bufferedAmount < bufferHighWaterBytes) source.resume();
+        if (error) abortController(controller, "websocket_forward_error", error.message);
+      });
+    }
   };
   const forwardDownstream = forward(downstream, upstream, onDownstreamMessage);
   downstream.on("message", forwardDownstream);

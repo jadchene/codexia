@@ -1296,7 +1296,122 @@ test("WebSocket gateway waits for a quota refresh and retries the current handsh
   }
 });
 
-function externalApiHooks(getHarness, supportsWebSocket = true) {
+test("WebSocket compaction supports continuation and repeated compaction on the same connection", async () => {
+  let harness;
+  const requests = [];
+  harness = await startHarness({
+    hooks: externalApiHooks(() => harness, true, true),
+    onConnection(websocket) {
+      websocket.on("message", (data) => {
+        const request = JSON.parse(data.toString());
+        requests.push(request);
+        const compacting = request.tool_choice === "none";
+        if (compacting) websocket.send(JSON.stringify({ type: "response.output_item.done", output_index: 0, item: {
+          type: "message", role: "assistant", content: [{ type: "output_text", text: `摘要 ${requests.length}` }]
+        } }));
+        websocket.send(JSON.stringify({ type: "response.completed", response: { id: `r${requests.length}`, output: [] } }));
+      });
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses");
+    let item;
+    for (const [index, compacting] of [true, false, true].entries()) {
+      const pending = nextMessages(websocket, index === 0 ? 5 : compacting ? 4 : 1);
+      websocket.send(JSON.stringify({ type: "response.create", model: "deepseek-chat", input: [
+        ...(item ? [item] : []),
+        compacting ? { type: "compaction_trigger" } : { type: "message", role: "user", content: [{ type: "input_text", text: "继续" }] }
+      ] }));
+      const events = (await pending).map((data) => JSON.parse(data.toString()));
+      const compact = events.filter((event) => event.type === "response.output_item.done" && event.item.type === "compaction");
+      assert.equal(compact.length, compacting ? 1 : 0);
+      if (item) {
+        assert.equal(requests.at(-1).input[0].type, "message");
+        assert.equal(requests.at(-1).input[0].content[0].text, item.encrypted_content);
+      }
+      if (compacting) {
+        item = compact[0].item;
+        assert.equal(item.encrypted_content, `摘要 ${index + 1}`);
+        assert.equal(requests.at(-1).input.some((input) => input.type === "compaction_trigger"), false);
+        assert.match(requests.at(-1).input.at(-1).content[0].text, /handoff summary/);
+        assert.deepEqual(requests.at(-1).tools, []);
+        const completedIndex = events.findIndex((event) => event.type === "response.completed");
+        assert.ok(completedIndex > events.indexOf(compact[0]));
+        assert.deepEqual(events[completedIndex].response.output.at(-1), item);
+        assert.equal(events[completedIndex].response.output.length, 2);
+      } else {
+        assert.equal(requests.at(-1).tool_choice, undefined);
+      }
+    }
+    websocket.close();
+    await nextClose(websocket);
+  } finally {
+    await harness.close();
+  }
+});
+
+for (const enabled of [true, false]) {
+  test(`WebSocket preserves native compactions with adaptation ${enabled}`, async () => {
+    let harness;
+    const requests = [];
+    const item = { type: "compaction", id: "cmp_native", encrypted_content: "opaque" };
+    harness = await startHarness({
+      hooks: externalApiHooks(() => harness, true, enabled),
+      onConnection(websocket) {
+        websocket.on("message", (data) => {
+          requests.push(JSON.parse(data.toString()));
+          websocket.send(JSON.stringify({ type: "response.output_item.done", output_index: 0, item }));
+          websocket.send(JSON.stringify({ type: "response.completed", response: { id: "native", output: [item] } }));
+        });
+      }
+    });
+    try {
+      const { websocket } = await connectGateway(harness, "/v1/responses");
+      const pending = nextMessages(websocket, 3);
+      websocket.send(JSON.stringify({ type: "response.create", model: "deepseek-chat", input: [{ type: "compaction_trigger" }] }));
+      const events = (await pending).map((data) => JSON.parse(data.toString()));
+      assert.deepEqual(events.filter((event) => event.type === "response.output_item.done").map((event) => event.item), [item]);
+      assert.equal(requests[0].input.some((input) => input.type === "compaction_trigger"), !enabled);
+      websocket.close();
+      await nextClose(websocket);
+    } finally {
+      await harness.close();
+    }
+  });
+}
+
+for (const mode of ["limit", "timeout"]) {
+  test(`WebSocket compaction enforces ${mode} without completing the response`, async () => {
+    let harness;
+    harness = await startHarness({
+      hooks: externalApiHooks(() => harness, true, true),
+      onConnection(websocket) {
+        websocket.on("message", () => {
+          const send = () => websocket.send(JSON.stringify({ type: "response.output_text.delta", delta: "x".repeat(mode === "limit" ? 2000 : 1) }));
+          send();
+          if (mode === "timeout") {
+            const timer = setInterval(send, 10);
+            websocket.once("close", () => clearInterval(timer));
+          }
+        });
+      }
+    }, mode === "limit" ? { gateway_compaction_response_limit_bytes: "1024" } : { gateway_unary_timeout_ms: "60" });
+    try {
+      const { websocket } = await connectGateway(harness, "/v1/responses");
+      const events = [];
+      websocket.on("message", (data) => events.push(JSON.parse(data.toString())));
+      const closed = nextClose(websocket);
+      websocket.send(JSON.stringify({ type: "response.create", model: "deepseek-chat", input: [{ type: "compaction_trigger" }] }));
+      await closed;
+      assert.equal(events.some((event) => event.type === "response.completed"), false);
+      assert.equal(events.some((event) => event.item?.type === "compaction"), false);
+    } finally {
+      await harness.close();
+    }
+  });
+}
+
+function externalApiHooks(getHarness, supportsWebSocket = true, compactAdaptEnabled = false) {
   return {
     upstreamService: {
       findRuntimeByModel(modelId) {
@@ -1310,6 +1425,7 @@ function externalApiHooks(getHarness, supportsWebSocket = true) {
           baseUrl: harness.settings.upstream_base_url,
           apiKey: "api-secret",
           supportsWebSocket,
+          compactAdaptEnabled,
           requestHeaders: { "X-Provider-Tenant": "tenant-ws" },
           credentialRef: "api-key-ref"
         };

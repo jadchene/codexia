@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { createWebSocketObserver } from "./gateway-websocket-observer.ts";
-import { rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
+import { createWebSocketCompactionAdapter, isCompactionTriggerRequest, prepareCompactionSummaryRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
 import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter.ts";
 import { isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import { buildSubscriptionRoutingHint, replaceSubscriptionRoutingHint, stripSubscriptionHeaders } from "./gateway/protocol.ts";
@@ -394,6 +394,11 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     downstream.once("close", observer.onClose);
     const downstreamClose = waitForWebSocketClose(downstream);
     let externalQuotaSent = false;
+    const compaction = createWebSocketCompactionAdapter(positiveSetting(settings.gateway_compaction_response_limit_bytes, 32 * 1024 * 1024));
+    let compactionTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopCompactionTimer = () => clearTimeout(compactionTimer);
+    downstream.once("close", stopCompactionTimer);
+    controller.signal.addEventListener("abort", stopCompactionTimer, { once: true });
     const transformDownstream = createDeferredMessageTransformer({
       downstream,
       observer,
@@ -420,7 +425,17 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       takeInitialDownstreamMessages: pending.take,
       onDownstreamMessage(data: Dynamic, isBinary: Dynamic) {
         debugWebSocketMessage(apiDebugLogger, debugEnabled, connectionId, "request", data, isBinary, apiDebugLogger?.bodyLimitBytes);
-        return transformDownstream(data, isBinary);
+        const transformed = transformDownstream(data, isBinary);
+        if (transformed === false || isBinary || selected.target.kind !== "responses_api" || selected.target.compactAdaptEnabled !== true) return transformed;
+        const outgoing = transformed ?? data;
+        if (parseJson(outgoing)?.type === "response.create" && compaction.active()) throw new Error("对话压缩尚未完成，请稍后发送新请求。");
+        if (parseJson(outgoing)?.type === "response.create" && isCompactionTriggerRequest(outgoing)) {
+          compaction.start();
+          compactionTimer = setTimeout(() => abortController(controller, "compaction_timeout", "对话压缩超时，请稍后重试。"),
+            positiveSetting(settings.gateway_unary_timeout_ms, 5 * 60 * 1000));
+          return toWebSocketBuffer(prepareCompactionSummaryRequest(outgoing).body);
+        }
+        return transformed;
       },
       onUpstreamMessage(data: Dynamic, isBinary: Dynamic) {
         const observation = observer.onUpstreamMessage(data, isBinary);
@@ -446,6 +461,11 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
             if (downstream.readyState !== WebSocket.OPEN) return;
             downstream.send(JSON.stringify({ type: "codex.rate_limits", rate_limits: helpers.buildExternalQuotaSnapshot() }));
           });
+        }
+        if (compaction.active()) {
+          const messages = compaction.accept(toWebSocketBuffer(data));
+          if (!compaction.active()) stopCompactionTimer();
+          if (messages) return { messages };
         }
         return data;
       }

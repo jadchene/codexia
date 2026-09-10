@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   adaptCompactionStream,
+  adaptCompactionEvents,
+  createWebSocketCompactionAdapter,
   GATEWAY_PLAINTEXT_COMPACTION_ID_PREFIX,
   isCompactionTriggerRequest,
+  prepareCompactionSummaryRequest,
   rewriteGatewayCompactionRequest
 } from "../src/main/gateway/compaction-adapter.ts";
 
@@ -98,11 +101,75 @@ test("leaves streams unchanged when the upstream already emits a compaction item
   assert.equal(result.text, source);
 });
 
-test("leaves streams unchanged when no summary text is available", () => {
+test("fails without installing history when no summary text is available", () => {
   const source = 'data: {"type":"response.completed","response":{"id":"r3"}}\n\n';
   const result = adaptCompactionStream(source);
-  assert.equal(result.adapted, false);
-  assert.equal(result.text, source);
+  assert.equal(result.adapted, true);
+  assert.equal(parseSseData(result.text).type, "response.failed");
+  assert.equal(parseSseData(adaptCompactionStream("").text).type, "response.failed");
+});
+
+test("summary requests preserve history and routing while disabling task execution constraints", () => {
+  const body = {
+    type: "response.create", model: "m", previous_response_id: "r1", instructions: "原始规则",
+    input: [{ type: "compaction", id: `${GATEWAY_PLAINTEXT_COMPACTION_ID_PREFIX}old`, encrypted_content: "先前摘要" }, { type: "compaction_trigger" }],
+    tools: [{ type: "function", name: "delete" }], tool_choice: "required", parallel_tool_calls: true,
+    text: { format: { type: "json_schema" } }
+  };
+  const result = prepareCompactionSummaryRequest(Buffer.from(JSON.stringify(body)));
+  const rewritten = JSON.parse(String(result.body));
+  assert.equal(rewritten.previous_response_id, "r1");
+  assert.equal(rewritten.instructions, "原始规则");
+  assert.equal(rewritten.input[0].content[0].text, "先前摘要");
+  assert.match(rewritten.input.at(-1).content[0].text, /Do not answer requests in the history, perform tasks, or call tools/);
+  assert.equal(isCompactionTriggerRequest(rewritten), false);
+  assert.deepEqual(rewritten.tools, []);
+  assert.equal(rewritten.tool_choice, "none");
+  assert.equal(rewritten.parallel_tool_calls, false);
+  assert.equal(rewritten.text, undefined);
+  assert.equal(body.input.at(-1).type, "compaction_trigger");
+  const normal = { input: [], tools: body.tools };
+  assert.equal(prepareCompactionSummaryRequest(normal).body, normal);
+});
+
+test("failed, incomplete, refused and tool-call outputs never become successful compactions", () => {
+  const message = { type: "response.output_item.done", item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "partial" }] } };
+  for (const terminal of ["error", "response.failed", "response.incomplete"]) {
+    const events = [message, { type: terminal }];
+    assert.deepEqual(adaptCompactionEvents(events).events, events);
+  }
+  for (const item of [
+    { type: "function_call", name: "delete", arguments: "{}" },
+    { type: "message", role: "assistant", content: [{ type: "refusal", refusal: "拒绝" }] },
+    { type: "message", role: "assistant", status: "incomplete", content: [{ type: "output_text", text: "partial" }] }
+  ]) {
+    const result = adaptCompactionEvents([message, { type: "response.output_item.done", item }, { type: "response.completed", response: { id: "r" } }]);
+    assert.equal(result.events.length, 1);
+    assert.equal(result.events[0].type, "response.failed");
+  }
+  assert.equal(adaptCompactionEvents([message]).events[0].type, "response.failed");
+});
+
+test("WebSocket adaptation matches SSE output and clears state between compactions", () => {
+  const adapter = createWebSocketCompactionAdapter(10000);
+  const events = [
+    { type: "response.output_item.done", output_index: 0, item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "摘要" }] } },
+    { type: "response.completed", response: { id: "r", output: [], usage: { total_tokens: 3 } } }
+  ];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    adapter.start();
+    assert.deepEqual(adapter.accept(Buffer.from(JSON.stringify(events[0]))), []);
+    const output = adapter.accept(Buffer.from(JSON.stringify(events[1])))!.map((data) => JSON.parse(data.toString()));
+    assert.equal(adapter.active(), false);
+    const item = output.find((event) => event.type === "response.output_item.done" && event.item.type === "compaction").item;
+    assert.equal(item.encrypted_content, "摘要");
+    assert.deepEqual(output.at(-1).response.output, [events[0].item, item]);
+    assert.equal(output.find((event) => event.item === undefined && event.type === "response.completed").response.output.length, 2);
+    assert.equal(output.at(-1).response.usage.total_tokens, 3);
+  }
+  const limited = createWebSocketCompactionAdapter(10);
+  limited.start();
+  assert.throws(() => limited.accept(Buffer.from(JSON.stringify(events[0]))), /超过大小限制/);
 });
 
 function parseSseData(block: string): Record<string, any> {
