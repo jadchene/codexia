@@ -6,7 +6,7 @@ import type {
   UsageRefreshResult
 } from "./accounts";
 import type { BootstrapData } from "./bootstrap";
-import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "./logs";
+import type { AppLogPage, LogQuery, RequestLogPage, RequestLogModels, TokenSummary } from "./logs";
 import type { ServiceStatus, Settings } from "./settings";
 import type {
   BalanceRefreshResult,
@@ -55,6 +55,7 @@ export type IpcContract = {
   "upstreams:testConnection": IpcSpec<[upstreamId: string], UpstreamHealthResult>;
   "upstreams:testInvocation": IpcSpec<[upstreamId: string, modelId: string], UpstreamInvocationTestResult>;
   "tokens:list": IpcSpec<[query: LogQuery], RequestLogPage>;
+  "tokens:models": IpcSpec<[], RequestLogModels>;
   "tokens:summary": IpcSpec<[query?: LogQuery], TokenSummary>;
   "quota:summary": IpcSpec<[], BootstrapData["quotaSummary"]>;
   "tokens:clear": IpcSpec<[], ClearResult>;
@@ -70,6 +71,7 @@ export type IpcContract = {
   "auth:status": IpcSpec<[loginId: string], LoginStatus>;
   "auth:cancelLogin": IpcSpec<[loginId: string], { cancelled: boolean }>;
   "accounts:refreshUsage": IpcSpec<[id: string], unknown>;
+  "accounts:refreshSubscription": IpcSpec<[id: string], PublicAccount>;
   "accounts:refreshAllUsage": IpcSpec<[], UsageRefreshResult[]>;
   "accounts:consumeResetCredit": IpcSpec<[id: string, creditId?: string], ConsumeResetCreditResult>;
   "accounts:importLocalCodex": IpcSpec<[], PublicAccount>;

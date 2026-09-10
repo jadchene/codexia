@@ -347,6 +347,12 @@ function App() {
     }
   }
 
+  const refreshSubscription = async (account: PublicAccount): Promise<PublicAccount> => {
+    const refreshed = await api.refreshSubscription(account.id);
+    await reload();
+    return refreshed;
+  };
+
   async function consumeResetCredit(account: PublicAccount, creditId?: string): Promise<ConsumeResetCreditResult | void> {
     setConsumingResetIds((prev) => new Set(prev).add(account.id));
     try {
@@ -510,6 +516,7 @@ function App() {
               setLoginError("");
             }}
             onRefreshUsage={refreshUsage}
+            onRefreshSubscription={refreshSubscription}
             onRefreshAll={refreshAllUsage}
             onConsumeResetCredit={consumeResetCredit}
             consumingResetIds={consumingResetIds}

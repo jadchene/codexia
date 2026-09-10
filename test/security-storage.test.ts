@@ -170,8 +170,8 @@ test("request log filters expose the actual channel and model", () => {
       startAt: 0,
       endAt,
       upstreamId: "api-a",
-      clientModel: "gpt",
-      upstreamModel: "provider",
+      clientModel: "gpt-client",
+      upstreamModel: "provider-model",
       status: "200",
       sessionId: "session-1"
     });
@@ -189,10 +189,18 @@ test("request log filters expose the actual channel and model", () => {
     assert.equal(result.items[0].client_model, "gpt-client");
     assert.equal(result.items[0].upstream_model, "provider-model");
     assert.equal(result.query.upstreamId, "api-a");
-    assert.equal(result.query.clientModel, "gpt");
-    assert.equal(result.query.upstreamModel, "provider");
+    assert.equal(result.query.clientModel, "gpt-client");
+    assert.equal(result.query.upstreamModel, "provider-model");
     assert.equal(result.query.sessionId, "session-1");
     assert.equal(result.query.status, "200");
+    const modelFilters = { startAt: 0, endAt, clientModel: "gpt-client", upstreamModel: "provider-model", sessionId: "session-1" };
+    assert.equal(store.tokenSummary(modelFilters).total.calls, 1);
+    assert.equal(store.listTokenLogs({ ...modelFilters, clientModel: "gpt" }).total, 0);
+    assert.equal(store.listTokenLogs({ ...modelFilters, upstreamModel: "provider" }).total, 0);
+    assert.equal(store.listTokenLogs({ ...modelFilters, sessionId: "missing" }).total, 0);
+    assert.deepEqual(store.listTokenLogModels(), {
+      clientModels: ["gpt-client", "other"], upstreamModels: ["other", "provider-model"]
+    });
 
     const channelSummary = store.tokenSummary({ page: 1, pageSize: 20, startAt: 0, endAt });
     assert.deepEqual(channelSummary.byAccount.map((item) => ({

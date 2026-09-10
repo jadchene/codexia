@@ -1,6 +1,26 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { createAuthService } from "../src/main/auth.ts";
+import { createAuthService, subscriptionFromTokens } from "../src/main/auth.ts";
+
+const subscriptionToken = (claims: Record<string, unknown>): string => `header.${Buffer.from(JSON.stringify({
+  "https://api.openai.com/auth": claims
+})).toString("base64url")}.signature`;
+
+test("subscription refresh reads fresh claims and falls back to the fresh access token", () => {
+  assert.deepEqual(subscriptionFromTokens({
+    id_token: subscriptionToken({ chatgpt_plan_type: "pro" }),
+    access_token: subscriptionToken({ chatgpt_plan_type: "plus", chatgpt_subscription_active_until: "2026-10-01T00:00:00Z" })
+  }), { subscription_plan: "pro", subscription_expires_at: Date.parse("2026-10-01T00:00:00Z") / 1000 });
+});
+
+test("subscription refresh clears unavailable expiry including a downgrade to free", () => {
+  assert.deepEqual(subscriptionFromTokens({ access_token: subscriptionToken({ chatgpt_plan_type: "free" }) }), {
+    subscription_plan: "free", subscription_expires_at: null
+  });
+  assert.deepEqual(subscriptionFromTokens({ id_token: "invalid" }), {
+    subscription_plan: "", subscription_expires_at: null
+  });
+});
 
 test("cancelled browser login cannot complete its callback", async () => {
   const sessions = new Map<string, Record<string, unknown>>([

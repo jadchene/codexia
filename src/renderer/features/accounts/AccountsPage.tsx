@@ -47,6 +47,7 @@ interface AccountsPageProps {
   onCancelLogin: () => Promise<void>;
   onResetLogin: () => void;
   onRefreshUsage: (account: PublicAccount) => Promise<void>;
+  onRefreshSubscription: (account: PublicAccount) => Promise<PublicAccount>;
   onRefreshAll: () => Promise<void>;
   onConsumeResetCredit: (account: PublicAccount, creditId?: string) => Promise<ConsumeResetCreditResult | void>;
   consumingResetIds: Set<string>;
@@ -66,6 +67,7 @@ export const AccountsPage = ({
   onCancelLogin,
   onResetLogin,
   onRefreshUsage,
+  onRefreshSubscription,
   onRefreshAll,
   onConsumeResetCredit,
   consumingResetIds,
@@ -75,6 +77,30 @@ export const AccountsPage = ({
   const [addOpen, setAddOpen] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
   const [detailAccount, setDetailAccount] = useState<PublicAccount | null>(null);
+  const [subscriptionRefreshing, setSubscriptionRefreshing] = useState(false);
+  const [subscriptionMessage, setSubscriptionMessage] = useState<{ id: string; type: "success" | "error"; text: string } | null>(null);
+  useEffect(() => {
+    setDetailAccount((current) => current ? accounts.find((account) => account.id === current.id) || null : null);
+  }, [accounts]);
+  useEffect(() => {
+    setSubscriptionMessage(null);
+  }, [detailAccount?.id]);
+  const refreshSubscription = async (): Promise<void> => {
+    if (!detailAccount || subscriptionRefreshing) return;
+    const id = detailAccount.id;
+    setSubscriptionRefreshing(true);
+    setSubscriptionMessage(null);
+    try {
+      const refreshed = await onRefreshSubscription(detailAccount);
+      setDetailAccount((current) => current?.id === id ? refreshed : current);
+      setSubscriptionMessage({ id, type: "success", text: refreshed.subscription_plan && refreshed.subscription_expires_at
+        ? "订阅信息已刷新。" : "订阅信息已刷新，未返回的信息显示为未知。" });
+    } catch {
+      setSubscriptionMessage({ id, type: "error", text: "订阅信息刷新失败，请检查网络或重新登录后重试。" });
+    } finally {
+      setSubscriptionRefreshing(false);
+    }
+  };
   const resetCredits = useMemo(() => parseResetCredits(detailAccount), [detailAccount]);
   const enabledAccounts = accounts.filter((account) => account.enabled && account.status !== "disabled");
   const totalFiveHourRemaining = enabledAccounts.reduce(
@@ -265,8 +291,10 @@ export const AccountsPage = ({
         title={detailAccount ? `${detailAccount.name} · 账号详情` : "账号详情"}
         open={Boolean(detailAccount)}
         size={720}
+        extra={<Button aria-label="刷新订阅信息" icon={<ReloadOutlined />} loading={subscriptionRefreshing} onClick={() => void refreshSubscription()}>刷新订阅信息</Button>}
         onClose={() => setDetailAccount(null)}
       >
+        {subscriptionMessage && subscriptionMessage.id === detailAccount?.id && <Alert type={subscriptionMessage.type} showIcon title={subscriptionMessage.text} style={{ marginBottom: 12 }} />}
         {detailAccount && <Descriptions bordered column={1} size="small" items={[
           { key: "identity", label: "账号", children: detailAccount.email || detailAccount.id },
           { key: "plan", label: "套餐", children: detailAccount.subscription_plan || "未知" },

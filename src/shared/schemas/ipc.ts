@@ -55,6 +55,7 @@ export const ipcArgumentSchemas = {
   "upstreams:testConnection": z.tuple([id]),
   "upstreams:testInvocation": z.tuple([id, id]),
   "tokens:list": z.tuple([logQuery]),
+  "tokens:models": empty,
   "tokens:summary": z.tuple([logQuery.optional()]),
   "quota:summary": empty,
   "tokens:clear": empty,
@@ -70,6 +71,7 @@ export const ipcArgumentSchemas = {
   "auth:status": z.tuple([id]),
   "auth:cancelLogin": z.tuple([id]),
   "accounts:refreshUsage": z.tuple([id]),
+  "accounts:refreshSubscription": z.tuple([id]),
   "accounts:refreshAllUsage": empty,
   "accounts:consumeResetCredit": z.tuple([id, id.optional()]),
   "accounts:importLocalCodex": empty

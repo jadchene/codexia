@@ -5,7 +5,7 @@ import path from "node:path";
 import { dbPath, dataDir } from "./paths.ts";
 import type { SecretCodec } from "./secret-codec";
 import type { Settings } from "../shared/contracts/settings";
-import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shared/contracts/logs";
+import type { AppLogPage, LogQuery, RequestLogPage, RequestLogModels, TokenSummary } from "../shared/contracts/logs";
 
 type Db = any;
 type Row = Record<string, any>;
@@ -41,6 +41,7 @@ export interface Store {
   getLoginSession: (id: string) => Row | null;
   updateLoginSession: (id: string, status: string, error: string | null) => void;
   listTokenLogs: (query?: Partial<LogQuery>) => RequestLogPage;
+  listTokenLogModels: () => RequestLogModels;
   addTokenLog: (entry: Row) => void;
   clearTokenLogs: () => { deleted: number };
   tokenSummary: (query?: Partial<LogQuery>) => TokenSummary;
@@ -98,6 +99,10 @@ export function createStore(options: StoreOptions = {}): Store {
     getLoginSession: (id) => getLoginSession(db, id, secretCodec),
     updateLoginSession: (id, status, error) => updateLoginSession(db, id, status, error),
     listTokenLogs: (query) => listTokenLogs(db, query),
+    listTokenLogModels: () => ({
+      clientModels: db.prepare("SELECT DISTINCT client_model AS model FROM request_logs WHERE client_model IS NOT NULL AND TRIM(client_model) <> '' ORDER BY client_model").all().map((row: Row) => row.model),
+      upstreamModels: db.prepare("SELECT DISTINCT upstream_model AS model FROM request_logs WHERE upstream_model IS NOT NULL AND TRIM(upstream_model) <> '' ORDER BY upstream_model").all().map((row: Row) => row.model)
+    }),
     addTokenLog: (entry) => addTokenLog(db, entry),
     clearTokenLogs: () => clearTokenLogs(db),
     tokenSummary: (query) => tokenSummary(db, query),
@@ -948,12 +953,12 @@ function tokenLogFilter(range: ReturnType<typeof normalizeLogQuery>): { where: s
     params.push(range.upstreamId);
   }
   if (range.clientModel) {
-    clauses.push("request_logs.client_model LIKE ?");
-    params.push(`%${range.clientModel}%`);
+    clauses.push("request_logs.client_model = ?");
+    params.push(range.clientModel);
   }
   if (range.upstreamModel) {
-    clauses.push("request_logs.upstream_model LIKE ?");
-    params.push(`%${range.upstreamModel}%`);
+    clauses.push("request_logs.upstream_model = ?");
+    params.push(range.upstreamModel);
   }
   if (range.sessionId) {
     clauses.push("request_logs.session_id LIKE ?");

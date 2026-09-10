@@ -99,6 +99,7 @@ describe("Ant Design pages", () => {
       onCancelLogin,
       onResetLogin: vi.fn(),
       onRefreshUsage: vi.fn(),
+      onRefreshSubscription: vi.fn(),
       onRefreshAll: vi.fn(),
       onConsumeResetCredit: vi.fn(),
       consumingResetIds: new Set<string>(),
@@ -144,6 +145,7 @@ describe("Ant Design pages", () => {
       onCancelLogin: vi.fn(),
       onResetLogin: vi.fn(),
       onRefreshUsage: vi.fn(),
+      onRefreshSubscription: vi.fn(),
       onRefreshAll: vi.fn(),
       onConsumeResetCredit: vi.fn(),
       consumingResetIds: new Set<string>(),
@@ -166,6 +168,11 @@ describe("Ant Design pages", () => {
   it("shows the subscription expiry in account details", async () => {
     const user = userEvent.setup();
     const subscriptionExpiresAt = 1_800_000_000;
+    const onRefreshSubscription = vi.fn().mockResolvedValue({
+      id: "account-1", name: "测试账号", email: "account@example.com", enabled: true, status: "active",
+      subscription_plan: "pro", subscription_expires_at: subscriptionExpiresAt + 86400,
+      has_access_token: true, has_refresh_token: true
+    });
     render(<AccountsPage accounts={[{
       id: "account-1",
       name: "测试账号",
@@ -177,7 +184,7 @@ describe("Ant Design pages", () => {
       has_access_token: true,
       has_refresh_token: true
     }]} loginPhase="idle" loginError="" refreshingIds={new Set()} retryIds={new Set()} settings={{}}
-      onStartLogin={vi.fn()} onImportLocal={vi.fn()} onCancelLogin={vi.fn()} onResetLogin={vi.fn()} onRefreshUsage={vi.fn()}
+      onStartLogin={vi.fn()} onImportLocal={vi.fn()} onCancelLogin={vi.fn()} onResetLogin={vi.fn()} onRefreshUsage={vi.fn()} onRefreshSubscription={onRefreshSubscription}
       onRefreshAll={vi.fn()} onConsumeResetCredit={vi.fn()} consumingResetIds={new Set()}
       onSetEnabled={vi.fn()} onDelete={vi.fn()} />);
 
@@ -187,6 +194,14 @@ describe("Ant Design pages", () => {
     await user.click(screen.getByRole("button", { name: "查看详情" }));
     expect(screen.getByText("订阅到期")).toBeTruthy();
     expect(screen.getByText(new Date(subscriptionExpiresAt * 1000).toLocaleString())).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "刷新订阅信息" }));
+    expect(onRefreshSubscription).toHaveBeenCalledWith(expect.objectContaining({ id: "account-1" }));
+    expect(await screen.findByText("pro")).toBeTruthy();
+    expect(screen.getByText(new Date((subscriptionExpiresAt + 86400) * 1000).toLocaleString())).toBeTruthy();
+    onRefreshSubscription.mockRejectedValueOnce(new Error("network failed"));
+    await user.click(screen.getByRole("button", { name: "刷新订阅信息" }));
+    expect(await screen.findByText("订阅信息刷新失败，请检查网络或重新登录后重试。")).toBeTruthy();
+    expect(screen.getByText("pro")).toBeTruthy();
   });
 
   it("requires Codex model JSON when adding an API upstream", async () => {
@@ -402,6 +417,27 @@ describe("Ant Design pages", () => {
     expect(onQuery.mock.calls[1]?.[0]).not.toHaveProperty("accountId");
   });
 
+  it("filters analytics by session and selected models and clears them on reset", async () => {
+    const user = userEvent.setup();
+    const onQuery = vi.fn();
+    renderWithQueries(<RequestAnalyticsPage pageData={emptyRequestPage} summary={emptySummary} accounts={[]} settings={{}} onMessage={vi.fn()} onQuery={onQuery} />);
+    await user.type(screen.getByRole("textbox", { name: "会话 ID" }), "session-42");
+    await user.click(screen.getByRole("combobox", { name: "Codex 模型" }));
+    await user.click(await screen.findByText("gpt-client", { selector: ".ant-select-item-option-content" }));
+    await user.click(screen.getByRole("combobox", { name: "渠道模型" }));
+    await user.click(await screen.findByText("gpt-upstream", { selector: ".ant-select-item-option-content" }));
+    await user.click(screen.getByRole("button", { name: /查询/ }));
+    expect(onQuery).toHaveBeenLastCalledWith(expect.objectContaining({
+      page: 1, sessionId: "session-42", clientModel: "gpt-client", upstreamModel: "gpt-upstream"
+    }), true);
+    await user.click(screen.getByRole("button", { name: /重置/ }));
+    const resetQuery = onQuery.mock.lastCall?.[0];
+    expect(resetQuery).not.toHaveProperty("sessionId");
+    expect(resetQuery).not.toHaveProperty("clientModel");
+    expect(resetQuery).not.toHaveProperty("upstreamModel");
+    expect((screen.getByRole("textbox", { name: "会话 ID" }) as HTMLInputElement).value).toBe("");
+  });
+
   it("keeps request analytics column settings after the page remounts", async () => {
     const user = userEvent.setup();
     localStorage.setItem("codexia:request-analytics:visible-columns", JSON.stringify(["time", "duration", "tokens"]));
@@ -510,6 +546,7 @@ function renderWithQueries(element: ReactElement) {
 
 function createBridge(): CodexGatewayBridge {
   return {
+    listTokenLogModels: vi.fn().mockResolvedValue({ clientModels: ["gpt-client"], upstreamModels: ["gpt-upstream"] }),
     listUpstreams: vi.fn().mockResolvedValue([]),
     listUpstreamModels: vi.fn().mockResolvedValue([]),
     getBundledModelOverride: vi.fn().mockResolvedValue({ enabled: false, modelCatalogJson: "" }),

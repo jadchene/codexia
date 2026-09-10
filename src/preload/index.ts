@@ -8,7 +8,7 @@ import type {
 } from "../shared/contracts/accounts";
 import type { BootstrapData } from "../shared/contracts/bootstrap";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc";
-import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shared/contracts/logs";
+import type { AppLogPage, LogQuery, RequestLogPage, RequestLogModels, TokenSummary } from "../shared/contracts/logs";
 import type { ServiceStatus, Settings } from "../shared/contracts/settings";
 import type {
   BalanceRefreshResult,
@@ -62,10 +62,12 @@ const api = {
   testUpstreamConnection: (upstreamId: string): Promise<UpstreamHealthResult> => invoke("upstreams:testConnection", upstreamId),
   testUpstreamInvocation: (upstreamId: string, modelId: string): Promise<UpstreamInvocationTestResult> => invoke("upstreams:testInvocation", upstreamId, modelId),
   refreshUsage: (id: string): Promise<unknown> => invoke("accounts:refreshUsage", id),
+  refreshSubscription: (id: string): Promise<PublicAccount> => invoke("accounts:refreshSubscription", id),
   refreshAllUsage: (): Promise<UsageRefreshResult[]> => invoke("accounts:refreshAllUsage"),
   consumeResetCredit: (id: string, creditId?: string): Promise<ConsumeResetCreditResult> => invoke("accounts:consumeResetCredit", id, creditId),
   importLocalCodexAccount: (): Promise<PublicAccount> => invoke("accounts:importLocalCodex"),
   listTokenLogs: (query: LogQuery): Promise<RequestLogPage> => invoke("tokens:list", query),
+  listTokenLogModels: (): Promise<RequestLogModels> => invoke("tokens:models"),
   tokenSummary: (query?: LogQuery): Promise<TokenSummary> => invoke("tokens:summary", query),
   quotaSummary: (): Promise<BootstrapData["quotaSummary"]> => invoke("quota:summary"),
   clearTokenLogs: (): Promise<ClearResult> => invoke("tokens:clear"),

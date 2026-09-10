@@ -257,6 +257,16 @@ export function accountFromTokens(tokens: TokenSet): Record<string, unknown> {
   };
 }
 
+export function subscriptionFromTokens(tokens: TokenSet): { subscription_plan: string; subscription_expires_at: number | null } {
+  const access = decodeJwtPayload(tokens.access_token)?.["https://api.openai.com/auth"] || {};
+  const identity = decodeJwtPayload(tokens.id_token)?.["https://api.openai.com/auth"] || {};
+  const auth = { ...access, ...identity };
+  return {
+    subscription_plan: auth.chatgpt_plan_type || "",
+    subscription_expires_at: toEpoch(auth.chatgpt_subscription_active_until)
+  };
+}
+
 function decodeJwtPayload(token: string | undefined): Record<string, any> | null {
   if (!token || !token.includes(".")) return null;
   try {

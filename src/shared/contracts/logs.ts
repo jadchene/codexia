@@ -1,5 +1,10 @@
 import type { PageResult } from "./common";
 
+export interface RequestLogModels {
+  clientModels: string[];
+  upstreamModels: string[];
+}
+
 export interface LogQuery {
   page: number;
   pageSize: number;

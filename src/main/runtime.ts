@@ -19,7 +19,7 @@ import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
 import { createCodexModelCatalogService, parseBundledOverrideCatalog } from "./codex-model-catalog.ts";
-import { createAuthService, accountFromTokens } from "./auth.ts";
+import { createAuthService, accountFromTokens, subscriptionFromTokens } from "./auth.ts";
 import { normalizeUsagePayload, normalizeResetCreditsPayload } from "./quota.ts";
 import {
   buildConsumeRequestBody,
@@ -493,6 +493,7 @@ function registerIpc() {
     return result;
   });
   handleIpc("tokens:list", (_event, query) => store.listTokenLogs(query));
+  handleIpc("tokens:models", () => store.listTokenLogModels());
   handleIpc("tokens:summary", (_event, query) => store.tokenSummary(query));
   handleIpc("quota:summary", () => gatewayQuotaSummary());
   handleIpc("tokens:clear", () => {
@@ -548,6 +549,18 @@ function registerIpc() {
     return publicAccount(result);
   });
   handleIpc("accounts:refreshAllUsage", async () => refreshAllUsage("manual"));
+  handleIpc("accounts:refreshSubscription", async (_event, id) => {
+    const account = store.listAccounts().find((item: Dynamic) => item.id === id);
+    if (!account) throw new Error("账号不存在，请刷新列表后重试。");
+    if (!account.refresh_token) throw new Error("登录已失效，请重新登录后刷新订阅信息。");
+    const refreshed = await refreshAccessToken(account, true);
+    const latest = store.listAccounts().find((item: Dynamic) => item.id === id);
+    if (!latest) throw new Error("账号已删除。");
+    const saved = store.saveAccount({ ...latest, ...refreshed });
+    store.addAppLog({ scope: "auth", action: "refresh-subscription", status: "success", message: `已刷新订阅信息：${saved.name}` });
+    notifyDataChanged(["accounts"]);
+    return publicAccount(saved);
+  });
   handleIpc("accounts:consumeResetCredit", async (_event, id, creditId) => {
     const result = await consumeResetCredit(id, creditId);
     notifyDataChanged(["accounts"]);
@@ -1515,7 +1528,7 @@ async function requestJson(endpoint: Dynamic, account: Dynamic) {
   return JSON.parse(text);
 }
 
-async function refreshAccessToken(account: Dynamic) {
+async function refreshAccessToken(account: Dynamic, refreshSubscription = false) {
   const body = new URLSearchParams({
     client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
     grant_type: "refresh_token",
@@ -1534,6 +1547,7 @@ async function refreshAccessToken(account: Dynamic) {
     access_token: data.access_token || account.access_token,
     refresh_token: data.refresh_token || account.refresh_token,
     id_token: data.id_token || account.id_token,
+    ...(refreshSubscription ? subscriptionFromTokens(data) : {}),
     last_refresh: new Date().toISOString()
   };
 }

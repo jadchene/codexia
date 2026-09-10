@@ -85,6 +85,10 @@ export const RequestAnalyticsPage = ({
   useDayRollover(() => {
     if (followsToday) setFilters((current) => withTodayRange(current));
   });
+  const modelsQuery = useQuery({
+    queryKey: ["request-log-models"],
+    queryFn: () => window.codexGateway.listTokenLogModels()
+  });
 
   const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters, nextFollowsToday = followsToday): Promise<void> => {
     setFilters(nextFilters);
@@ -243,11 +247,29 @@ export const RequestAnalyticsPage = ({
           </div>
           <div>
             <Typography.Text type="secondary" className="v1-filter-label">Codex 模型</Typography.Text>
-            <Input value={filters.clientModel} placeholder="模糊匹配" style={{ width: 170 }} onChange={(event) => setFilters((current) => ({ ...current, clientModel: event.target.value }))} />
+            <Select aria-label="Codex 模型" allowClear showSearch value={filters.clientModel || undefined} placeholder="全部 Codex 模型" style={{ width: 200 }}
+              loading={modelsQuery.isFetching}
+              options={(modelsQuery.data?.clientModels || []).map((value) => ({ value, label: value }))}
+              onOpenChange={(open) => {
+                if (open) void modelsQuery.refetch();
+              }}
+              onChange={(value) => setFilters((current) => ({ ...current, clientModel: value || "" }))} />
           </div>
           <div>
             <Typography.Text type="secondary" className="v1-filter-label">渠道模型</Typography.Text>
-            <Input value={filters.upstreamModel} placeholder="模糊匹配" style={{ width: 170 }} onChange={(event) => setFilters((current) => ({ ...current, upstreamModel: event.target.value }))} />
+            <Select aria-label="渠道模型" allowClear showSearch value={filters.upstreamModel || undefined} placeholder="全部渠道模型" style={{ width: 200 }}
+              loading={modelsQuery.isFetching}
+              options={(modelsQuery.data?.upstreamModels || []).map((value) => ({ value, label: value }))}
+              onOpenChange={(open) => {
+                if (open) void modelsQuery.refetch();
+              }}
+              onChange={(value) => setFilters((current) => ({ ...current, upstreamModel: value || "" }))} />
+          </div>
+          <div>
+            <Typography.Text type="secondary" className="v1-filter-label">会话 ID</Typography.Text>
+            <Input aria-label="会话 ID" allowClear value={filters.sessionId} placeholder="输入会话 ID，支持部分匹配" style={{ width: 240 }}
+              onChange={(event) => setFilters((current) => ({ ...current, sessionId: event.target.value }))}
+              onPressEnter={() => void runQuery(1)} />
           </div>
           <div>
             <Typography.Text type="secondary" className="v1-filter-label">状态</Typography.Text>
