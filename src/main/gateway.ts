@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { pickGatewayAccount } from "./selection.ts";
 import { createGatewayRouting } from "./gateway-routing.ts";
 import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
+import { createAccountModeApiProxy } from "./account-mode-api-proxy.ts";
 import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
@@ -102,6 +103,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     }
   });
   let websocketGateway: Dynamic = null;
+  let accountModeApiProxy: Dynamic = null;
 
   async function start() {
     if (server) return status();
@@ -118,7 +120,20 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       routing,
       apiDebugLogger
     };
-    server = http.createServer((req: Dynamic, res: Dynamic) => handleRequest(req, res, store, authService, hooks, runtime));
+    accountModeApiProxy = createAccountModeApiProxy(store, apiDebugLogger, {
+      upstreamBaseUrl: hooks.accountModeUpstreamBaseUrl,
+      getModelPricing: (modelId) => hooks.upstreamService?.getModelPricing?.("builtin-chatgpt-subscription-pool", modelId)
+    });
+    server = http.createServer((req: Dynamic, res: Dynamic) => {
+      if (useAccountModeGatewayProxy(store.getSettings(), req.url)) {
+        void accountModeApiProxy.handleHttp(req, res).catch((error: Dynamic) => {
+          if (!res.headersSent) sendJson(res, 502, { error: { message: "API 服务暂时无法完成账号模式代理请求。" } });
+          store.addAppLog?.({ level: "error", scope: "gateway", action: "account-proxy", status: "failed", message: gatewayErrorMessage(error) });
+        });
+        return;
+      }
+      void handleRequest(req, res, store, authService, hooks, runtime);
+    });
     websocketGateway = createGatewayWebSocketGateway({
       store,
       hooks,
@@ -137,7 +152,13 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
         extractTokenUsage
       }
     });
-    server.on("upgrade", websocketGateway.handleUpgrade);
+    server.on("upgrade", (request: Dynamic, socket: Dynamic, head: Dynamic) => {
+      if (useAccountModeGatewayProxy(store.getSettings(), request.url)) {
+        accountModeApiProxy.handleUpgrade(request, socket, head);
+        return;
+      }
+      websocketGateway.handleUpgrade(request, socket, head);
+    });
     server.on("connection", (socket: Dynamic) => {
       sockets.add(socket);
       socket.on("error", () => {});
@@ -162,8 +183,11 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       server = null;
       const failedWebsocketGateway = websocketGateway;
       websocketGateway = null;
+      const failedAccountModeApiProxy = accountModeApiProxy;
+      accountModeApiProxy = null;
       failedServer?.removeAllListeners();
       await failedWebsocketGateway?.close();
+      await failedAccountModeApiProxy?.close();
       state = { running: false, url: "", error: String(error?.message || error) };
       throw error;
     }
@@ -183,6 +207,8 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     server = null;
     const closingWebsocketGateway = websocketGateway;
     websocketGateway = null;
+    const closingAccountModeApiProxy = accountModeApiProxy;
+    accountModeApiProxy = null;
     const settings = store.getSettings();
     const graceMs = positiveSetting(settings.gateway_shutdown_grace_ms, DEFAULT_SHUTDOWN_GRACE_MS);
     const closePromise = new Promise<void>((resolve) => closing.close(resolve));
@@ -200,6 +226,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     });
     await Promise.race([closePromise, forcePromise]);
     await closingWebsocketGateway?.close();
+    await closingAccountModeApiProxy?.close();
     routingPersistence.flush();
     if (forceTimer) clearTimeout(forceTimer);
     if (forcedSocketCount > 0 && store.addAppLog) {
@@ -233,8 +260,14 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     return apiDebugMode.disable();
   }
 
-  return { start, stop, status, setApiDebugLogging, shutdownApiDebugLogging };
+  return { start, stop, status, setApiDebugLogging, shutdownApiDebugLogging, apiDebugLogger };
 }
+
+const useAccountModeGatewayProxy = (settings: Dynamic, requestUrl: unknown): boolean => {
+  if (settings.codex_auth_mode !== "account" || settings.account_mode_use_api_proxy !== "true") return false;
+  const pathname = new URL(String(requestUrl || "/"), "http://localhost").pathname;
+  return pathname.startsWith("/v1/");
+};
 
 export function createDebouncedPersistence(
   write: (value: string) => void,

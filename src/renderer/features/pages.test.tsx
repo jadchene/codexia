@@ -333,12 +333,17 @@ describe("Ant Design pages", () => {
   it("starts the gateway from service management", async () => {
     const user = userEvent.setup();
     const onToggleGateway = vi.fn().mockResolvedValue(undefined);
-    render(<ServicesPage gateway={{ running: false }} mcpGateway={{ running: false }} gatewayBase="http://localhost:8436/v1"
+    render(<ServicesPage gateway={{ running: false }} mcpGateway={{ running: false }}
+      gatewayBase="http://localhost:8436/v1"
       mcpGatewayUrl="http://127.0.0.1:3000/mcp" mcpGatewayCommand="mcp-gateway-service --http"
       onToggleGateway={onToggleGateway}
-      onToggleMcpGateway={vi.fn()} onRestartGateway={vi.fn()} onRestartMcpGateway={vi.fn()} onMessage={vi.fn()} />);
+      onToggleMcpGateway={vi.fn()} onRestartGateway={vi.fn()}
+      onRestartMcpGateway={vi.fn()} />);
     expect(screen.getByText("API 服务")).toBeTruthy();
     expect(screen.getByText("MCP 服务")).toBeTruthy();
+    expect(screen.queryByText("HTTP 请求")).toBeNull();
+    expect(screen.queryByText("WebSocket 连接")).toBeNull();
+    expect(screen.queryByRole("button", { name: /复制/ })).toBeNull();
     await user.click(screen.getAllByRole("button", { name: /启动/ })[0]!);
     expect(onToggleGateway).toHaveBeenCalledOnce();
   });
@@ -524,7 +529,8 @@ describe("Ant Design pages", () => {
     const user = userEvent.setup();
     const onApplyGateway = vi.fn().mockResolvedValue(undefined);
     const onSaveSettings = vi.fn().mockResolvedValue(undefined);
-    render(<CodexIntegrationPage settings={{ codex_auth_mode: "" }} accounts={[]} gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json"
+    render(<CodexIntegrationPage settings={{ codex_auth_mode: "" }} accounts={[]}
+      gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json"
       onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
     expect(screen.getByRole("radio", { name: /API 模式/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /API 模式/ }));
@@ -536,6 +542,38 @@ describe("Ant Design pages", () => {
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ codex_config_use_openai_base_url: "false" }));
     expect(onApplyGateway).toHaveBeenCalledOnce();
+  });
+
+  it("applies account mode through the API service and shows name-only account labels", async () => {
+    const user = userEvent.setup();
+    const onApplyAccount = vi.fn().mockResolvedValue(undefined);
+    render(<CodexIntegrationPage
+      settings={{ codex_auth_mode: "" }}
+      accounts={[{
+        id: "account-1",
+        name: "测试账号",
+        email: "account@example.com",
+        enabled: true,
+        status: "active",
+        has_access_token: true,
+        has_refresh_token: true
+      }]}
+      gatewayBase="http://localhost:8436/v1"
+      modelCatalogPath="D:/data/models.json"
+      onMessage={vi.fn()}
+      onSaveSettings={vi.fn()}
+      onApplyGateway={vi.fn()}
+      onApplyAccount={onApplyAccount}
+    />);
+    fireEvent.click(screen.getByRole("radio", { name: /账号模式/ }));
+    await user.click(screen.getByRole("combobox"));
+    expect(await screen.findByText("测试账号", { selector: ".ant-select-item-option-content" })).toBeTruthy();
+    expect(screen.queryByText(/account@example\.com/, { selector: ".ant-select-item-option-content" })).toBeNull();
+    await user.click(screen.getByText("测试账号", { selector: ".ant-select-item-option-content" }));
+    expect(screen.getByText("通过现有 API 服务透明转发，仅记录请求日志")).toBeTruthy();
+    await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
+    await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
+    expect(onApplyAccount).toHaveBeenCalledWith("account-1", true);
   });
 });
 

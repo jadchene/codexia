@@ -66,7 +66,7 @@ export type IpcContract = {
   "mcpGateway:start": IpcSpec<[], ServiceStatus>;
   "mcpGateway:stop": IpcSpec<[], ServiceStatus>;
   "codexAuth:applyGatewayMode": IpcSpec<[], ApplyAuthResult>;
-  "codexAuth:applyAccountMode": IpcSpec<[accountId: string], ApplyAuthResult>;
+  "codexAuth:applyAccountMode": IpcSpec<[accountId: string, useApiProxy: boolean], ApplyAuthResult>;
   "auth:startLogin": IpcSpec<[], LoginStartResult>;
   "auth:status": IpcSpec<[loginId: string], LoginStatus>;
   "auth:cancelLogin": IpcSpec<[loginId: string], { cancelled: boolean }>;

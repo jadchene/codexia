@@ -1,5 +1,5 @@
 import { CheckCircleOutlined, KeyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Radio, Segmented, Select, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Flex, Radio, Segmented, Select, Space, Switch, Tag, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
@@ -16,7 +16,7 @@ interface CodexIntegrationPageProps {
   onMessage: (message: string) => void;
   onSaveSettings: (settings: Settings) => Promise<unknown>;
   onApplyGateway: () => Promise<void>;
-  onApplyAccount: (accountId: string) => Promise<void>;
+  onApplyAccount: (accountId: string, useApiProxy: boolean) => Promise<void>;
 }
 
 export const CodexIntegrationPage = ({
@@ -32,6 +32,7 @@ export const CodexIntegrationPage = ({
   const [mode, setMode] = useState<AuthMode>(normalizeAuthMode(settings.codex_auth_mode));
   const [accountId, setAccountId] = useState(settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "");
   const [gatewayConfigMode, setGatewayConfigMode] = useState<GatewayConfigMode>(gatewayConfigModeFromSettings(settings));
+  const [useApiProxy, setUseApiProxy] = useState(settings.account_mode_use_api_proxy === "true");
   const [busy, setBusy] = useState(false);
   const usableAccounts = useMemo(() => accounts.filter((account) => isUsableAccount(account, settings)), [accounts, settings]);
   const selectedAccount = accounts.find((account) => account.id === accountId);
@@ -39,18 +40,20 @@ export const CodexIntegrationPage = ({
     ? settings.codex_auth_mode === "gateway"
     : mode === "account" && settings.codex_auth_mode === "account" && settings.codex_selected_account_id === accountId;
   const gatewayConfigChanged = gatewayConfigMode !== gatewayConfigModeFromSettings(settings);
+  const apiProxyChanged = useApiProxy !== (settings.account_mode_use_api_proxy === "true");
   const previewSettings = {
     ...settings,
     codex_config_use_openai_base_url: gatewayConfigMode === "base_url" ? "true" : "false"
   };
   const applyButtonText = mode === "gateway"
     ? alreadyApplied && !gatewayConfigChanged ? "重新应用到 Codex" : "应用到 Codex"
-    : alreadyApplied ? "已应用" : "应用到 Codex";
+    : alreadyApplied && !apiProxyChanged ? "已应用" : alreadyApplied ? "重新应用到 Codex" : "应用到 Codex";
 
   useEffect(() => {
     setMode(normalizeAuthMode(settings.codex_auth_mode));
     setAccountId(settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "");
     setGatewayConfigMode(gatewayConfigModeFromSettings(settings));
+    setUseApiProxy(settings.account_mode_use_api_proxy === "true");
   }, [settings]);
 
   const apply = async (): Promise<void> => {
@@ -60,7 +63,7 @@ export const CodexIntegrationPage = ({
         if (gatewayConfigChanged) await onSaveSettings(previewSettings);
         await onApplyGateway();
       }
-      else if (mode === "account") await onApplyAccount(accountId);
+      else if (mode === "account") await onApplyAccount(accountId, useApiProxy);
     } catch (error) {
       onMessage(`写入失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -120,7 +123,7 @@ export const CodexIntegrationPage = ({
             showIcon
             type="warning"
             title="Codex 将直接使用所选账号"
-            description="账号模式不会经过 API 服务。需要使用模型渠道时，请重新应用 API 模式。"
+            description="账号模式不会经过本地服务。需要使用模型渠道时，请重新应用 API 模式。"
           />
           <Select
             showSearch
@@ -129,12 +132,19 @@ export const CodexIntegrationPage = ({
             optionFilterProp="label"
             options={accounts.map((account) => ({
               value: account.id,
-              label: `${account.name || "未命名账号"}${account.email ? ` · ${account.email}` : ""}`,
+              label: account.name || "未命名账号",
               disabled: !isUsableAccount(account, settings)
             }))}
             onChange={setAccountId}
           />
           {accounts.length > 0 && usableAccounts.length === 0 && <Alert showIcon type="error" title="当前没有可用账号，请先刷新额度或重新登录。" />}
+          <Space orientation="vertical" size={2}>
+            <Flex align="center" gap={10}>
+              <Typography.Text strong>通过 API 服务代理</Typography.Text>
+              <Switch size="small" aria-label="通过 API 服务代理" checked={useApiProxy} onChange={setUseApiProxy} />
+            </Flex>
+            <Typography.Text type="secondary">通过现有 API 服务透明转发，仅记录请求日志</Typography.Text>
+          </Space>
         </Space>
       )}
 
@@ -142,7 +152,7 @@ export const CodexIntegrationPage = ({
         <Button
           type="primary"
           loading={busy}
-          disabled={!mode || (mode === "account" && (alreadyApplied || !accountId || !isUsableAccount(selectedAccount, settings)))}
+          disabled={!mode || (mode === "account" && ((alreadyApplied && !apiProxyChanged) || !accountId || !isUsableAccount(selectedAccount, settings)))}
           onClick={apply}
         >
           {applyButtonText}

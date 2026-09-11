@@ -1,5 +1,5 @@
-import { CopyOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
-import { Alert, Badge, Button, Card, Descriptions, Flex, Space, Typography } from "antd";
+import { PlayCircleOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
+import { Alert, Badge, Button, Card, Descriptions, Space, Typography } from "antd";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -7,8 +7,6 @@ interface ServiceStatus {
   running: boolean;
   command?: string;
   error?: string;
-  activeHttpRequests?: number;
-  activeWebSockets?: number;
 }
 
 interface ServicesPageProps {
@@ -21,7 +19,6 @@ interface ServicesPageProps {
   onToggleMcpGateway: () => Promise<void>;
   onRestartGateway: () => Promise<void>;
   onRestartMcpGateway: () => Promise<void>;
-  onMessage: (message: string) => void;
 }
 
 export const ServicesPage = ({
@@ -33,15 +30,15 @@ export const ServicesPage = ({
   onToggleGateway,
   onToggleMcpGateway,
   onRestartGateway,
-  onRestartMcpGateway,
-  onMessage
+  onRestartMcpGateway
 }: ServicesPageProps) => {
   const [busyService, setBusyService] = useState<"gateway" | "mcp" | null>(null);
 
   const toggle = async (service: "gateway" | "mcp"): Promise<void> => {
     setBusyService(service);
     try {
-      await (service === "gateway" ? onToggleGateway() : onToggleMcpGateway());
+      if (service === "gateway") await onToggleGateway();
+      else await onToggleMcpGateway();
     } finally {
       setBusyService(null);
     }
@@ -50,18 +47,10 @@ export const ServicesPage = ({
   const restart = async (service: "gateway" | "mcp"): Promise<void> => {
     setBusyService(service);
     try {
-      await (service === "gateway" ? onRestartGateway() : onRestartMcpGateway());
+      if (service === "gateway") await onRestartGateway();
+      else await onRestartMcpGateway();
     } finally {
       setBusyService(null);
-    }
-  };
-
-  const copy = async (label: string, value: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(value);
-      onMessage(`${label}已复制`);
-    } catch (error) {
-      onMessage(`复制失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -76,7 +65,7 @@ export const ServicesPage = ({
           onRestart={() => restart("gateway")}
         >
           <Descriptions column={1} size="small" items={[
-            { key: "base", label: "服务地址", children: <CopyableValue value={gatewayBase} onCopy={() => copy("API 地址", gatewayBase)} /> }
+            { key: "base", label: "服务地址", children: <ServiceValue value={gatewayBase} /> }
           ]} />
           {gateway.error && <Alert showIcon type="error" title="最近错误" description={gateway.error} />}
         </ServiceCard>
@@ -88,8 +77,8 @@ export const ServicesPage = ({
           onRestart={() => restart("mcp")}
         >
           <Descriptions column={1} size="small" items={[
-            { key: "url", label: "服务地址", children: <CopyableValue value={mcpGatewayUrl || "-"} onCopy={() => copy("MCP 地址", mcpGatewayUrl)} /> },
-            { key: "command", label: "启动命令", children: <CopyableValue value={mcpGateway.command || mcpGatewayCommand || "-"} onCopy={() => copy("MCP 命令", mcpGateway.command || mcpGatewayCommand)} /> }
+            { key: "url", label: "服务地址", children: <ServiceValue value={mcpGatewayUrl} /> },
+            { key: "command", label: "启动命令", children: <ServiceValue value={mcpGateway.command || mcpGatewayCommand} /> }
           ]} />
           {mcpGateway.error && <Alert showIcon type="error" title="最近错误" description={mcpGateway.error} />}
         </ServiceCard>
@@ -136,9 +125,6 @@ const ServiceCard = ({
   </Card>
 );
 
-const CopyableValue = ({ value, onCopy }: { value: string; onCopy: () => void }) => (
-  <Flex align="center" gap={8}>
-    <Typography.Text className="v1-mono">{value || "-"}</Typography.Text>
-    {value && value !== "-" && <Button aria-label={`复制 ${value}`} icon={<CopyOutlined />} size="small" type="text" onClick={onCopy} />}
-  </Flex>
+const ServiceValue = ({ value }: { value: string }) => (
+  <Typography.Text className="v1-mono">{value || "-"}</Typography.Text>
 );

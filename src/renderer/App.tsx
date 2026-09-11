@@ -547,8 +547,8 @@ function App() {
               await reload();
               setMessage(result.providerChanged ? "已应用 API 模式" : "已更新 API 模式");
             }}
-            onApplyAccount={async (accountId) => {
-              const result = await api.applyAccountAuth(accountId);
+            onApplyAccount={async (accountId, useApiProxy) => {
+              const result = await api.applyAccountAuth(accountId, useApiProxy);
               await reload();
               setMessage(result.providerRemoved ? "已应用账号模式" : "已更新账号模式");
             }}
@@ -565,7 +565,6 @@ function App() {
             onToggleMcpGateway={toggleMcpGateway}
             onRestartGateway={restartGateway}
             onRestartMcpGateway={restartMcpGateway}
-            onMessage={setMessage}
           />
         )}
         {page === "settings" && (

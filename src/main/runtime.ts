@@ -30,7 +30,13 @@ import {
   pickResetCreditById,
   requestResetCreditConsume
 } from "./reset-credit.ts";
-import { applyGatewayMode, applyAccountMode, detectCodexAuthMode, ensureProviderConfig, resolveCodexHome } from "./codex-cli-auth.ts";
+import {
+  applyGatewayMode,
+  applyAccountMode,
+  detectCodexAuthMode,
+  ensureProviderConfig,
+  resolveCodexHome
+} from "./codex-cli-auth.ts";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc.ts";
 import type { ModelManagementInput } from "../shared/contracts/upstreams.ts";
 import { ipcArgumentSchemas } from "../shared/schemas/ipc.ts";
@@ -520,7 +526,7 @@ function registerIpc() {
   handleIpc("mcpGateway:stop", async () => {
     return stopMcpGateway("manual");
   });
-  handleIpc("codexAuth:applyGatewayMode", () => {
+  handleIpc("codexAuth:applyGatewayMode", async () => {
     const settings = store.getSettings();
     modelCatalogService.refresh();
     const result = applyGatewayMode(settings, gatewayCodexOptions());
@@ -528,11 +534,20 @@ function registerIpc() {
     store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex API 模式认证" });
     return result;
   });
-  handleIpc("codexAuth:applyAccountMode", (_event, accountId) => {
+  handleIpc("codexAuth:applyAccountMode", async (_event, accountId, useApiProxy) => {
     const account = store.listAccounts().find((item: Dynamic) => item.id === accountId);
     if (!account) throw new Error("账号不存在。");
-    const result = applyAccountMode(account as Parameters<typeof applyAccountMode>[0], codexAccessOptions(runtimeProfile));
-    store.saveSettings({ codex_auth_mode: "account", codex_selected_account_id: account.id });
+    const settings = store.getSettings();
+    if (useApiProxy) await startGateway("account-proxy");
+    const result = applyAccountMode(account as Parameters<typeof applyAccountMode>[0], {
+      ...codexAccessOptions(runtimeProfile),
+      ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {})
+    });
+    store.saveSettings({
+      codex_auth_mode: "account",
+      codex_selected_account_id: account.id,
+      account_mode_use_api_proxy: useApiProxy ? "true" : "false"
+    });
     store.addAppLog({ scope: "auth", action: "apply-account", status: "success", message: `已写入 Codex 账号模式认证：${account.name}` });
     return result;
   });
@@ -702,6 +717,15 @@ async function startGateway(reason: Dynamic = "manual") {
 
 function gatewayCodexOptions() {
   return { ...codexAccessOptions(runtimeProfile), modelCatalogPath: modelCatalogService.path };
+}
+
+function accountModeGatewayBaseUrl(settings: Dynamic): string {
+  const configuredHost = String(settings.gateway_host || "localhost").trim();
+  const reachableHost = configuredHost === "0.0.0.0" || configuredHost === "::" || configuredHost === "[::]"
+    ? "localhost"
+    : configuredHost;
+  const host = reachableHost.includes(":") && !reachableHost.startsWith("[") ? `[${reachableHost}]` : reachableHost;
+  return `http://${host}:${settings.gateway_port || "8436"}/v1`;
 }
 
 async function stopGateway(reason: Dynamic = "manual") {

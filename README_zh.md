@@ -16,6 +16,7 @@ Codexia 是一个 Windows 桌面应用，用于在 Codex 中集中使用 ChatGPT
 - 在同一个桌面应用中集成并管理可选的 MCP 服务。
 - 快捷查看并使用订阅账号可用的重置卡。
 - 根据各模型的输入、缓存输入和输出费率估算调用成本。
+- 可选地让账号模式请求通过 API 服务代理，并将 Responses 调用纳入调用分析。
 
 ## 快速开始
 
@@ -25,7 +26,7 @@ Codexia 是一个 Windows 桌面应用，用于在 Codex 中集中使用 ChatGPT
 4. 在“服务管理”中启动 API 服务。
 5. 回到 Codex 选择模型。
 
-API 模式可以同时使用订阅模型和第三方模型；账号模式则让 Codex 直接连接一个选中的订阅账号。
+API 模式可以同时使用订阅模型和第三方模型；账号模式使用一个选中的订阅账号，并可选择是否通过 API 服务代理。
 
 ## 功能与设置
 
@@ -47,11 +48,11 @@ API 模式可以同时使用订阅模型和第三方模型；账号模式则让 
 
 使用渠道前，可以查看导入的模型目录并运行调用测试。
 
-“接入模式”用于将 API 模式或账号模式应用到 Codex。应用 API 模式前，还可以选择推荐的 Base URL 配置或自定义 Provider 配置。设置 `CODEX_HOME` 环境变量后，Codexia 会从该目录读写 Codex 配置；未设置时使用当前用户默认的 `.codex` 目录。
+“接入模式”用于将 API 模式或账号模式应用到 Codex。应用 API 模式前，还可以选择推荐的 Base URL 配置或自定义 Provider 配置。账号模式可勾选“通过 API 服务代理”；应用后会启动现有 API 服务并写入其 `/v1` Base URL。账号凭证会原样转发到 ChatGPT Codex 后端，只有 HTTP 与 WebSocket `/responses` 写入调用分析，其他路径仅透明转发，也不写调试 JSONL。设置 `CODEX_HOME` 环境变量后，Codexia 会从该目录读写 Codex 配置；未设置时使用当前用户默认的 `.codex` 目录。
 
 ### 服务管理
 
-“服务管理”用于启动、停止或重启本地 API 服务，以及由 [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway) 提供的可选 MCP 服务。启动 MCP 服务前，需要先配置文件路径和服务地址。
+“服务管理”用于启动、停止或重启本地 API 服务，以及由 [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway) 提供的可选 MCP 服务。账号模式开启代理后同样使用现有 API 服务，不增加独立服务或端口。启动 MCP 服务前，需要先配置文件路径和服务地址。
 
 ### 设置
 
@@ -69,7 +70,7 @@ API 模式可以同时使用订阅模型和第三方模型；账号模式则让 
 
 ### API 调试日志
 
-默认关闭（设置 > API 服务）。开启时会显示敏感数据警告；HTTP 与 WebSocket 的 API 请求和响应会以 JSON Lines 格式记录到 `data/logs/<yyyymmdd>.jsonl`。敏感请求头自动脱敏，但正文会保留以便排障，每条最多记录 1 MiB。调试模式最多开启 10 分钟，手动关闭、到期自动关闭或退出应用时都会删除全部调试日志。
+默认关闭（设置 > API 服务）。开启时会显示敏感数据警告，HTTP 与 WebSocket 的 API 请求和响应会以 JSON Lines 格式记录到 `data/logs/<yyyymmdd>.jsonl`；账号代理模式只记录 `/responses`。敏感请求头自动脱敏，但正文会保留以便排障，每条最多记录 1 MiB。调试模式最多开启 10 分钟，手动关闭、到期自动关闭或退出应用时都会删除全部调试日志。
 
 ### 数据与备份
 

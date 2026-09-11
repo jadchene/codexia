@@ -7,6 +7,7 @@ interface CodexPathOptions {
   codexDir?: string;
   modelCatalogPath?: string;
   environment?: NodeJS.ProcessEnv;
+  accountModeBaseUrl?: string;
 }
 interface AccountRecord extends Record<string, unknown> {
   id: string;
@@ -112,13 +113,19 @@ export function applyAccountMode(account: AccountRecord | null | undefined, opti
     last_refresh: String(account.last_refresh || toIso(account.updated_at) || new Date().toISOString())
   });
   const currentConfig = readText(configPath(options));
-  const nextConfig = withoutGatewayProvider(currentConfig);
+  const accountConfig = withoutGatewayProvider(currentConfig);
+  const proxyBaseUrl = String(options.accountModeBaseUrl || "").trim();
+  const nextConfig = proxyBaseUrl ? withOpenaiBaseUrl(accountConfig, proxyBaseUrl) : accountConfig;
   writeFilesTransaction([
     { file: authPath(options), content: nextAuth },
     { file: configPath(options), content: nextConfig }
   ], () => {
     const auth = readJsonSafe(authPath(options));
-    if (auth?.auth_mode !== "chatgpt" || auth?.tokens?.access_token !== account.access_token || hasGatewayProvider(readText(configPath(options)))) {
+    const writtenConfig = readText(configPath(options));
+    if (auth?.auth_mode !== "chatgpt"
+      || auth?.tokens?.access_token !== account.access_token
+      || hasCustomGatewayProvider(writtenConfig)
+      || (proxyBaseUrl && readOpenaiBaseUrl(writtenConfig) !== proxyBaseUrl)) {
       throw new Error("写入后的 Codex 账号认证校验失败。");
     }
   });
@@ -237,6 +244,22 @@ export function withoutGatewayProvider(current: unknown): string {
   return next;
 }
 
+export function readOpenaiBaseUrl(config: unknown): string {
+  const match = /^\s*openai_base_url\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/m.exec(String(config || ""));
+  return String(match?.[1] ?? match?.[2] ?? "").trim();
+}
+
+function withOpenaiBaseUrl(current: unknown, baseUrl: string): string {
+  return insertProviderBlockIntoConfig(removeOpenaiBaseUrl(current), `openai_base_url = ${tomlString(baseUrl)}`);
+}
+
+function removeOpenaiBaseUrl(current: unknown): string {
+  return String(current || "")
+    .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd() + "\n";
+}
+
 function hasManagedModelCatalog(config: string): boolean {
   return /^\s*model_catalog_json\s*=.*models\.json.*$/m.test(config);
 }
@@ -284,6 +307,11 @@ function hasGatewayProvider(config: string): boolean {
   return /^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(config)
     || /^\s*\[model_providers\.(?:codexia|codex_gateway)\]\s*$/m.test(config)
     || /^\s*openai_base_url\s*=.*$/m.test(config);
+}
+
+function hasCustomGatewayProvider(config: string): boolean {
+  return /^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(config)
+    || /^\s*\[model_providers\.(?:codexia|codex_gateway)\]\s*$/m.test(config);
 }
 
 function useOpenaiBaseUrl(settings: Settings): boolean {

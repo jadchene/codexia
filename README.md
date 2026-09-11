@@ -16,6 +16,7 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts and thi
 - Integrate and manage an optional MCP service from the same desktop app.
 - Quickly view and use available Bank Reset cards for subscription accounts.
 - Estimate request costs from each model's input, cached-input, and output prices.
+- Optionally route account-mode requests through the API service and include Responses calls in request analytics.
 
 ## Quick Start
 
@@ -25,7 +26,7 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts and thi
 4. Start the API service from **Services**.
 5. Return to Codex and select a model.
 
-API mode makes subscription and third-party models available together. Account mode connects Codex directly to one selected subscription account.
+API mode makes subscription and third-party models available together. Account mode uses one selected subscription account and can optionally route requests through the API service.
 
 ## Reference
 
@@ -47,11 +48,11 @@ The built-in subscription channel also provides an optional Codex Bundled overri
 
 You can inspect the imported model catalog and test a channel before using it in Codex.
 
-The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it. Codexia reads and writes Codex configuration from `CODEX_HOME` when that environment variable is set, otherwise it uses the current user's default `.codex` directory.
+The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it. Account mode can enable **Use API service proxy**. When applied, Codexia starts the existing API service, writes its `/v1` Base URL, transparently forwards account credentials to the ChatGPT Codex backend, and records only HTTP and WebSocket `/responses` calls. Other paths are forwarded without analytics or debug logging. Codexia reads and writes Codex configuration from `CODEX_HOME` when that environment variable is set, otherwise it uses the current user's default `.codex` directory.
 
 ### Services
 
-The **Services** page starts, stops, and restarts the local API service and the optional MCP service powered by [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the MCP service file path and address before starting it.
+The **Services** page starts, stops, and restarts the local API service and the optional MCP service powered by [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). The API service also carries account-mode transparent proxy traffic when that option is enabled. Configure the MCP service file path and address before starting it.
 
 ### Settings
 
@@ -69,7 +70,7 @@ Some service settings take effect after the corresponding service is restarted.
 
 ### API Debug Logs
 
-Disabled by default (Settings > API service). Enabling it displays a sensitive-data warning and records HTTP and WebSocket API requests and responses as JSON Lines in `data/logs/<yyyymmdd>.jsonl`. Sensitive headers are redacted, while bodies are retained for troubleshooting and capped at 1 MiB per entry. Debug mode runs for at most 10 minutes; all debug logs are deleted when it is disabled manually, expires automatically, or the app exits.
+Disabled by default (Settings > API service). Enabling it displays a sensitive-data warning and records HTTP and WebSocket API requests and responses as JSON Lines in `data/logs/<yyyymmdd>.jsonl`. In account proxy mode, only `/responses` is recorded. Sensitive headers are redacted, while bodies are retained for troubleshooting and capped at 1 MiB per entry. Debug mode runs for at most 10 minutes; all debug logs are deleted when it is disabled manually, expires automatically, or the app exits.
 
 ### Data and Backup
 

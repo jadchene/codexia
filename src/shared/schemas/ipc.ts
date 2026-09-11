@@ -66,7 +66,7 @@ export const ipcArgumentSchemas = {
   "mcpGateway:start": empty,
   "mcpGateway:stop": empty,
   "codexAuth:applyGatewayMode": empty,
-  "codexAuth:applyAccountMode": z.tuple([id]),
+  "codexAuth:applyAccountMode": z.tuple([id, z.boolean()]),
   "auth:startLogin": empty,
   "auth:status": z.tuple([id]),
   "auth:cancelLogin": z.tuple([id]),

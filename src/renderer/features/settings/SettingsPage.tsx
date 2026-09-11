@@ -262,7 +262,7 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
             <Typography.Text strong>API 调试日志</Typography.Text>
-            <Typography.Text type="secondary" className="v1-block">记录完整 API 请求与响应，最多开启 10 分钟；关闭后自动清空。</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">记录 API 服务中的 HTTP 与 WebSocket 请求，最多开启 10 分钟；关闭后自动清空。</Typography.Text>
           </div>
           <Form.Item name="debug_api_logging_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>

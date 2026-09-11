@@ -233,6 +233,7 @@ function migrate(db: Db): void {
     last_usage_refresh_all_at: "0",
     auto_start_gateway: "false",
     auto_start_mcp_gateway: "false",
+    account_mode_use_api_proxy: "false",
     mcp_gateway_config_path: "",
     mcp_gateway_host: "127.0.0.1",
     mcp_gateway_port: "3000",
