@@ -566,6 +566,7 @@ describe("Ant Design pages", () => {
       onApplyAccount={onApplyAccount}
     />);
     fireEvent.click(screen.getByRole("radio", { name: /账号模式/ }));
+    expect(screen.getByText("关闭代理时直接访问官方服务；开启后通过本地 API 服务透明转发。")).toBeTruthy();
     await user.click(screen.getByRole("combobox"));
     expect(await screen.findByText("测试账号", { selector: ".ant-select-item-option-content" })).toBeTruthy();
     expect(screen.queryByText(/account@example\.com/, { selector: ".ant-select-item-option-content" })).toBeNull();

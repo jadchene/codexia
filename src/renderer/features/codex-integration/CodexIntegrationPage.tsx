@@ -123,7 +123,7 @@ export const CodexIntegrationPage = ({
             showIcon
             type="warning"
             title="Codex 将直接使用所选账号"
-            description="账号模式不会经过本地服务。需要使用模型渠道时，请重新应用 API 模式。"
+            description="关闭代理时直接访问官方服务；开启后通过本地 API 服务透明转发。"
           />
           <Select
             showSearch
