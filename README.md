@@ -10,93 +10,81 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts and thi
 
 ## Why Use It
 
-- Turn ChatGPT subscription accounts into a local API service.
-- Connect third-party models through Responses API channels.
-- Switch easily between subscription and third-party models from the Codex model picker.
-- Integrate and manage an optional MCP service from the same desktop app.
-- Quickly view and use available Bank Reset cards for subscription accounts.
-- Estimate request costs from each model's input, cached-input, and output prices.
-- Optionally route account-mode requests through the API service and include Responses calls in request analytics.
+- Pool multiple ChatGPT subscription accounts behind one local API service.
+- Add third-party Responses API channels and select all models from Codex.
+- View account quota, reset credits, request analytics, and estimated costs.
+- Wake unattended long-running sessions after account quota becomes available.
+- Send scheduled messages to existing sessions or start new Codex sessions.
+- Manage Codex integration and an optional MCP service in one desktop app.
 
 ## Quick Start
 
-1. Open `Codexia.exe`.
-2. Add a ChatGPT subscription account, a model channel, or both.
-3. Open **Integration Mode** and apply API mode.
-4. Start the API service from **Services**.
-5. Return to Codex and select a model.
+1. Install Codex CLI and confirm that the `codex` command is available.
+2. Open `Codexia.exe`.
+3. Add a ChatGPT subscription account, a model channel, or both.
+4. Open **Integration Mode** and apply API mode.
+5. Start the API service from **Services**.
+6. Return to Codex and select a model.
 
-API mode makes subscription and third-party models available together. Account mode uses one selected subscription account and can optionally route requests through the API service.
+API mode makes subscription and third-party models available together. Account mode uses one selected subscription account.
 
-## Reference
+## Core Features
 
-### Subscription Accounts
+### Subscription Accounts and Model Channels
 
-Sign in through the browser or import the account currently used by Codex. You can view quota and reset-credit status, refresh an account, enable or disable it, use an available reset credit, or remove the account.
+Sign in to a subscription account through the browser or import it from Codex. Codexia supports quota refresh, account enablement, reset-credit use, and account-pool routing.
 
-### Model Channels
+Third-party channels can configure an API address, API key, `models.json`, WebSocket support, balance lookup, request headers, and model prices. Preview the model catalog and run a connection test before use. Model IDs must be unique across channels. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
 
-Each Responses API channel supports the following settings:
+The built-in subscription channel also supports an optional Codex Bundled override. When enabled, its custom catalog replaces the CLI catalog before third-party models are merged.
 
-- Channel name, API address, API key, and enabled state.
-- Provider-supplied Codex `models.json`; model IDs must be unique across channels.
-- WebSocket support. Leave it off when the provider supports HTTP only.
-- Remote compaction adaptation. Keep it enabled unless the provider explicitly supports native Codex compaction.
-- Optional balance lookup, public or encrypted request headers, and per-model input, cached-input, and output prices.
+### Integration and Services
 
-The built-in subscription channel also provides an optional Codex Bundled override, disabled by default. When enabled, its manually supplied model JSON replaces the CLI bundled catalog before third-party models are merged into the final `models.json`.
+**Integration Mode** writes the selected configuration to Codex. API mode uses the local API service. Account mode uses one subscription account and can optionally proxy `/responses` through the same API service for request analytics.
 
-You can inspect the imported model catalog and test a channel before using it in Codex.
+**Services** starts, stops, and restarts the API service and the optional [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the executable path and listening address before starting MCP for the first time. When `CODEX_HOME` is set, Codexia uses the Codex configuration in that directory; otherwise it uses the current user's `.codex` directory.
 
-The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it. Account mode can enable **Use API service proxy**. When applied, Codexia starts the existing API service, writes its `/v1` Base URL, transparently forwards account credentials to the ChatGPT Codex backend, and records only HTTP and WebSocket `/responses` calls. Other paths are forwarded without analytics or debug logging. Codexia reads and writes Codex configuration from `CODEX_HOME` when that environment variable is set, otherwise it uses the current user's default `.codex` directory.
-
-### Services
-
-The **Services** page starts, stops, and restarts the local API service and the optional MCP service powered by [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). The API service also carries account-mode transparent proxy traffic when that option is enabled. Configure the MCP service file path and address before starting it.
+> Known limitation: Codex CLI 0.154.0 may omit quota from `/status` and the status line in API-key mode. The gateway still uses quota data; view the remaining account-pool quota on Codexia's **Overview** page.
 
 ### Session Wakeup
 
-Register a Codex session UUID under **Session Wakeup**, choose a start/end date and time, and set the maximum number of attempts. Keep Codexia and the corresponding Codex session running, with Codex CLI available on PATH and the same `CODEX_HOME` used by that session.
+**Session Wakeup** is intended for unattended long-running work. Register a session UUID, active time window, and maximum attempt count:
 
-When a subscription-pool request fails because quota is exhausted and no account can take over, Codexia schedules one check after the nearest quota reset, with a one-minute grace period. At that time it refreshes account quota and wakes the session only if a successfully refreshed account has available quota. Without a future reset time, checks are spaced five minutes apart. HTTP, SSE quota errors, and WebSocket requests are supported; third-party channel errors and account-mode transparent proxy traffic do not trigger pool wakeups.
+- When the subscription pool is out of quota and no account can take over, Codexia waits for the nearest reset and wakes the session only after refreshed quota is available.
+- **Resume Goal** reactivates an unfinished Goal; otherwise Codexia sends a normal continuation message.
+- Disabling, deleting, expiry, or reaching the attempt limit stops pending work. Waiting state survives app restarts, while uncertain deliveries are not automatically duplicated.
 
-Enable **Resume Goal** to reactivate an unfinished Goal through the Codex app-server control protocol without loading the session. Completed Goals are skipped. When disabled, or when the session has no Goal, Codexia sends a continuation message using `codex queue`. This requires a CLI version supporting these commands; verified with 0.154.0.
-
-Each quota check and its optional wakeup count as one attempt, including failures. The count covers the whole configured time window and does not reset after a successful wakeup. Changing the session or time window starts a new count. Disabling or deleting an entry cancels pending work; no wakeup is sent after the end time. Waiting records survive application restarts. If the app exits during message delivery, that entry requires manual confirmation instead of automatically sending a duplicate message.
+Keep Codexia and the target Codex session running, ensure `codex` is available, and use the same `CODEX_HOME`.
 
 ### Scheduled Tasks
 
-Use **Scheduled Tasks** to send a plain message to an existing session UUID, or choose **New session each time** and provide an existing absolute working-directory path. Configure the message, an effective start/end date and time, a five-field Cron expression, and whether the task is enabled. Cron uses the machine's local time zone: `0 * * * *` runs hourly, `0 22 * * *` runs daily at 22:00, and `0 9 * * MON` runs on Mondays at 09:00.
+**Scheduled Tasks** sends ordinary messages to an Agent on a schedule:
 
-The expression builder supports minute steps, hourly, daily, and weekly schedules. Apply the generated expression or edit Cron directly. Minute steps are evaluated within each hour.
+- Target an existing session, or start a new session in a selected working directory each time.
+- Configure the message, active window, and enabled state. The builder supports minute-step, hourly, daily, and weekly schedules, or enter five-field Cron directly. `0 22 * * *` runs daily at 22:00 in local time.
+- The same task never overlaps itself, and missed occurrences are not replayed after restart or sleep. Disabling or deleting a task does not interrupt work already started.
 
-Existing sessions receive the text through `codex queue`; slash commands such as `/goal resume` remain ordinary text. New sessions run with `codex exec` and automatic approval review in the workspace sandbox. Their latest session ID and result are recorded in the task list. Keep Codexia running and use the same `CODEX_HOME` as the intended sessions.
-
-The time window controls new triggers. Disabling or deleting a task stops future triggers but does not cancel work already started. A task never overlaps its own execution; up to four scheduled tasks run concurrently. Missed occurrences after restart or prolonged sleep are skipped rather than replayed. Failures are shown in the task list and wait for the next Cron occurrence instead of repeatedly sending at the same time point. Closing Codexia stops the new-session processes it owns; after restart, an interrupted occurrence is not automatically replayed.
+Slash commands sent to an existing session remain plain text. Keep Codexia running; existing sessions must use the same `CODEX_HOME`.
 
 ### Settings
 
 | Area | Available settings |
 | --- | --- |
-| General | Launch with Windows, window-close behavior, theme, and interface density. |
-| API service | Listening address, port, access key, automatic service start, and an opt-in API debug request/response log. |
-| MCP service | Installation notice, automatic start, configuration file path, host, port, and HTTP path. |
-| Accounts and quotas | Refresh interval, refresh timeout, account-selection policy, sliding Session-affinity lifetime, account-failure cooldown, quota display, and an optional third-party fallback model for auto review. |
-| Logs and billing | Request-log retention, runtime-log retention, and billing currency. |
-| Storage | Current data location and controls for clearing request or runtime logs. |
-| Advanced network | Connection and idle timeouts, request timeout, shutdown grace period, HTTP and WebSocket limits, payload and buffer limits, and automatic HTTP fallback for HTTP-only models. Defaults are suitable for normal use. |
+| General | Launch with Windows, close behavior, theme, and interface density. |
+| API and MCP | Addresses, ports, access key, configuration file, and automatic startup. |
+| Accounts and quotas | Refresh policy, account selection, Session affinity, failure cooldown, and quota display. |
+| Logs and billing | Retention, billing currency, data location, and cleanup actions. |
+| Advanced network | Timeouts, connection limits, request size, and fallback for HTTP-only models. Defaults suit normal use. |
 
 Some service settings take effect after the corresponding service is restarted.
 
-### API Debug Logs
+### Data, Security, and Debugging
 
-Disabled by default (Settings > API service). Enabling it displays a sensitive-data warning and records HTTP and WebSocket API requests and responses as JSON Lines in `data/logs/<yyyymmdd>.jsonl`. In account proxy mode, only `/responses` is recorded. Sensitive headers are redacted, while bodies are retained for troubleshooting and capped at 1 MiB per entry. Debug mode runs for at most 10 minutes; all debug logs are deleted when it is disabled manually, expires automatically, or the app exits.
+Packaged application data is stored in `data/` beside the app. Preserve it during upgrades and back it up before moving or replacing the application. Do not share it because it contains account and channel configuration.
 
-### Data and Backup
+Database upgrades create an encrypted backup under `data/backups/` and remove it after 24 hours. A backup is bound to the Windows user that created it.
 
-Packaged application data is stored in `data/` beside the app. Back up this directory before moving or replacing the application. Do not share it because it contains account and channel configuration.
-
-Automatic schema-migration backups under `data/backups/` are encrypted as complete files with a per-backup AES-256-GCM key. That key is wrapped by Electron `safeStorage`, so the encrypted backup is bound to the Windows user security context that created it. Unencrypted migration backups from earlier versions are encrypted automatically on the next start, and migration backups are removed after 24 hours.
+API debug logging is disabled by default. When enabled, request and response bodies are temporarily written under `data/logs/`, while sensitive headers are redacted. Debugging lasts at most 10 minutes, and its logs are deleted when disabled, expired, or the app exits. Bodies may contain sensitive data, so enable it only for troubleshooting.
 
 This project is intended for personal local use. Use your own accounts and API keys, and follow each provider's terms.
 
