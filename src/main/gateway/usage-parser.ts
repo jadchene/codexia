@@ -10,6 +10,7 @@ export interface SseUsageParser {
   feed: (chunk: Uint8Array) => void;
   latestUsage: () => TokenUsage;
   responseCompleted: () => boolean;
+  terminalError: () => string;
 }
 
 const MAX_TAIL_BYTES = 1024 * 1024;
@@ -27,6 +28,7 @@ export function createSseUsageParser(): SseUsageParser {
   let tail = "";
   let latest = emptyUsage();
   let completed = false;
+  let terminalError = "";
 
   const consume = (text: string, flush = false): void => {
     const lines = text.split(/\r?\n/);
@@ -38,6 +40,7 @@ export function createSseUsageParser(): SseUsageParser {
       try {
         const event = JSON.parse(payload) as Record<string, unknown>;
         if (event.type === "response.completed") completed = true;
+        if (event.type === "error" || event.type === "response.failed") terminalError = payload;
       } catch {}
       let usage = parseUsageJson(payload);
       if (!hasUsage(usage)) usage = parseUsageFromJsonTail(payload);
@@ -47,6 +50,7 @@ export function createSseUsageParser(): SseUsageParser {
   };
 
   return {
+    terminalError: () => terminalError,
     feed(chunk: Uint8Array): void {
       consume(tail + decoder.decode(chunk, { stream: true }));
     },

@@ -56,8 +56,53 @@ try {
     fs.writeFileSync(screenshotPath, await captureScreenshot(target.webSocketDebuggerUrl));
   }
   inspection.pageCount = await inspectLazyPages(target.webSocketDebuggerUrl, child);
+  inspection.sessionWakeupCrud = await inspectSessionWakeupCrud(target.webSocketDebuggerUrl);
+  inspection.scheduledTaskCrud = await inspectScheduledTaskCrud(target.webSocketDebuggerUrl);
 } finally {
   stopProcessTree(child.pid);
+}
+
+async function inspectScheduledTaskCrud(webSocketDebuggerUrl) {
+  return evaluate(webSocketDebuggerUrl, `(async () => {
+    const api = window.codexGateway;
+    const now = Date.now();
+    const record = await api.saveScheduledTask({
+      name: '定时任务打包检查', target: 'existing', sessionId: crypto.randomUUID(), workingDirectory: '',
+      cron: '0 22 * * *', message: '只用于配置读写检查，不执行。', enabled: false,
+      startsAt: now + 86400000, endsAt: now + 172800000
+    });
+    try {
+      let saved = (await api.listScheduledTasks()).find(item => item.id === record.id);
+      if (!saved || saved.cron !== '0 22 * * *') throw new Error('定时任务保存结果不正确');
+      await api.setScheduledTaskEnabled(record.id, true);
+      saved = (await api.listScheduledTasks()).find(item => item.id === record.id);
+      if (!saved?.enabled || saved.nextRunAt <= now) throw new Error('定时任务启用后未安排未来触发');
+      await api.setScheduledTaskEnabled(record.id, false);
+    } finally { await api.deleteScheduledTask(record.id); }
+    if ((await api.listScheduledTasks()).some(item => item.id === record.id)) throw new Error('定时任务删除操作未生效');
+    return true;
+  })()`);
+}
+
+async function inspectSessionWakeupCrud(webSocketDebuggerUrl) {
+  return evaluate(webSocketDebuggerUrl, `(async () => {
+    const api = window.codexGateway;
+    const now = Date.now();
+    const record = await api.saveSessionWakeup({
+      sessionId: crypto.randomUUID(), name: '唤醒打包检查', enabled: false,
+      resumeGoal: true, startsAt: now, endsAt: now + 3600000, maxAttempts: 2
+    });
+    try {
+      let saved = (await api.listSessionWakeups()).find(item => item.id === record.id);
+      if (!saved || saved.maxAttempts !== 2 || saved.resumeGoal !== true) throw new Error('会话唤醒保存结果不正确');
+      await api.setSessionWakeupEnabled(record.id, true);
+      saved = (await api.listSessionWakeups()).find(item => item.id === record.id);
+      if (!saved?.enabled) throw new Error('会话唤醒启用操作未生效');
+      await api.setSessionWakeupEnabled(record.id, false);
+    } finally { await api.deleteSessionWakeup(record.id); }
+    if ((await api.listSessionWakeups()).some(item => item.id === record.id)) throw new Error('会话唤醒删除操作未生效');
+    return true;
+  })()`);
 }
 
 async function inspectRenderer(webSocketDebuggerUrl) {
@@ -186,6 +231,8 @@ async function inspectLazyPages(webSocketDebuggerUrl, processHandle) {
     ["services", "服务管理"],
     ["analytics", "调用分析"],
     ["runtimeLogs", "运行日志"],
+    ["sessionWakeups", "会话唤醒"],
+    ["scheduledTasks", "定时任务"],
     ["codexIntegration", "接入模式"],
     ["settings", "设置中心"]
   ];
@@ -330,7 +377,7 @@ function verifyLegacyUpgrade(databasePath, applicationRoot) {
       }
     });
     const browserMarkerPreserved = fs.existsSync(path.join(applicationRoot, "data", "browser", "v0-browser-marker.txt"));
-    if (version !== 5 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
+    if (version !== 7 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
       || !compactAdaptColumn || legacyRoutingTableCount !== 0 || encryptedBackups.length < 1 || !browserMarkerPreserved) {
       throw new Error("Packaged legacy upgrade did not preserve data, reach the current schema, or create an encrypted backup.");
     }

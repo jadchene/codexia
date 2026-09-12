@@ -13,6 +13,8 @@ import { OverviewPage } from "./overview/OverviewPage";
 import { RequestAnalyticsPage } from "./request-analytics/RequestAnalyticsPage";
 import { RuntimeLogsPage } from "./runtime-logs/RuntimeLogsPage";
 import { ServicesPage } from "./services/ServicesPage";
+import { SessionWakeupsPage } from "./session-wakeups/SessionWakeupsPage";
+import { ScheduledTasksPage } from "./scheduled-tasks/ScheduledTasksPage";
 import { UpstreamsPage } from "./upstreams/UpstreamsPage";
 import { currentLogQuery } from "../lib/log-query";
 
@@ -27,6 +29,46 @@ describe("Ant Design pages", () => {
     Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
   afterEach(() => cleanup());
+
+  it.each(["existing", "new"])("定时任务支持 %s 目标并原样保存多行消息", async (target) => {
+    const save = vi.fn().mockResolvedValue({});
+    Object.assign(window.codexGateway, { listScheduledTasks: vi.fn().mockResolvedValue([]), saveScheduledTask: save });
+    renderWithQueries(<ScheduledTasksPage onMessage={vi.fn()} />);
+    await screen.findByText("暂无定时任务");
+    await userEvent.click(screen.getByRole("button", { name: /新建任务/ }));
+    await userEvent.type(screen.getByLabelText("任务名称"), "夜间检查");
+    if (target === "new") {
+      await userEvent.click(screen.getByRole("radio", { name: "每次新建会话" }));
+      await userEvent.type(screen.getByLabelText("工作目录"), "E:\\Personal\\my-project");
+    } else {
+      await userEvent.type(screen.getByLabelText("会话 ID"), "00000000-0000-4000-8000-000000000001");
+    }
+    fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: "检查项目\n报告结果。" } });
+    await userEvent.click(screen.getByLabelText("执行频率"));
+    await userEvent.click(screen.getByText("每隔几分钟"));
+    await userEvent.click(screen.getByRole("button", { name: "生成表达式" }));
+    expect((screen.getByLabelText("Cron 表达式") as HTMLInputElement).value).toBe("*/30 * * * *");
+    await userEvent.click(screen.getByRole("button", { name: /保.*存/ }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0]![0]).toMatchObject({ target, cron: "*/30 * * * *", enabled: true, message: "检查项目\n报告结果。" });
+    expect(save.mock.calls[0]![0].sessionId).toBe(target === "new" ? "" : "00000000-0000-4000-8000-000000000001");
+    expect(save.mock.calls[0]![0].workingDirectory).toBe(target === "new" ? "E:\\Personal\\my-project" : "");
+  });
+
+  it("登记会话唤醒时保存会话、跨日时段和次数上限", async () => {
+    const save = vi.fn().mockResolvedValue({});
+    Object.assign(window.codexGateway, { listSessionWakeups: vi.fn().mockResolvedValue([]), saveSessionWakeup: save });
+    renderWithQueries(<SessionWakeupsPage onMessage={vi.fn()} />);
+    await screen.findByText("暂无会话唤醒登记");
+    await userEvent.click(screen.getByRole("button", { name: /登记会话/ }));
+    await userEvent.type(screen.getByLabelText("会话 ID"), "00000000-0000-4000-8000-000000000001");
+    await userEvent.type(screen.getByLabelText("会话名称"), "夜间任务");
+    await userEvent.click(screen.getByRole("button", { name: /保.*存/ }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const input = save.mock.calls[0]![0];
+    expect(input).toMatchObject({ sessionId: "00000000-0000-4000-8000-000000000001", name: "夜间任务", resumeGoal: false, enabled: true, maxAttempts: 3 });
+    expect(input.endsAt - input.startsAt).toBeGreaterThanOrEqual(8 * 3600_000);
+  });
 
   it("uses the page definitions for navigation and the current page title", () => {
     render(

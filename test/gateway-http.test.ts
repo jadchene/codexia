@@ -6,6 +6,45 @@ import path from "node:path";
 import { test } from "vitest";
 import { createGateway } from "../src/main/gateway.ts";
 
+test("HTTP 账号池轮换用尽后登记唤醒，单个账号耗尽或认证失败不登记", async () => {
+  for (const mode of ["quota", "failover", "auth", "sse"]) {
+    const notifications = [];
+    const attempts = [];
+    const harness = await startHarness((req, res) => {
+      attempts.push(req.headers.authorization);
+      if (mode === "sse") {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"type":"response.failed","response":{"error":{"code":"usage_limit_reached"}}}\n\n');
+      } else if (mode === "failover" && req.headers.authorization === "Bearer token-b") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      } else {
+        res.writeHead(mode === "auth" ? 401 : 429, { "content-type": "application/json", "x-codex-primary-used-percent": "100", "x-codex-primary-reset-after-seconds": "1800" });
+        res.end(mode === "auth" ? '{"error":"invalid_token"}' : '{"error":"usage_limit_reached"}');
+      }
+    }, {}, { onSessionQuotaExhausted: (id) => notifications.push(id) });
+    try {
+      if (mode === "sse") harness.accounts.splice(1);
+      const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("wake-http-session", "wake-turn") });
+      await response.text();
+      assert.deepEqual(notifications, ["quota", "sse"].includes(mode) ? ["wake-http-session"] : []);
+      if (mode === "quota") assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-b"]);
+    } finally { await harness.close(); }
+  }
+});
+
+test("HTTP 选不到账号时仅在真实额度用尽的情况下登记唤醒", async () => {
+  const notifications = [];
+  const harness = await startHarness((_req, res) => res.end("{}"), {}, { onSessionQuotaExhausted: (id) => notifications.push(id) });
+  try {
+    for (const account of harness.accounts) { account.quota_7d_used_percent = 100; account.quota_7d_reset_at = 2_000_000_000; }
+    const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("empty-pool-session", "turn") });
+    await response.text();
+    assert.equal(response.status, 503);
+    assert.deepEqual(notifications, ["empty-pool-session"]);
+  } finally { await harness.close(); }
+});
+
 test("HTTP gateway streams SSE unchanged and preserves turn state", async () => {
   const harness = await startHarness((req, res) => {
     res.writeHead(200, {

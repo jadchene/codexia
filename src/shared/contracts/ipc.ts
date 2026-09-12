@@ -6,6 +6,8 @@ import type {
   UsageRefreshResult
 } from "./accounts";
 import type { BootstrapData } from "./bootstrap";
+import type { SessionWakeup, SessionWakeupInput } from "./session-wakeup";
+import type { ScheduledTask, ScheduledTaskInput } from "./scheduled-tasks";
 import type { AppLogPage, LogQuery, RequestLogPage, RequestLogModels, TokenSummary } from "./logs";
 import type { ServiceStatus, Settings } from "./settings";
 import type {
@@ -34,6 +36,14 @@ interface ClearResult { deleted: number }
 interface ApplyAuthResult { providerChanged?: boolean; providerRemoved?: boolean }
 
 export type IpcContract = {
+  "scheduledTasks:list": IpcSpec<[], ScheduledTask[]>;
+  "scheduledTasks:save": IpcSpec<[input: ScheduledTaskInput], ScheduledTask>;
+  "scheduledTasks:setEnabled": IpcSpec<[id: string, enabled: boolean], void>;
+  "scheduledTasks:delete": IpcSpec<[id: string], void>;
+  "sessionWakeups:list": IpcSpec<[], SessionWakeup[]>;
+  "sessionWakeups:save": IpcSpec<[input: SessionWakeupInput], SessionWakeup>;
+  "sessionWakeups:setEnabled": IpcSpec<[id: string, enabled: boolean], void>;
+  "sessionWakeups:delete": IpcSpec<[id: string], void>;
   "app:bootstrap": IpcSpec<[], BootstrapData>;
   "app:listSystemFonts": IpcSpec<[], string[]>;
   "settings:save": IpcSpec<[patch: Record<string, unknown>], Settings>;

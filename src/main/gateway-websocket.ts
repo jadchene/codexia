@@ -1,5 +1,7 @@
 type Dynamic = any;
 
+import { notifySessionQuotaExhausted } from "./gateway/session-wakeup.ts";
+
 import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
@@ -453,6 +455,8 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
             closeWebSocketForReconnect(downstream, "subscription account quota exhausted");
             return false;
           }
+          notifySessionQuotaExhausted(request.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
+            hooks.onSessionQuotaExhausted, true, [selected.account.id]);
         }
         if (selected.account) return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
         if (!externalQuotaSent) {
@@ -487,6 +491,10 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     const closeDetail = await downstreamClose;
     logTargetClose(store, parsedUrl, selected, connectionId, closeDetail, started);
   } catch (error: Dynamic) {
+    if (error?.code === "SUBSCRIPTION_ACCOUNT_UNAVAILABLE" || error?.poolQuotaExhausted) {
+      notifySessionQuotaExhausted(request.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
+        hooks.onSessionQuotaExhausted, Boolean(error.poolQuotaExhausted), error.unavailableAccountIds || []);
+    }
     pending?.dispose();
     upstream?.terminate();
     if (downstream && downstream.readyState === WebSocket.OPEN) {
@@ -871,6 +879,10 @@ async function connectWithFailover(options: Dynamic) {
     }
   }
   routing.releaseSessionReservation(routeContext);
+  if (lastError && isWebSocketQuotaFailure(lastError, helpers)) {
+    lastError.poolQuotaExhausted = true;
+    lastError.unavailableAccountIds = [...excluded, account?.id || options.firstAccount.id];
+  }
   throw lastError || statusError(503, "No enabled GPT account with an access token is available.");
 }
 

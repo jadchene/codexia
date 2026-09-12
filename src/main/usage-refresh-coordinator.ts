@@ -46,7 +46,7 @@ export function createUsageRefreshCoordinator(options: RefreshCoordinatorOptions
 
   const perform = async (reason: string): Promise<RefreshResult[]> => {
     const accounts = options.listAccounts().filter((account) => account.enabled && account.access_token);
-    const balanceUpstreams = options.listBalanceUpstreams ? options.listBalanceUpstreams() : [];
+    const balanceUpstreams = reason !== "session-wakeup" && options.listBalanceUpstreams ? options.listBalanceUpstreams() : [];
     const targets: Array<{ kind: "account" | "balance"; id: string; label: string }> = [
       ...accounts.map((account) => ({
         kind: "account" as const,

@@ -1443,6 +1443,43 @@ function externalApiHooks(getHarness, supportsWebSocket = true, compactAdaptEnab
   };
 }
 
+test("WebSocket 额度错误在无法换号时登记唤醒", async () => {
+  const notifications = [];
+  const harness = await startHarness({
+    hooks: { onSessionQuotaExhausted: (id) => notifications.push(id) },
+    onConnection(websocket) {
+      websocket.once("message", () => websocket.send(JSON.stringify({ type: "error", error: { code: "usage_limit_reached", message: "quota exceeded" } })));
+    }
+  });
+  try {
+    harness.accounts.splice(1);
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "wake-ws-session" });
+    const messages = nextMessages(websocket, 1);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
+    await messages;
+    assert.deepEqual(notifications, ["wake-ws-session"]);
+    websocket.close();
+  } finally { await harness.close(); }
+});
+
+test("WebSocket 握手轮换全部因额度失败后登记唤醒", async () => {
+  const notifications = [];
+  const harness = await startHarness({
+    hooks: { onSessionQuotaExhausted: (id) => notifications.push(id) },
+    onUpgrade(_request, socket) {
+      socket.end('HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nx-codex-primary-used-percent: 100\r\nx-codex-primary-reset-after-seconds: 1800\r\nConnection: close\r\n\r\n{"error":"usage_limit_reached"}');
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "wake-ws-handshake" });
+    const messages = nextMessages(websocket, 1);
+    websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
+    await messages;
+    assert.deepEqual(notifications, ["wake-ws-handshake"]);
+    websocket.close();
+  } finally { await harness.close(); }
+});
+
 async function startHarness(options, settingOverrides = {}) {
   const upstreamServer = http.createServer((request, response) => {
     if (options.onHttpRequest) options.onHttpRequest(request, response);

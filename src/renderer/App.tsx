@@ -20,12 +20,16 @@ const AccountsPage = React.lazy(() => import("./features/accounts/AccountsPage")
 const CodexIntegrationPage = React.lazy(() => import("./features/codex-integration/CodexIntegrationPage").then((module) => ({ default: module.CodexIntegrationPage })));
 const RequestAnalyticsPage = React.lazy(() => import("./features/request-analytics/RequestAnalyticsPage").then((module) => ({ default: module.RequestAnalyticsPage })));
 const RuntimeLogsPage = React.lazy(() => import("./features/runtime-logs/RuntimeLogsPage").then((module) => ({ default: module.RuntimeLogsPage })));
+const SessionWakeupsPage = React.lazy(() => import("./features/session-wakeups/SessionWakeupsPage").then((module) => ({ default: module.SessionWakeupsPage })));
+const ScheduledTasksPage = React.lazy(() => import("./features/scheduled-tasks/ScheduledTasksPage").then((module) => ({ default: module.ScheduledTasksPage })));
 
 const pages = [
   { id: "overview", label: "运行概览", description: "快速查看服务状态、可用额度和调用概况。" },
   { id: "accounts", label: "订阅账号", description: "添加和管理用于 Codex 的 ChatGPT 订阅账号。" },
   { id: "upstreams", label: "模型渠道", description: "管理订阅账号池和第三方模型，并设置连接方式与模型费率。" },
   { id: "services", label: "服务管理", description: "启动、停止或重启本地 API 与 MCP 服务。" },
+  { id: "sessionWakeups", label: "会话唤醒", description: "在指定时段内，额度恢复后自动继续无人值守的 Codex 会话。" },
+  { id: "scheduledTasks", label: "定时任务", description: "在指定时段按 Cron 发送消息，或新建 Codex 会话执行任务。" },
   { id: "codexIntegration", label: "接入模式", description: "选择 Codex 使用本地 API 服务，或直接使用一个订阅账号。" },
   { id: "analytics", label: "调用分析", description: "按渠道、模型和账号查看调用量、Token、耗时与费用。" },
   { id: "runtimeLogs", label: "运行日志", description: "查看服务运行记录和错误信息。" },
@@ -501,6 +505,8 @@ function App() {
           onToggleGateway={toggleGateway}
           onRefreshAccounts={refreshAllUsage}
         />}
+        {page === "sessionWakeups" && <SessionWakeupsPage onMessage={setMessage} />}
+        {page === "scheduledTasks" && <ScheduledTasksPage onMessage={setMessage} />}
         {page === "accounts" && (
           <AccountsPage
             accounts={accounts}

@@ -11,7 +11,7 @@ type Db = any;
 type Row = Record<string, any>;
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-const LATEST_SCHEMA_VERSION = 5;
+const LATEST_SCHEMA_VERSION = 7;
 const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite(?:\.enc)?$/;
 const PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
@@ -80,6 +80,8 @@ export function createStore(options: StoreOptions = {}): Store {
     migrateV3(db, options.migrationHooks);
     migrateV4(db, options.migrationHooks);
     migrateV5(db, options.migrationHooks);
+    migrateV6(db, options.migrationHooks);
+    migrateV7(db, options.migrationHooks);
     migrateSecrets(db, secretCodec);
   } catch (error) {
     db.close();
@@ -438,6 +440,40 @@ function migrateV5(db: Db, hooks: MigrationHooks = {}): void {
     throw error;
   }
 }
+
+const migrateV6 = (db: Db, hooks: MigrationHooks = {}): void => {
+  if (schemaVersion(db) >= 6) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS session_wakeups (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL UNIQUE,
+      data_json TEXT NOT NULL
+    )`);
+    hooks.beforeMigrationCommit?.({ db, version: 6 });
+    db.prepare("INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(6, now());
+    db.exec("PRAGMA user_version = 6");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+};
+
+const migrateV7 = (db: Db, hooks: MigrationHooks = {}): void => {
+  if (schemaVersion(db) >= 7) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS scheduled_tasks (id TEXT PRIMARY KEY, data_json TEXT NOT NULL)");
+    hooks.beforeMigrationCommit?.({ db, version: 7 });
+    db.prepare("INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(7, now());
+    db.exec("PRAGMA user_version = 7");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+};
 
 function schemaVersion(db: Db): number {
   return Number(db.prepare("PRAGMA user_version").get()?.user_version || 0);

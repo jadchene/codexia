@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { BACKUP_MAGIC, createSecretCodec } from "../src/main/secret-codec.ts";
 import { createStore } from "../src/main/store.ts";
+import { createSessionWakeupStore } from "../src/main/session-wakeup-store.ts";
+import { createScheduledTaskStore } from "../src/main/scheduled-task-store.ts";
 
 const passthroughCodec = createSecretCodec({
   isEncryptionAvailable: () => true,
@@ -22,7 +24,7 @@ test("migrations create a verified backup, model pricing storage, and remove obs
       dataDir: fixture.directory,
       dbPath: fixture.database
     });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 5);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     const compactColumn = store.db.prepare("PRAGMA table_info(upstreams)").all()
       .find((column) => column.name === "compact_adapt_enabled");
@@ -82,7 +84,7 @@ test("current migration upgrades an existing v1 database with its own verified b
   const fixture = createV1Fixture();
   try {
     const store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 5);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     store.db.close();
     const backups = backupFiles(fixture.directory);
@@ -238,6 +240,45 @@ test("v1 migration refuses a corrupted backup before changing the source databas
     fixture.writer.close();
     cleanupFixture(fixture.directory);
   }
+});
+
+test("会话唤醒配置和等待进度在数据库重开后保留", () => {
+  const fixture = createLegacyFixture();
+  try {
+    let store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    const record = { id: "wake-test", sessionId: "session-test", status: "waiting", attempts: 2, maxAttempts: 3, nextAttemptAt: 2_000_000_000_000 };
+    createSessionWakeupStore(store.db).put(record);
+    store.db.close();
+    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    const repository = createSessionWakeupStore(store.db);
+    assert.deepEqual(repository.list(), [record]);
+    assert.throws(() => repository.put({ ...record, id: "duplicate" }), /UNIQUE/);
+    repository.delete(record.id);
+    assert.deepEqual(repository.list(), []);
+    store.db.close();
+  } finally { fixture.writer.close(); cleanupFixture(fixture.directory); }
+});
+
+test("升级到定时任务表时保留会话唤醒，定时配置和执行记录可重开读取", () => {
+  const fixture = createLegacyFixture();
+  try {
+    let store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    const wakeup = { id: "wake-before-v7", sessionId: "session", status: "waiting", attempts: 1 };
+    createSessionWakeupStore(store.db).put(wakeup);
+    store.db.exec("DROP TABLE scheduled_tasks; DELETE FROM schema_migrations WHERE version = 7; PRAGMA user_version = 6");
+    store.db.close();
+    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    assert.deepEqual(createSessionWakeupStore(store.db).list(), [wakeup]);
+    const task = { id: "scheduled-test", name: "定时测试", target: "existing", cron: "0 * * * *", message: "多行\n消息", runCount: 2, nextRunAt: 2_000_000_000_000 };
+    createScheduledTaskStore(store.db).put(task);
+    store.db.close();
+    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    const repository = createScheduledTaskStore(store.db);
+    assert.deepEqual(repository.list(), [task]);
+    repository.delete(task.id);
+    assert.deepEqual(repository.list(), []);
+    store.db.close();
+  } finally { fixture.writer.close(); cleanupFixture(fixture.directory); }
 });
 
 function createLegacyFixture() {

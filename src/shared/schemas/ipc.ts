@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { IpcChannel } from "../contracts/ipc";
 import { saveResponsesApiUpstreamSchema } from "./upstreams";
+import { sessionWakeupInputSchema } from "./session-wakeup";
+import { scheduledTaskInputSchema } from "./scheduled-tasks";
 
 const id = z.string().trim().min(1).max(256);
 const empty = z.tuple([]);
@@ -34,6 +36,14 @@ const logQuery = z.object({
   scope: z.string().optional()
 }).strict();
 export const ipcArgumentSchemas = {
+  "scheduledTasks:list": empty,
+  "scheduledTasks:save": z.tuple([scheduledTaskInputSchema]),
+  "scheduledTasks:setEnabled": z.tuple([id, z.boolean()]),
+  "scheduledTasks:delete": z.tuple([id]),
+  "sessionWakeups:list": empty,
+  "sessionWakeups:save": z.tuple([sessionWakeupInputSchema]),
+  "sessionWakeups:setEnabled": z.tuple([id, z.boolean()]),
+  "sessionWakeups:delete": z.tuple([id]),
   "app:bootstrap": empty,
   "app:listSystemFonts": empty,
   "settings:save": z.tuple([z.record(z.string(), z.unknown())]),

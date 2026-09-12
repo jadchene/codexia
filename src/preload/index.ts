@@ -7,6 +7,8 @@ import type {
   UsageRefreshResult
 } from "../shared/contracts/accounts";
 import type { BootstrapData } from "../shared/contracts/bootstrap";
+import type { SessionWakeupInput } from "../shared/contracts/session-wakeup";
+import type { ScheduledTaskInput } from "../shared/contracts/scheduled-tasks";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc";
 import type { AppLogPage, LogQuery, RequestLogPage, RequestLogModels, TokenSummary } from "../shared/contracts/logs";
 import type { ServiceStatus, Settings } from "../shared/contracts/settings";
@@ -41,6 +43,14 @@ const onStatusChanged = (channel: string, callback: StatusChangedListener): (() 
 };
 
 const api = {
+  listScheduledTasks: () => invoke("scheduledTasks:list"),
+  saveScheduledTask: (input: ScheduledTaskInput) => invoke("scheduledTasks:save", input),
+  setScheduledTaskEnabled: (id: string, enabled: boolean) => invoke("scheduledTasks:setEnabled", id, enabled),
+  deleteScheduledTask: (id: string) => invoke("scheduledTasks:delete", id),
+  listSessionWakeups: () => invoke("sessionWakeups:list"),
+  saveSessionWakeup: (input: SessionWakeupInput) => invoke("sessionWakeups:save", input),
+  setSessionWakeupEnabled: (id: string, enabled: boolean) => invoke("sessionWakeups:setEnabled", id, enabled),
+  deleteSessionWakeup: (id: string) => invoke("sessionWakeups:delete", id),
   bootstrap: (): Promise<BootstrapData> => invoke("app:bootstrap"),
   listSystemFonts: (): Promise<string[]> => invoke("app:listSystemFonts"),
   saveSettings: (patch: Record<string, unknown>): Promise<Settings> => invoke("settings:save", patch),
