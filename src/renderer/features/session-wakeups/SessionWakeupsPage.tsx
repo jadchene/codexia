@@ -79,7 +79,6 @@ export const SessionWakeupsPage = ({ onMessage }: { onMessage: (message: string)
     </Space> }
   ];
   return <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-    <Alert showIcon type="info" title="在生效时段内，网关确认账号池额度不足后，等待重置、刷新额度并唤醒登记的会话。请保持 Codexia 和对应的 Codex 会话运行。" />
     {query.isError && <Alert showIcon type="error" title="读取会话唤醒登记失败，请刷新重试。" />}
     <div className="v1-page-card">
       <Flex gap={8} className="v1-table-toolbar">

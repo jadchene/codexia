@@ -89,7 +89,6 @@ export const ScheduledTasksPage = ({ onMessage }: { onMessage: (message: string)
     </Space> }
   ];
   return <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-    <Alert type="info" showIcon title="按本机时区定时发送普通消息。请保持 Codexia 运行；停用只取消后续触发，已开始的执行会继续。" />
     {query.isError && <Alert type="error" showIcon title="读取定时任务失败，请刷新重试。" />}
     <div className="v1-page-card">
       <Flex gap={8} className="v1-table-toolbar">
