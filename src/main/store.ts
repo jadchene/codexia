@@ -258,7 +258,8 @@ function migrate(db: Db): void {
     model_management_json: "[]",
     billing_currency: "USD",
     request_log_retention_days: "30",
-    app_log_retention_days: "14"
+    app_log_retention_days: "14",
+    login_session_retention_days: "7"
   };
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   for (const [key, value] of Object.entries(defaults)) insert.run(key, value);
@@ -1061,22 +1062,26 @@ function clearAppLogs(db: Db): { deleted: number } {
 
 function runMaintenance(db: Db, targetDataDir: string): { requestLogsDeleted: number; appLogsDeleted: number; loginSessionsDeleted: number } {
   const settings = getSettings(db);
-  const requestDays = clampInt(settings.request_log_retention_days, 30, 1, 3650);
-  const appDays = clampInt(settings.app_log_retention_days, 14, 1, 3650);
+  const requestDays = clampInt(settings.request_log_retention_days, 30, 0, 3650);
+  const appDays = clampInt(settings.app_log_retention_days, 14, 0, 3650);
+  const loginSessionDays = clampInt(settings.login_session_retention_days, 7, 0, 3650);
   const current = now();
-  const requestResult = db.prepare("DELETE FROM request_logs WHERE created_at < ?")
-    .run(current - requestDays * 86400);
-  const appResult = db.prepare("DELETE FROM app_logs WHERE created_at < ?")
-    .run(current - appDays * 86400);
-  const loginResult = db.prepare("DELETE FROM login_sessions WHERE updated_at < ?")
-    .run(current - 7 * 86400);
+  const requestLogsDeleted = requestDays === 0
+    ? 0
+    : Number(db.prepare("DELETE FROM request_logs WHERE created_at < ?").run(current - requestDays * 86400).changes || 0);
+  const appLogsDeleted = appDays === 0
+    ? 0
+    : Number(db.prepare("DELETE FROM app_logs WHERE created_at < ?").run(current - appDays * 86400).changes || 0);
+  const loginSessionsDeleted = loginSessionDays === 0
+    ? 0
+    : Number(db.prepare("DELETE FROM login_sessions WHERE updated_at < ?").run(current - loginSessionDays * 86400).changes || 0);
   removeExpiredMigrationBackups(targetDataDir);
   db.exec("PRAGMA wal_checkpoint(PASSIVE)");
   db.exec("PRAGMA optimize");
   return {
-    requestLogsDeleted: Number(requestResult.changes || 0),
-    appLogsDeleted: Number(appResult.changes || 0),
-    loginSessionsDeleted: Number(loginResult.changes || 0)
+    requestLogsDeleted,
+    appLogsDeleted,
+    loginSessionsDeleted
   };
 }
 

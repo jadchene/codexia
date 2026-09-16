@@ -145,6 +145,39 @@ describe("settings appearance and display units", () => {
     expect(saved.ignore_five_hour_limit).toBe("true");
   });
 
+  it("keeps the selected appearance while editing a non-appearance section", async () => {
+    const user = userEvent.setup();
+    const appearance = { theme: "dark" as const, density: "compact" as const, fontFamily: "Example Sans" };
+    applyAppearancePreferences(appearance);
+    render(createElement(SettingsPage, {
+      settings: {
+        appearance_theme: appearance.theme,
+        appearance_density: appearance.density,
+        appearance_font_family: appearance.fontFamily,
+        request_log_retention_days: "30",
+        app_log_retention_days: "14",
+        login_session_retention_days: "7",
+        billing_currency: "USD",
+        auto_start_gateway: "false",
+        auto_start_mcp_gateway: "false",
+        ignore_five_hour_limit: "false"
+      },
+      paths: {},
+      onSave: vi.fn(),
+      onMessage: vi.fn(),
+      onClearTokenLogs: vi.fn(),
+      onClearAppLogs: vi.fn()
+    }));
+
+    await user.click(screen.getByRole("menuitem", { name: "日志与计费" }));
+    const retentionInput = screen.getByRole("spinbutton", { name: "调用记录保留" });
+    await user.clear(retentionInput);
+    await user.type(retentionInput, "0");
+
+    expect(screen.getByRole("button", { name: /保存设置/ })).toBeTruthy();
+    expect(loadAppearancePreferences()).toEqual(appearance);
+  });
+
   it("renders categorized settings instead of a single configuration pile", async () => {
     const user = userEvent.setup();
     render(createElement(SettingsPage, {

@@ -19,7 +19,7 @@ const EDITABLE_SETTING_KEYS = new Set([
   "ignore_five_hour_limit", "codex_config_use_openai_base_url",
   "debug_api_logging",
   "auto_review_upstream_model",
-  "billing_currency", "request_log_retention_days", "app_log_retention_days",
+  "billing_currency", "request_log_retention_days", "app_log_retention_days", "login_session_retention_days",
   "appearance_theme", "appearance_density", "appearance_font_family", "navigation_collapsed"
 ]);
 
@@ -43,8 +43,9 @@ const INTEGER_SETTINGS: Record<string, readonly [number, number]> = {
   usage_refresh_interval_secs: [0, 86400],
   usage_refresh_timeout_ms: [1000, 300000],
   mcp_gateway_port: [1, 65535],
-  request_log_retention_days: [1, 3650],
-  app_log_retention_days: [1, 3650]
+  request_log_retention_days: [0, 3650],
+  app_log_retention_days: [0, 3650],
+  login_session_retention_days: [0, 3650]
 };
 
 const ENUM_SETTINGS = {

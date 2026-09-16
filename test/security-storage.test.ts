@@ -113,6 +113,33 @@ test("store retention removes expired logs and OAuth sessions", () => {
   }
 });
 
+test("store retention keeps data when retention days are zero", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-retention-disabled-"));
+  const database = path.join(directory, "test.sqlite");
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: database });
+  try {
+    store.addTokenLog({ method: "POST", request_path: "/v1/responses" });
+    store.addAppLog({ message: "old" });
+    store.saveLoginSession({ id: "old-login", code_verifier: "secret", redirect_uri: "http://localhost", status: "pending" });
+    store.db.exec("UPDATE request_logs SET created_at = 1; UPDATE app_logs SET created_at = 1; UPDATE login_sessions SET updated_at = 1");
+    store.saveSettings({
+      request_log_retention_days: "0",
+      app_log_retention_days: "0",
+      login_session_retention_days: "0"
+    });
+
+    const result = store.runMaintenance();
+
+    assert.deepEqual(result, { requestLogsDeleted: 0, appLogsDeleted: 0, loginSessionsDeleted: 0 });
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM request_logs").get().count, 1);
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM app_logs").get().count, 1);
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM login_sessions").get().count, 1);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("app log queries filter level, scope, status, and keyword without renderer-side filtering", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-log-filter-"));
   const database = path.join(directory, "test.sqlite");
@@ -313,6 +340,16 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
     auto_review_upstream_model: "deepseek-model"
   });
   assert.throws(() => editableSettingsPatch({ gateway_port: "70000" }), /超出范围/);
+  assert.deepEqual(editableSettingsPatch({
+    request_log_retention_days: "0",
+    app_log_retention_days: "0",
+    login_session_retention_days: "0"
+  }), {
+    request_log_retention_days: "0",
+    app_log_retention_days: "0",
+    login_session_retention_days: "0"
+  });
+  assert.throws(() => editableSettingsPatch({ login_session_retention_days: "-1" }), /超出范围/);
   assert.throws(() => editableSettingsPatch({ upstream_base_url: "file:///secret" }), /HTTP/);
   assert.deepEqual(editableSettingsPatch({
     gateway_connect_timeout_ms: "45000",

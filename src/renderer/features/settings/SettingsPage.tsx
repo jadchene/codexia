@@ -137,12 +137,15 @@ export const SettingsPage = ({
     }
   };
 
-  const previewAppearance = (_: Partial<SettingsFormValues>, values: SettingsFormValues): void => {
+  const previewAppearance = (changedValues: Partial<SettingsFormValues>): void => {
     setDirty(true);
+    const appearanceChanged = ["appearance_theme", "appearance_density", "appearance_font_family"]
+      .some((key) => Object.prototype.hasOwnProperty.call(changedValues, key));
+    if (!appearanceChanged) return;
     applyAppearancePreferences(appearanceFromSettings({
-      appearance_theme: values.appearance_theme,
-      appearance_density: values.appearance_density,
-      appearance_font_family: values.appearance_font_family
+      appearance_theme: form.getFieldValue("appearance_theme"),
+      appearance_density: form.getFieldValue("appearance_density"),
+      appearance_font_family: form.getFieldValue("appearance_font_family")
     }));
   };
 
@@ -339,10 +342,11 @@ export const SettingsPage = ({
 
   const logsBillingTab = (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <SettingsSection title="日志保留" description="设置调用记录和运行日志的保留时间。">
-        <div className="v1-settings-grid v1-settings-grid-2">
-          <NumberField name="request_log_retention_days" label="调用记录保留" suffix="天" min={1} max={3650} />
-          <NumberField name="app_log_retention_days" label="运行日志保留" suffix="天" min={1} max={3650} />
+      <SettingsSection title="数据保留" description="设置自动清理前的保留天数，填 0 表示不自动清理。">
+        <div className="v1-settings-grid v1-settings-grid-3">
+          <NumberField name="request_log_retention_days" label="调用记录保留" suffix="天" min={0} max={3650} />
+          <NumberField name="app_log_retention_days" label="运行日志保留" suffix="天" min={0} max={3650} />
+          <NumberField name="login_session_retention_days" label="登录会话保留" suffix="天" min={0} max={3650} />
         </div>
       </SettingsSection>
       <SettingsSection title="计费币种" description="设置费用统计和界面展示使用的币种。">
