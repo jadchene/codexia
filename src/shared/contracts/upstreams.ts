@@ -100,7 +100,9 @@ export interface BundledModelOverride {
 export interface ModelCatalogBuildResult {
   path: string;
   bundledCachePath: string;
-  bundledSource: "cli" | "cache" | "override";
+  bundledSource: "cli" | "cache" | "override" | "remote" | "remote-cache";
+  /** 远程获取失败后使用本地目录的原因。 */
+  refreshWarning?: string;
   bundledCount: number;
   externalCount: number;
   totalCount: number;

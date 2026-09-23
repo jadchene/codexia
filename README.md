@@ -36,7 +36,7 @@ Sign in to a subscription account through the browser or import it from Codex. C
 
 Third-party channels can configure an API address, API key, `models.json`, WebSocket support, balance lookup, request headers, and model prices. Preview the model catalog and run a connection test before use. Model IDs must be unique across channels. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
 
-The built-in subscription channel also supports an optional Codex Bundled override. When enabled, its custom catalog replaces the CLI catalog before third-party models are merged.
+The GPT account pool fetches the official model catalog at startup and on manual refresh, choosing accounts in this order: Pro, Pro Lite, Plus, Go, Free. If fetching fails, it uses the last successful remote catalog, then the local Codex bundled catalog. Third-party channels keep their own model configuration. An optional Codex Bundled override replaces the account-pool catalog with your JSON.
 
 ### Integration and Services
 

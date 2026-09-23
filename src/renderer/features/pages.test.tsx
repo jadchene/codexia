@@ -294,9 +294,48 @@ describe("Ant Design pages", () => {
     expect(await screen.findByText("内置账号渠道")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "删除" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "配置 Bundled 覆盖" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "刷新内置模型" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "刷新账号池模型" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新余额" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "更多操作" })).toHaveLength(1);
+  });
+
+  it("model directory matches the current count and excludes retired local models", async () => {
+    const builtin = createUpstream("builtin", "GPT 账号池", "chatgpt_subscription_pool");
+    builtin.modelCount = 9;
+    vi.mocked(window.codexGateway.listUpstreams).mockResolvedValue([builtin]);
+    vi.mocked(window.codexGateway.listUpstreamModels).mockResolvedValue(
+      Array.from({ length: 14 }, (_, index) => ({
+        modelId: `model-${index}`, displayName: `Model ${index}`, available: index < 9,
+        source: index < 9 ? "codex_remote" : "codex_bundled", metadata: {},
+        pricing: { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 },
+        lastSeenAt: 1, lastSyncedAt: 1
+      }))
+    );
+    renderWithQueries(<UpstreamsPage />);
+    await userEvent.click(await screen.findByText("9 个"));
+    const drawer = await screen.findByRole("dialog", { name: "GPT 账号池 · 模型目录" });
+    await within(drawer).findByText("model-0");
+    expect(within(drawer).getAllByRole("row")).toHaveLength(10);
+    expect(within(drawer).getByText("model-8")).toBeTruthy();
+    expect(within(drawer).queryByText("model-9")).toBeNull();
+    expect(within(drawer).queryByText("model-13")).toBeNull();
+  });
+
+  it.each([false, true])("refreshes account pool models and reports cache fallback: %s", async (fallback) => {
+    vi.mocked(window.codexGateway.listUpstreams).mockResolvedValue([
+      createUpstream("builtin", "GPT 账号池", "chatgpt_subscription_pool")
+    ]);
+    vi.mocked(window.codexGateway.refreshBuiltinModels).mockResolvedValue({
+      path: "D:/data/models.json", bundledCachePath: "D:/data/codex-bundled-models.json",
+      bundledSource: fallback ? "remote-cache" : "remote", bundledCount: 3, externalCount: 0, totalCount: 3,
+      ...(fallback ? { refreshWarning: "远程获取失败。" } : {})
+    });
+    renderWithQueries(<UpstreamsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "刷新账号池模型" }));
+    expect(await screen.findByText(fallback
+      ? "远程获取失败。 已加载 3 个账号池模型（远程缓存）"
+      : "已加载 3 个账号池模型（远程目录）")).toBeTruthy();
+    expect(window.codexGateway.refreshBuiltinModels).toHaveBeenCalledTimes(1);
   });
 
   it("configures a disabled-by-default bundled model override with validated JSON", async () => {

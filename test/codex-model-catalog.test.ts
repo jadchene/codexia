@@ -10,6 +10,113 @@ import { BUILTIN_SUBSCRIPTION_ID, createUpstreamService } from "../src/main/upst
 const codec = { encrypt: (value: string) => value, decrypt: (value: string) => value, isEncrypted: () => true };
 const bundled = JSON.stringify({ models: [{ slug: "gpt-built-in", display_name: "GPT Built In", support_shell_tool: true }] });
 
+test("remote catalog takes precedence, persists across restart, and preserves external models and display settings", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-models-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
+    upstreams.save({ name: "Third Party", baseUrl: "https://example.test/v1", enabled: true,
+      supportsWebSocket: false, balanceQueryType: "none", modelPricing: {},
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "external" }] }) });
+    const options = {
+      db: store.db, dataDir: directory,
+      runBundledModels: () => { throw new Error("remote success must not require bundled models"); },
+      getModelManagement: () => [{ slug: "remote", displayName: "Custom", visible: false }],
+      fetchRemoteModels: async () => JSON.stringify({ models: [{ slug: "remote", context_window: 400000, supported_reasoning_levels: [{ effort: "high" }] }] })
+    };
+    const service = createCodexModelCatalogService(options);
+    const result = await service.refreshSubscription();
+    assert.equal(result.bundledSource, "remote");
+    assert.equal(result.totalCount, 2);
+    const models = JSON.parse(fs.readFileSync(result.path, "utf8")).models;
+    assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["remote", "external"]);
+    assert.equal(models[0].context_window, 400000);
+    assert.equal(models[0].display_name, "Custom");
+    assert.equal(models[0].visibility, "hide");
+    assert.deepEqual(upstreams.listGatewayModels().map((model) => model.id).sort(), ["external", "remote"]);
+    assert.equal(upstreams.listModels(BUILTIN_SUBSCRIPTION_ID)[0].source, "codex_remote");
+    const restarted = createCodexModelCatalogService({ ...options, fetchRemoteModels: async () => { throw new Error("offline"); } });
+    assert.equal(restarted.refresh().bundledSource, "remote-cache");
+    const fallback = await restarted.refreshSubscription();
+    assert.equal(fallback.bundledSource, "remote-cache");
+    assert.equal(fallback.refreshWarning, "offline");
+    assert.equal(fallback.totalCount, 2);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("unavailable remote or corrupt remote cache falls back to the local Codex catalog", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-fallback-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    fs.writeFileSync(path.join(directory, "codex-remote-models.json"), "invalid cache");
+    let cliAvailable = true;
+    const service = createCodexModelCatalogService({
+      db: store.db, dataDir: directory,
+      runBundledModels: () => { if (!cliAvailable) throw new Error("CLI missing"); return bundled; },
+      fetchRemoteModels: async () => { throw new Error("offline"); }
+    });
+    assert.equal((await service.refreshSubscription()).bundledSource, "cli");
+    cliAvailable = false;
+    assert.equal((await service.refreshSubscription()).bundledSource, "cache");
+    assert.equal(service.listModels()[0].slug, "gpt-built-in");
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("concurrent refreshes share one fetch and rejected catalogs preserve the published catalog and cache", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-atomic-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
+    upstreams.save({ name: "Third Party", baseUrl: "https://example.test/v1", enabled: true,
+      supportsWebSocket: false, balanceQueryType: "none", modelPricing: {},
+      modelCatalogJson: JSON.stringify({ models: [{ slug: "external" }] }) });
+    let calls = 0;
+    let remote = JSON.stringify({ models: [{ slug: "remote" }] });
+    const service = createCodexModelCatalogService({ db: store.db, dataDir: directory, runBundledModels: () => bundled,
+      fetchRemoteModels: async () => { calls += 1; return remote; } });
+    await Promise.all([service.refreshSubscription(), service.refreshSubscription()]);
+    assert.equal(calls, 1);
+    const published = fs.readFileSync(service.path, "utf8");
+    const cached = fs.readFileSync(path.join(directory, "codex-remote-models.json"), "utf8");
+    remote = JSON.stringify({ models: [{ slug: "external" }] });
+    await assert.rejects(service.refreshSubscription(), /模型 ID 冲突/);
+    assert.equal(fs.readFileSync(service.path, "utf8"), published);
+    assert.equal(fs.readFileSync(path.join(directory, "codex-remote-models.json"), "utf8"), cached);
+    assert.equal(upstreams.listModels(BUILTIN_SUBSCRIPTION_ID).filter((model) => model.available)[0].modelId, "remote");
+    remote = '{"models":[]}';
+    assert.equal((await service.refreshSubscription()).bundledSource, "remote-cache");
+    assert.equal(fs.readFileSync(service.path, "utf8"), published);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("explicit manual override skips remote fetching and disabling it restores the remote catalog", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-override-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    let override = { enabled: true, modelCatalogJson: '{"models":[{"slug":"manual"}]}' };
+    let calls = 0;
+    const service = createCodexModelCatalogService({ db: store.db, dataDir: directory, getBundledOverride: () => override,
+      fetchRemoteModels: async () => { calls += 1; return '{"models":[{"slug":"remote"}]}'; } });
+    assert.equal((await service.refreshSubscription()).bundledSource, "override");
+    assert.equal(calls, 0);
+    override = { ...override, enabled: false };
+    assert.equal((await service.refreshSubscription()).bundledSource, "remote");
+    assert.equal(calls, 1);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("cached bundled and external channel catalogs merge without rerunning Codex on gateway rebuild", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-catalog-"));
   const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });

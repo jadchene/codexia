@@ -118,10 +118,16 @@ export const UpstreamsPage = () => {
   });
   const bundledMutation = useMutation({
     mutationFn: () => window.codexGateway.refreshBuiltinModels(),
-    onMutate: () => { message.loading({ key: "refresh-bundled-models", content: "正在刷新 Codex 内置模型...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "refresh-bundled-models", content: "正在刷新 GPT 账号池模型...", duration: 0 }); },
     onSuccess: async (result) => {
       await invalidate();
-      message.success({ key: "refresh-bundled-models", content: `已刷新 ${result.bundledCount} 个内置模型` });
+      const source = { remote: "远程目录", "remote-cache": "远程缓存", cli: "本机目录", cache: "本机缓存", override: "手动覆盖" }[result.bundledSource];
+      const content = `已加载 ${result.bundledCount} 个账号池模型（${source}）`;
+      if (result.refreshWarning) {
+        message.warning({ key: "refresh-bundled-models", content: `${result.refreshWarning} ${content}`, duration: 8 });
+      } else {
+        message.success({ key: "refresh-bundled-models", content });
+      }
     },
     onError: (error) => message.error({ key: "refresh-bundled-models", content: `刷新失败：${readableError(error)}`, duration: 8 })
   });
@@ -135,7 +141,7 @@ export const UpstreamsPage = () => {
         key: "save-bundled-override",
         content: result.override.enabled
           ? `已启用覆盖并写入 ${result.catalog.totalCount} 个模型`
-          : `已关闭覆盖并恢复 ${result.catalog.bundledCount} 个 Codex 内置模型`
+          : `已关闭覆盖并加载 ${result.catalog.bundledCount} 个账号池模型`
       });
     },
     onError: (error) => message.error({ key: "save-bundled-override", content: `保存失败：${readableError(error)}`, duration: 8 })
@@ -328,8 +334,8 @@ export const UpstreamsPage = () => {
           </Tooltip>
         )}
         {upstream.kind === "chatgpt_subscription_pool" && (
-          <Tooltip title="刷新内置模型">
-            <Button aria-label="刷新内置模型" loading={bundledMutation.isPending} icon={<ReloadOutlined />} onClick={() => bundledMutation.mutate()} />
+          <Tooltip title="刷新账号池模型">
+            <Button aria-label="刷新账号池模型" loading={bundledMutation.isPending} icon={<ReloadOutlined />} onClick={() => bundledMutation.mutate()} />
           </Tooltip>
         )}
         {upstream.kind === "responses_api" && upstream.balanceQueryType !== "none" && (
@@ -444,7 +450,7 @@ export const UpstreamsPage = () => {
         <Alert
           showIcon
           type="info"
-          title="关闭时使用 Codex CLI 内置目录；启用后使用下方 JSON 覆盖 Bundled，并与已启用的第三方模型合并。"
+          title="关闭时优先获取官方远程模型，本机目录作为兜底；启用后使用下方 JSON 覆盖账号池模型。第三方模型仍按各渠道配置合并。"
           style={{ marginBottom: 16 }}
         />
         <Form.Item
@@ -540,7 +546,7 @@ export const UpstreamsPage = () => {
     </Drawer>
 
     <Drawer title={`${modelUpstream?.name || ""} · 模型目录`} width="min(1000px, 100vw)" open={Boolean(modelUpstream)} onClose={() => setModelUpstream(null)}>
-      <Table rowKey="modelId" pagination={false} dataSource={modelsQuery.data ?? []} loading={modelsQuery.isLoading} columns={modelColumns(currency)} scroll={{ x: 920 }} />
+      <Table rowKey="modelId" pagination={false} dataSource={(modelsQuery.data ?? []).filter((model) => model.available)} loading={modelsQuery.isLoading} columns={modelColumns(currency)} scroll={{ x: 920 }} />
     </Drawer>
 
     <Modal

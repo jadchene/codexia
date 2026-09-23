@@ -20,19 +20,36 @@ interface CatalogServiceOptions {
   runBundledModels?: () => string;
   getBundledOverride?: () => BundledModelOverride;
   getModelManagement?: () => ModelManagementInput[];
+  /** 从 GPT 账号池获取官方远程目录。 */
+  fetchRemoteModels?: () => Promise<string>;
 }
 
 export function createCodexModelCatalogService(options: CatalogServiceOptions) {
   const catalogPath = path.join(options.dataDir, "models.json");
   const bundledCachePath = path.join(options.dataDir, "codex-bundled-models.json");
+  const remoteCachePath = path.join(options.dataDir, "codex-remote-models.json");
   let sourceCatalog: Catalog | null = null;
-  const rebuild = (refreshBundled: boolean, allowCachedFallback: boolean): ModelCatalogBuildResult => {
+  let remoteRefresh: Promise<ModelCatalogBuildResult> | null = null;
+  /** 缓存损坏时允许退回本机目录，避免阻断应用启动。 */
+  const readRemoteCache = (): Catalog | null => {
+    try {
+      const cached = parseCatalog(fs.readFileSync(remoteCachePath, "utf8"), "远程模型缓存");
+      return cached.models.length > 0 ? cached : null;
+    } catch {
+      return null;
+    }
+  };
+  const rebuild = (refreshBundled: boolean, allowCachedFallback: boolean, remote?: Catalog): ModelCatalogBuildResult => {
     const override = options.getBundledOverride?.() || { enabled: false, modelCatalogJson: "" };
     let bundled: Catalog;
     let bundledSource: ModelCatalogBuildResult["bundledSource"];
+    const cachedRemote = remote || readRemoteCache();
     if (override.enabled) {
       bundled = parseBundledOverrideCatalog(override.modelCatalogJson);
       bundledSource = "override";
+    } else if (cachedRemote) {
+      bundled = cachedRemote;
+      bundledSource = remote ? "remote" : "remote-cache";
     } else if (refreshBundled || !fs.existsSync(bundledCachePath)) {
       try {
         bundled = parseCatalog((options.runBundledModels || runBundledModels)(), "Codex 内置模型目录");
@@ -48,12 +65,15 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
       bundledSource = "cache";
     }
     const external = enabledExternalModels(options.db);
-    sourceCatalog = mergeCatalogs(bundled, external);
-    const merged = applyModelManagement(sourceCatalog, options.getModelManagement?.() || []);
-    syncBundledModels(options.db, bundled.models);
-    writeFilesTransaction([{ file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` }], () => {
+    const nextSource = mergeCatalogs(bundled, external);
+    const merged = applyModelManagement(nextSource, options.getModelManagement?.() || []);
+    const files = [{ file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` }];
+    if (remote && !override.enabled) files.push({ file: remoteCachePath, content: `${JSON.stringify(remote, null, 2)}\n` });
+    writeFilesTransaction(files, () => {
       parseCatalog(fs.readFileSync(catalogPath, "utf8"), "生成的模型目录");
+      syncBundledModels(options.db, bundled.models, bundledSource);
     });
+    sourceCatalog = nextSource;
     return {
       path: catalogPath,
       bundledCachePath,
@@ -63,10 +83,31 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
       totalCount: merged.models.length
     };
   };
+  /** 合并并发刷新；只有校验和目录合并成功才替换远程缓存。 */
+  const refreshSubscription = (): Promise<ModelCatalogBuildResult> => {
+    if (remoteRefresh) return remoteRefresh;
+    remoteRefresh = (async () => {
+      if (options.getBundledOverride?.().enabled) return rebuild(false, true);
+      let remote: Catalog;
+      try {
+        if (!options.fetchRemoteModels) throw new Error("未配置远程模型获取。");
+        remote = parseCatalog(await options.fetchRemoteModels(), "远程模型目录");
+        if (remote.models.length === 0) throw new Error("远程模型目录为空。");
+      } catch (error) {
+        return {
+          ...rebuild(true, true),
+          refreshWarning: error instanceof Error ? error.message : "远程模型获取失败。"
+        };
+      }
+      return rebuild(false, true, remote);
+    })().finally(() => { remoteRefresh = null; });
+    return remoteRefresh;
+  };
   return {
     path: catalogPath,
     refresh: () => rebuild(false, false),
     refreshBundled: (allowCachedFallback = false) => rebuild(true, allowCachedFallback),
+    refreshSubscription,
     listModels: (): ModelManagementItem[] => buildModelManagement(
       sourceCatalog || parseCatalog(fs.readFileSync(catalogPath, "utf8"), "生成的模型目录"),
       options.getModelManagement?.() || []
@@ -203,7 +244,7 @@ function parseStoredMetadata(value: unknown, modelId: string): Record<string, un
   return parsed;
 }
 
-function syncBundledModels(db: DatabaseSync, models: ModelEntry[]): void {
+function syncBundledModels(db: DatabaseSync, models: ModelEntry[], source: ModelCatalogBuildResult["bundledSource"]): void {
   const timestamp = Math.floor(Date.now() / 1000);
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -213,7 +254,7 @@ function syncBundledModels(db: DatabaseSync, models: ModelEntry[]): void {
       INSERT INTO upstream_models (
         upstream_id, model_id, display_name, available, source, capabilities_json,
         raw_metadata_json, pricing_json, last_seen_at, last_synced_at
-      ) VALUES (?, ?, ?, 1, 'codex_bundled', '{}', ?, '{}', ?, ?)
+      ) VALUES (?, ?, ?, 1, ?, '{}', ?, '{}', ?, ?)
       ON CONFLICT(upstream_id, model_id) DO UPDATE SET
         display_name = excluded.display_name, available = 1, source = excluded.source,
         raw_metadata_json = excluded.raw_metadata_json,
@@ -224,6 +265,7 @@ function syncBundledModels(db: DatabaseSync, models: ModelEntry[]): void {
         BUILTIN_SUBSCRIPTION_ID,
         model.slug,
         String(model.display_name || model.slug),
+        source === "remote" || source === "remote-cache" ? "codex_remote" : "codex_bundled",
         JSON.stringify(model),
         timestamp,
         timestamp

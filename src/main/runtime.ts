@@ -25,6 +25,7 @@ import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
 import { createCodexModelCatalogService, parseBundledOverrideCatalog } from "./codex-model-catalog.ts";
+import { createSubscriptionModelFetcher, type ModelAccount } from "./subscription-models.ts";
 import { createAuthService, accountFromTokens, subscriptionFromTokens } from "./auth.ts";
 import { normalizeUsagePayload, normalizeResetCreditsPayload } from "./quota.ts";
 import {
@@ -200,13 +201,23 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     db: store.db,
     dataDir: store.paths.dataDir,
     getBundledOverride: bundledModelOverride,
-    getModelManagement: configuredModelManagement
+    getModelManagement: configuredModelManagement,
+    fetchRemoteModels: createSubscriptionModelFetcher({
+      listAccounts: () => store.listAccounts() as unknown as ModelAccount[],
+      refreshAccount: async (id) => await refreshGatewayAccountToken(id) as unknown as ModelAccount
+    })
   });
   try {
-    modelCatalogService.refreshBundled(true);
+    modelCatalogService.refresh();
   } catch (error: Dynamic) {
     store.addAppLog({ level: "warn", scope: "models", action: "initial-refresh", status: "failed", message: error.message });
   }
+  void modelCatalogService.refreshSubscription().then((result) => {
+    if (result.refreshWarning) store.addAppLog({ level: "warn", scope: "models", action: "remote-refresh", message: result.refreshWarning });
+    notifyDataChanged(["upstreams", "upstreamModels"]);
+  }).catch((error: Dynamic) => {
+    store.addAppLog({ level: "warn", scope: "models", action: "remote-refresh", status: "failed", message: error.message });
+  });
   sessionWakeups = createSessionWakeupService({
     repository: createSessionWakeupStore(store.db),
     listAccounts: () => store.listAccounts() as Parameters<typeof createSessionWakeupService>[0]["listAccounts"] extends () => infer Accounts ? Accounts : never,
@@ -497,8 +508,8 @@ function registerIpc() {
   });
   handleIpc("upstreams:bundledOverride", () => bundledModelOverride());
   handleIpc("upstreams:saveBundledOverride", (_event, input) => saveBundledModelOverride(input));
-  handleIpc("upstreams:refreshBuiltinModels", () => {
-    const result = modelCatalogService.refreshBundled();
+  handleIpc("upstreams:refreshBuiltinModels", async () => {
+    const result = await modelCatalogService.refreshSubscription();
     notifyDataChanged(["upstreams", "upstreamModels"]);
     return result;
   });
@@ -702,7 +713,7 @@ function saveModelManagement(models: Dynamic[]) {
   }
 }
 
-function saveBundledModelOverride(input: Dynamic) {
+async function saveBundledModelOverride(input: Dynamic) {
   const previous = bundledModelOverride();
   const next = {
     enabled: Boolean(input.enabled),
@@ -714,7 +725,7 @@ function saveBundledModelOverride(input: Dynamic) {
     codex_bundled_override_json: next.modelCatalogJson
   });
   try {
-    const catalog = next.enabled ? modelCatalogService.refresh() : modelCatalogService.refreshBundled();
+    const catalog = next.enabled ? modelCatalogService.refresh() : await modelCatalogService.refreshSubscription();
     notifyDataChanged(["upstreams", "upstreamModels"]);
     return { override: bundledModelOverride(), catalog };
   } catch (error: Dynamic) {
