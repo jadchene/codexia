@@ -1,3 +1,4 @@
+import { assertGptIpAllowed } from "./upstream-ip-guard.ts";
 type Dynamic = any;
 
 import { notifySessionQuotaExhausted } from "./gateway/session-wakeup.ts";
@@ -249,6 +250,7 @@ function createGatewayWebSocketGateway(options: Dynamic) {
       downstream.once("close", observer.onClose);
       const downstreamClose = waitForWebSocketClose(downstream);
       bridgeWebSockets({
+        beforeDownstreamSend: () => assertGptIpAllowed(undefined, true),
         downstream,
         upstream,
         controller,
@@ -420,6 +422,7 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       })
     });
     bridgeWebSockets({
+      beforeDownstreamSend: () => assertGptIpAllowed(selected.upstreamUrl, Boolean(selected.account)),
       downstream,
       upstream,
       controller,
@@ -813,6 +816,10 @@ async function connectWithFailover(options: Dynamic) {
       if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
       return { account, ...result };
     } catch (error: Dynamic) {
+      if (error?.code === "upstream_ip_guard_blocked") {
+        routing.releaseSessionReservation(routeContext, account.id);
+        throw error;
+      }
       let failure: Dynamic = error;
       if (helpers.isAuthExpiredResponse(failure.statusCode, failure.body || Buffer.alloc(0)) && hooks.refreshAccountToken) {
         let refreshedAccount: Dynamic;
@@ -917,7 +924,9 @@ function openApiUpstream(request: Dynamic, upstream: Dynamic, settings: Dynamic,
   return openUpstreamSocket(request, upstreamUrl, headers, settings, signal, false);
 }
 
-function openUpstreamSocket(request: Dynamic, upstreamUrl: Dynamic, headers: Dynamic, settings: Dynamic, signal: Dynamic, forwardClientProtocols = true) {
+async function openUpstreamSocket(request: Dynamic, upstreamUrl: Dynamic, headers: Dynamic, settings: Dynamic, signal: Dynamic, forwardClientProtocols = true) {
+  assertGptIpAllowed(upstreamUrl, forwardClientProtocols);
+  signal?.throwIfAborted();
   const protocols = forwardClientProtocols ? parseProtocols(request.headers["sec-websocket-protocol"]) : [];
   const timeoutMs = positiveSetting(settings.gateway_connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS);
   const errorLimit = positiveSetting(settings.gateway_error_body_limit_bytes, DEFAULT_ERROR_BODY_LIMIT_BYTES);

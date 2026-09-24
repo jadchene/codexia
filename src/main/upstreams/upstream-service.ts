@@ -1,3 +1,4 @@
+import { guardedFetch } from "../upstream-ip-guard.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { isSensitiveHeaderName, usesInsecureRemoteTransport } from "../../shared/security/upstream.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -50,7 +51,7 @@ export function createUpstreamService(options: {
   fetch?: typeof fetch;
 }) {
   const { db, secretCodec } = options;
-  const fetchImpl = options.fetch || globalThis.fetch;
+  const fetchImpl = options.fetch || guardedFetch;
   backfillMissingEstimatedCosts(db);
   return {
     list: () => listUpstreams(db, secretCodec),

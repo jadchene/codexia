@@ -245,3 +245,13 @@ describe("settings appearance and display units", () => {
     expect(screen.getByText("未检测到 MCP 服务，请先安装 mcp-gateway-service。")).toBeTruthy();
   });
 });
+
+it("round-trips the optional IP guard switch and trims its address", () => {
+  expect(settingsToForm({}).gpt_ip_guard_enabled).toBe(false);
+  const form = settingsToForm({ gpt_ip_guard: "true", gpt_allowed_ip: "203.0.113.10" });
+  expect(form.gpt_ip_guard_enabled).toBe(true);
+  expect(formToSettings({}, { gpt_ip_guard_enabled: true, gpt_allowed_ip: " 203.0.113.10 " })).toMatchObject({
+    gpt_ip_guard: "true", gpt_allowed_ip: "203.0.113.10"
+  });
+  expect(formToSettings({ gpt_ip_guard: "true" }, { gpt_ip_guard_enabled: false }).gpt_ip_guard).toBe("false");
+});

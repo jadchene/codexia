@@ -9,7 +9,7 @@ import type { BootstrapData } from "./bootstrap";
 import type { SessionWakeup, SessionWakeupInput } from "./session-wakeup";
 import type { ScheduledTask, ScheduledTaskInput } from "./scheduled-tasks";
 import type { AppLogPage, LogQuery, RequestLogPage, RequestLogModels, TokenSummary } from "./logs";
-import type { ServiceStatus, Settings } from "./settings";
+import type { ServiceStatus, Settings, IpGuardStatus } from "./settings";
 import type {
   BalanceRefreshResult,
   BundledModelOverride,
@@ -46,6 +46,8 @@ export type IpcContract = {
   "sessionWakeups:delete": IpcSpec<[id: string], void>;
   "app:bootstrap": IpcSpec<[], BootstrapData>;
   "app:listSystemFonts": IpcSpec<[], string[]>;
+  "settings:ipGuardStatus": IpcSpec<[], IpGuardStatus>;
+  "settings:refreshIp": IpcSpec<[], IpGuardStatus>;
   "settings:save": IpcSpec<[patch: Record<string, unknown>], Settings>;
   "accounts:setEnabled": IpcSpec<[id: string, enabled: boolean], PublicAccount[]>;
   "accounts:delete": IpcSpec<[id: string], PublicAccount[]>;

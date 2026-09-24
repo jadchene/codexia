@@ -768,3 +768,22 @@ function testSecretCodec() {
     decryptString: (value) => value.toString("utf8").replace(/^encrypted:/, "")
   });
 }
+
+test("IP guard settings persist atomically and cannot enable without an IP", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-ip-settings-"));
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    assert.equal(store.getSettings().gpt_ip_guard, "false");
+    assert.throws(() => store.saveSettings({ gpt_ip_guard: "true" }), /有效/);
+    assert.equal(store.getSettings().gpt_ip_guard, "false");
+    store.saveSettings(editableSettingsPatch({ gpt_ip_guard: "true", gpt_allowed_ip: "203.0.113.10" }));
+    assert.equal(store.getSettings().gpt_ip_guard, "true");
+    assert.throws(() => store.saveSettings({ gpt_allowed_ip: "" }), /有效/);
+    assert.equal(store.getSettings().gpt_allowed_ip, "203.0.113.10");
+    store.saveSettings({ gpt_ip_guard: "false", gpt_allowed_ip: "" });
+    assert.equal(store.getSettings().gpt_ip_guard, "false");
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

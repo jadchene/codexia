@@ -1,3 +1,4 @@
+import { guardedFetch } from "./upstream-ip-guard.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseCatalog } from "./codex-model-catalog.ts";
@@ -47,7 +48,7 @@ export function orderModelAccounts(accounts: ModelAccount[]): ModelAccount[] {
 
 /** 从最高订阅等级的账号拉取目录，鉴权重试后仍失败则依次换号。 */
 export function createSubscriptionModelFetcher(options: SubscriptionModelsOptions): () => Promise<string> {
-  const fetchImpl = options.fetch || globalThis.fetch;
+  const fetchImpl = options.fetch || guardedFetch;
   return async () => {
     const accounts = orderModelAccounts(options.listAccounts());
     if (accounts.length === 0) throw new Error("没有可用于获取模型目录的已启用 GPT 账号。");
@@ -82,7 +83,8 @@ export function createSubscriptionModelFetcher(options: SubscriptionModelsOption
           if (catalog.models.length === 0) throw new Error("远程模型目录为空。");
           return JSON.stringify(catalog);
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "upstream_ip_guard_blocked") throw error;
         // 不记录响应正文或令牌；单个账号失败后继续尝试低等级账号。
       }
     }

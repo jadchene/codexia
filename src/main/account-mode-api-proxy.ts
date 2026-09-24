@@ -1,3 +1,4 @@
+import { assertGptIpAllowed } from "./upstream-ip-guard.ts";
 import { randomUUID } from "node:crypto";
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
@@ -128,6 +129,8 @@ const handleHttpRequest = async (
     }
   };
 
+  assertGptIpAllowed(undefined, true);
+  if (response.destroyed) return;
   await new Promise<void>((resolve, reject) => {
     clientRequest = transport.request(upstreamUrl, {
       method: request.method,
@@ -200,6 +203,9 @@ const createAccountProxyWebSocketServer = (
   });
 
   const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    try { assertGptIpAllowed(undefined, true); }
+    catch (error) { rejectUpgrade(socket, 403, error instanceof Error ? error.message : String(error)); return; }
+    if (socket.destroyed) return;
     const parsed = new URL(request.url || "/", "http://localhost");
     if (!isSupportedProxyPath(parsed.pathname, options)) {
       rejectUpgrade(socket, 404, "Unrecognized request URL.");
@@ -280,6 +286,7 @@ const createAccountProxyWebSocketServer = (
           upstreamUrl: upstreamUrl.toString()
         });
         bridgeWebSockets({
+          beforeDownstreamSend: () => assertGptIpAllowed(undefined, true),
           downstream,
           upstream,
           controller,

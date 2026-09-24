@@ -1,3 +1,4 @@
+import { guardedFetch } from "./upstream-ip-guard.ts";
 import { randomUUID } from "node:crypto";
 import type { ResetCreditConsumeStatus } from "../shared/contracts/accounts";
 
@@ -68,7 +69,7 @@ export async function requestResetCreditConsume(options: {
   timeoutMs?: number;
 }): Promise<unknown> {
   const { endpoint, account, body } = options;
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const fetchImpl = options.fetchImpl || guardedFetch;
   const timeoutMs = Math.max(1000, Math.trunc(options.timeoutMs || 20_000));
   const response = await fetchImpl(endpoint, {
     method: "POST",

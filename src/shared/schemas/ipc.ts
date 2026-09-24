@@ -46,6 +46,8 @@ export const ipcArgumentSchemas = {
   "sessionWakeups:delete": z.tuple([id]),
   "app:bootstrap": empty,
   "app:listSystemFonts": empty,
+  "settings:ipGuardStatus": empty,
+  "settings:refreshIp": empty,
   "settings:save": z.tuple([z.record(z.string(), z.unknown())]),
   "accounts:setEnabled": z.tuple([id, z.boolean()]),
   "accounts:delete": z.tuple([id]),

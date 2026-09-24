@@ -1,3 +1,4 @@
+import { guardedFetch } from "./upstream-ip-guard.ts";
 import http, { type Server, type ServerResponse } from "node:http";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { LoginStartResult, LoginStatus } from "../shared/contracts/accounts";
@@ -221,7 +222,7 @@ async function exchangeCodeForTokens({ issuer, clientId, redirectUri, codeVerifi
     client_id: clientId,
     code_verifier: codeVerifier
   });
-  const resp = await fetch(`${issuer}/oauth/token`, {
+  const resp = await guardedFetch(`${issuer}/oauth/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,

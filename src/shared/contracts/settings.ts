@@ -14,3 +14,12 @@ export interface ServiceStatus {
   activeHttpRequests?: number;
   activeWebSockets?: number;
 }
+
+export interface IpGuardStatus {
+  enabled: boolean;
+  allowedIp: string;
+  currentIp: string;
+  checkedAt: number | null;
+  error: string;
+  matched: boolean;
+}

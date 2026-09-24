@@ -5,6 +5,7 @@ import type { PublicAccount } from "../shared/contracts/accounts";
 import type { Settings } from "../shared/contracts/settings";
 
 const EDITABLE_SETTING_KEYS = new Set([
+  "gpt_ip_guard", "gpt_allowed_ip",
   "gateway_host", "gateway_port", "gateway_api_key", "upstream_base_url",
   "gateway_connect_timeout_ms", "gateway_stream_idle_timeout_ms", "gateway_unary_timeout_ms",
   "gateway_shutdown_grace_ms", "gateway_request_body_limit_bytes", "gateway_error_body_limit_bytes",
@@ -49,6 +50,7 @@ const INTEGER_SETTINGS: Record<string, readonly [number, number]> = {
 };
 
 const ENUM_SETTINGS = {
+  gpt_ip_guard: ["true", "false"],
   auto_start_gateway: ["true", "false"],
   auto_start_mcp_gateway: ["true", "false"],
   startup_launch: ["disabled", "auto", "delayed"],

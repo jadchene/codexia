@@ -4,6 +4,7 @@ interface QueuedMessage { data: RawData; isBinary: boolean }
 type MessageTransform = (data: RawData, isBinary: boolean) => RawData | { messages: RawData[] } | false | null | undefined;
 
 interface BridgeWebSocketsOptions {
+  beforeDownstreamSend?: () => void;
   downstream: WebSocket;
   upstream: WebSocket;
   controller: AbortController;
@@ -51,7 +52,20 @@ export function bridgeWebSockets(options: BridgeWebSocketsOptions): void {
       });
     }
   };
-  const forwardDownstream = forward(downstream, upstream, onDownstreamMessage);
+  const forwardDownstream = forward(downstream, upstream, (data, isBinary) => {
+    try { options.beforeDownstreamSend?.(); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (downstream.readyState === WebSocket.OPEN) {
+        downstream.send(JSON.stringify({ type: "error", error: { code: "upstream_ip_guard_blocked", message } }));
+        downstream.close(1008, "upstream_ip_guard_blocked");
+      }
+      upstream.terminate();
+      closing = true;
+      return false;
+    }
+    return onDownstreamMessage?.(data, isBinary);
+  });
   downstream.on("message", forwardDownstream);
   upstream.on("message", forward(upstream, downstream, onUpstreamMessage));
   const queuedMessages = typeof takeInitialDownstreamMessages === "function"

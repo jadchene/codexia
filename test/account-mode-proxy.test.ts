@@ -296,3 +296,74 @@ const waitFor = async (condition: () => boolean): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 };
+
+test("IP cache blocks account HTTP and WS handshake and rechecks established WS messages", async () => {
+  const { createUpstreamIpGuard, installUpstreamIpGuard } = await import("../src/main/upstream-ip-guard.ts");
+  let ip = "203.0.113.10";
+  let probes = 0;
+  let httpCalls = 0;
+  let upgrades = 0;
+  let messages = 0;
+  const server = http.createServer((_req, res) => { httpCalls++; res.end("ok"); });
+  const wsServer = new WebSocketServer({ server });
+  wsServer.on("connection", (socket) => {
+    upgrades++;
+    socket.on("message", () => { messages++; socket.send("accepted"); });
+  });
+  const upstream = await listenExisting(server);
+  const harness = await createHarness(upstream.url, false);
+  const config = { gpt_ip_guard: "true", gpt_allowed_ip: "203.0.113.10" };
+  const guard = createUpstreamIpGuard(() => config, async () => {
+    probes++;
+    return new Response(JSON.stringify({ ip }));
+  });
+  installUpstreamIpGuard(guard);
+  let client: WebSocket | undefined;
+  try {
+    const blocked = await fetch(`${harness.gateway.status().url}/v1/models`);
+    expect(blocked.status).toBe(403);
+    expect(await blocked.text()).toContain("尚未检测");
+    expect(httpCalls).toBe(0);
+    const rejected = new WebSocket(harness.gateway.status().url.replace("http:", "ws:") + "/v1/responses");
+    await new Promise<void>((resolve, reject) => {
+      rejected.on("error", () => {});
+      rejected.once("open", () => reject(new Error("Unexpected upstream connection")));
+      rejected.once("unexpected-response", (_req, response) => {
+        expect(response.statusCode).toBe(403);
+        response.resume();
+        rejected.terminate();
+        resolve();
+      });
+    });
+    expect(upgrades).toBe(0);
+    expect(probes).toBe(0);
+    await guard.refresh();
+    client = new WebSocket(harness.gateway.status().url.replace("http:", "ws:") + "/v1/responses");
+    await onceOpen(client);
+    const accepted = nextMessages(client, 1);
+    client.send("first");
+    await accepted;
+    expect(messages).toBe(1);
+    expect(probes).toBe(1);
+    ip = "203.0.113.11";
+    await guard.refresh();
+    const failure = nextMessages(client, 1);
+    const closed = onceClose(client);
+    client.send("must not reach upstream");
+    expect(String((await failure)[0])).toContain("upstream_ip_guard_blocked");
+    await closed;
+    expect(messages).toBe(1);
+    expect(probes).toBe(2);
+    config.gpt_ip_guard = "false";
+    const allowed = await fetch(`${harness.gateway.status().url}/v1/models`);
+    expect(allowed.status).toBe(200);
+    expect(httpCalls).toBe(1);
+  } finally {
+    client?.terminate();
+    installUpstreamIpGuard(undefined);
+    await harness.close();
+    for (const socket of wsServer.clients) socket.terminate();
+    await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+    await upstream.close();
+  }
+});

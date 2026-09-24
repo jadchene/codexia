@@ -1,3 +1,4 @@
+import { guardedFetch, guardedSubscriptionFetch } from "./upstream-ip-guard.ts";
 type Dynamic = any;
 
 import http from "node:http";
@@ -128,7 +129,13 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
     server = http.createServer((req: Dynamic, res: Dynamic) => {
       if (useAccountModeGatewayProxy(store.getSettings(), req.url)) {
         void accountModeApiProxy.handleHttp(req, res).catch((error: Dynamic) => {
-          if (!res.headersSent) sendJson(res, 502, { error: { message: "API 服务暂时无法完成账号模式代理请求。" } });
+          if (!res.headersSent) {
+            const blocked = error?.code === "upstream_ip_guard_blocked";
+            sendJson(res, blocked ? 403 : 502, { error: {
+              ...(blocked ? { code: error.code } : {}),
+              message: blocked ? error.message : "API 服务暂时无法完成账号模式代理请求。"
+            } });
+          }
           store.addAppLog?.({ level: "error", scope: "gateway", action: "account-proxy", status: "failed", message: gatewayErrorMessage(error) });
         });
         return;
@@ -552,7 +559,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       message: `${req.method || "-"} ${requestPath} -> ${upstreamPath}: ${gatewayErrorMessage(error, message)}`
     });
     if (!res.headersSent && !res.destroyed) {
-      const clientMessage = [400, 409, 413, 422].includes(Number(error?.statusCode))
+      const clientMessage = (error?.code === "upstream_ip_guard_blocked" || [400, 409, 413, 422].includes(Number(error?.statusCode)))
         ? error.message
         : cancellation && cancellation !== "client_cancelled"
           ? "Request timed out."
@@ -735,7 +742,7 @@ async function callApiUpstream(options: Dynamic) {
   const upstreamUrl = buildUpstreamUrl(upstream.baseUrl, request.originalPath);
   let handedOff = false;
   try {
-    const response = await fetch(upstreamUrl, {
+    const response = await guardedFetch(upstreamUrl, {
       method: req.method,
       headers: buildApiUpstreamHeaders(req.headers, upstream, body.length > 0, request.path) as HeadersInit,
       body,
@@ -1041,7 +1048,7 @@ async function callUpstream(req: Dynamic, request: Dynamic, account: Dynamic, se
   }
   let handedOff = false;
   try {
-    const upstream = await fetch(request.upstreamUrl, {
+    const upstream = await guardedSubscriptionFetch(request.upstreamUrl, {
       method: req.method,
       headers: headers as HeadersInit,
       body: hasBody ? request.body : undefined,

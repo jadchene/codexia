@@ -1,3 +1,4 @@
+import type { IpGuardStatus } from "../../../shared/contracts/settings";
 import {
   Alert,
   Button,
@@ -89,6 +90,8 @@ export const SettingsPage = ({
   const [dirty, setDirty] = useState(false);
   const [autoReviewModelOptions, setAutoReviewModelOptions] = useState<Array<{ value: string; label: string }>>([]);
   const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [ipStatus, setIpStatus] = useState<IpGuardStatus | null>(null);
+  const [ipRefreshing, setIpRefreshing] = useState(false);
   const [fontsLoading, setFontsLoading] = useState(false);
 
   useEffect(() => {
@@ -111,6 +114,24 @@ export const SettingsPage = ({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeSection !== "network") return;
+    let cancelled = false;
+    const load = () => { void window.codexGateway?.getIpGuardStatus?.().then((value) => {
+      if (!cancelled) setIpStatus(value);
+    }).catch(() => {}); };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [activeSection, settings]);
+
+  const refreshIp = async (): Promise<void> => {
+    setIpRefreshing(true);
+    try { setIpStatus(await window.codexGateway.refreshIp()); }
+    catch (error) { onMessage(`刷新 IP 失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setIpRefreshing(false); }
+  };
 
   const save = async (values: SettingsFormValues): Promise<void> => {
     const next = formToSettings(settings, values);
@@ -405,6 +426,22 @@ export const SettingsPage = ({
 
   const networkTab = (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <SettingsSection title="GPT 出口 IP 校验" description="保存后生效，默认关闭。开启后每分钟更新 IP 缓存，GPT HTTP 请求、WS 连接及消息发送前检查缓存。">
+        <Form.Item name="gpt_ip_guard_enabled" label="启用出口 IP 校验" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="gpt_allowed_ip" label="允许的出口 IP" dependencies={["gpt_ip_guard_enabled"]}
+          rules={[({ getFieldValue }) => ({ validator: async (_, value) => {
+            if (getFieldValue("gpt_ip_guard_enabled") && !String(value || "").trim()) throw new Error("启用后必须填写允许的出口 IP");
+          } })]} extra="填写一个 IPv4 或 IPv6 地址。IP 不匹配、尚未检测、缓存超过 90 秒或检测失败时均阻止 GPT 调用。">
+          <Input placeholder="例如 203.0.113.10" />
+        </Form.Item>
+        <Space orientation="vertical">
+          <Typography.Text>当前出口 IP：{ipStatus?.currentIp || "尚未获取"}</Typography.Text>
+          <Typography.Text type="secondary">最近检测：{ipStatus?.checkedAt ? new Date(ipStatus.checkedAt).toLocaleString() : "尚未检测"} · {ipStatus?.enabled ? (ipStatus.matched ? "匹配" : "已阻止") : "校验关闭"}</Typography.Text>
+          {ipStatus?.error && <Alert type="error" showIcon title={ipStatus.error} />}
+          <Button icon={<ReloadOutlined />} loading={ipRefreshing} onClick={() => { void refreshIp(); }}>刷新当前 IP</Button>
+          <Typography.Text type="secondary">通过 ipinfo.io/json 检测本应用的出口。请确保 IP 检测与 GPT 流量使用相同代理线路；分流规则不同会导致检测结果无法代表 GPT 出口。账号直连模式需启用 API 代理才能受此保护。</Typography.Text>
+        </Space>
+      </SettingsSection>
       <Collapse items={[
         {
           key: "timeouts",
@@ -547,6 +584,7 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
   for (const [formKey, settingKey] of Object.entries(MIB_FIELDS)) {
     values[formKey] = formatNumber(Number(settings[settingKey] || 0) / (1024 * 1024));
   }
+  values.gpt_ip_guard_enabled = settings.gpt_ip_guard === "true";
   values.auto_start_gateway_enabled = settings.auto_start_gateway === "true";
   values.auto_start_mcp_gateway_enabled = settings.auto_start_mcp_gateway === "true";
   values.ignore_five_hour_limit_enabled = settings.ignore_five_hour_limit === "true";
@@ -586,6 +624,9 @@ export const formToSettings = (current: SettingsRecord, values: Partial<Settings
   }
   if (Object.prototype.hasOwnProperty.call(values, "gateway_websocket_reject_http_only_model_upgrade_enabled")) {
     next.gateway_websocket_reject_http_only_model_upgrade = values.gateway_websocket_reject_http_only_model_upgrade_enabled ? "true" : "false";
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "gpt_ip_guard_enabled")) {
+    next.gpt_ip_guard = values.gpt_ip_guard_enabled ? "true" : "false";
   }
   return next;
 };

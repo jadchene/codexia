@@ -1,3 +1,4 @@
+import { validateIpGuardSettings } from "./upstream-ip-guard.ts";
 import fs from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -233,6 +234,8 @@ function migrate(db: Db): void {
     usage_refresh_interval_secs: "900",
     usage_refresh_timeout_ms: "20000",
     last_usage_refresh_all_at: "0",
+    gpt_ip_guard: "false",
+    gpt_allowed_ip: "",
     auto_start_gateway: "false",
     auto_start_mcp_gateway: "false",
     account_mode_use_api_proxy: "false",
@@ -644,6 +647,12 @@ function getSettings(db: Db): Settings {
 }
 
 function saveSettings(db: Db, patch: Record<string, unknown>): Settings {
+  if ("gpt_ip_guard" in patch || "gpt_allowed_ip" in patch) {
+    validateIpGuardSettings({
+      ...getSettings(db),
+      ...Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, String(value ?? "")]))
+    });
+  }
   const stmt = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value

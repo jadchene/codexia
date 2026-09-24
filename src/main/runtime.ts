@@ -1,3 +1,4 @@
+import { guardedFetch, createUpstreamIpGuard, installUpstreamIpGuard } from "./upstream-ip-guard.ts";
 type Dynamic = any;
 
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, shell } from "electron";
@@ -69,6 +70,7 @@ if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
 let store!: ReturnType<typeof createStore>;
+let ipGuard!: ReturnType<typeof createUpstreamIpGuard>;
 let gateway!: ReturnType<typeof createGateway>;
 let mcpGateway!: ReturnType<typeof createMcpGatewayService>;
 let authService!: ReturnType<typeof createAuthService>;
@@ -173,6 +175,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       });
     }
   }
+  ipGuard = createUpstreamIpGuard(() => store.getSettings());
+  installUpstreamIpGuard(ipGuard);
+  ipGuard.start();
   store.runMaintenance();
   scheduleMaintenance();
   upstreamService = createUpstreamService({ db: store.db, secretCodec });
@@ -458,6 +463,8 @@ function registerIpc() {
     paths: store.paths
   }));
   handleIpc("app:listSystemFonts", () => listSystemFontFamilies());
+  handleIpc("settings:ipGuardStatus", () => ipGuard.status());
+  handleIpc("settings:refreshIp", () => ipGuard.refresh());
   handleIpc("settings:save", async (_event, patch) => {
     const editablePatch = editableSettingsPatch(patch);
     if (!editablePatch.gateway_api_key) delete editablePatch.gateway_api_key;
@@ -470,6 +477,7 @@ function registerIpc() {
     if (requestedDebugLogging !== undefined) {
       settings = await gateway.setApiDebugLogging(requestedDebugLogging === "true");
     }
+    ipGuard.start();
     applyStartupLaunchSettings(settings);
     scheduleUsageRefresh("settings-save");
     syncTrayForSettings();
@@ -997,6 +1005,7 @@ function syncDetectedCodexAuthMode() {
 }
 
 async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
+  ipGuard?.stop();
   sessionWakeups?.stop();
   scheduledTasks?.stop();
   if (shuttingDown) return;
@@ -1584,7 +1593,7 @@ async function refreshGatewayAccountToken(accountId: Dynamic) {
 
 async function requestJson(endpoint: Dynamic, account: Dynamic) {
   const timeoutMs = usageRefreshTimeoutMs();
-  const resp = await fetch(endpoint, {
+  const resp = await guardedFetch(endpoint, {
     headers: {
       authorization: `Bearer ${account.access_token}`,
       "ChatGPT-Account-Id": account.account_id || account.workspace_id || "",
@@ -1611,7 +1620,7 @@ async function refreshAccessToken(account: Dynamic, refreshSubscription = false)
     grant_type: "refresh_token",
     refresh_token: account.refresh_token
   });
-  const resp = await fetch("https://auth.openai.com/oauth/token", {
+  const resp = await guardedFetch("https://auth.openai.com/oauth/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
