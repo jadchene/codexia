@@ -517,6 +517,118 @@ test("gateway can retry startup after its configured port was temporarily occupi
   }
 });
 
+test.each([200, 422])("独立搜索通过账号池转发请求并保留上游响应（%i）", async (status) => {
+  const requests = [];
+  const body = JSON.stringify({
+    id: "search-session",
+    model: "gpt-6-astra",
+    input: [],
+    commands: { search_query: [{ q: "OpenAI 官网" }], response_length: "short" },
+    settings: { external_web_access: true },
+    max_output_tokens: 1000
+  });
+  const output = JSON.stringify(status === 200
+    ? { output: "OpenAI 官网", results: [{ ref_id: "turn0search0", url: "https://openai.com/" }] }
+    : { error: { message: "Invalid search command." } });
+  const harness = await startHarness(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    requests.push({ url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString("utf8") });
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(output);
+  });
+  try {
+    const response = await gatewayFetch(harness, "/v1/alpha/search?client_version=0.158.0", {
+      headers: { ...codexHeaders("search-session", "search-turn"), "content-type": "application/json" },
+      body
+    });
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get("content-type"), "application/json");
+    assert.equal(await response.text(), output);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "/backend-api/codex/alpha/search?client_version=0.158.0");
+    assert.equal(requests[0].body, body);
+    assert.equal(requests[0].headers.authorization, "Bearer token-a");
+    assert.equal(requests[0].headers["chatgpt-account-id"], "account-a");
+    assert.equal(harness.tokenLogs.at(-1).request_path, "/v1/alpha/search?client_version=0.158.0");
+    assert.equal(harness.tokenLogs.at(-1).status, status);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("独立搜索沿用网关鉴权并限制为 POST", async () => {
+  let upstreamCalls = 0;
+  const harness = await startHarness((_req, res) => {
+    upstreamCalls += 1;
+    res.end("{}");
+  });
+  try {
+    const unauthorized = await gatewayFetch(harness, "/v1/alpha/search");
+    assert.equal(unauthorized.status, 401);
+    await unauthorized.text();
+    const wrongMethod = await fetch(`${harness.gateway.status().url}/v1/alpha/search`, {
+      headers: { authorization: "Bearer local-key" }
+    });
+    assert.equal(wrongMethod.status, 405);
+    assert.equal(wrongMethod.headers.get("allow"), "POST");
+    await wrongMethod.text();
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("独立搜索按模型转发到所属 API 渠道", async () => {
+  const requests = [];
+  const output = JSON.stringify({ output: "API 搜索结果", results: [] });
+  const apiUpstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    requests.push({ url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString("utf8") });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(output);
+  });
+  await listen(apiUpstream);
+  let subscriptionCalls = 0;
+  const harness = await startHarness((_req, res) => {
+    subscriptionCalls += 1;
+    res.writeHead(500);
+    res.end();
+  }, {}, {
+    upstreamService: {
+      findRuntimeByModel: (model) => model === "external-search-model" ? {
+        id: "search-api", name: "Search API", kind: "responses_api", enabled: true,
+        baseUrl: `http://127.0.0.1:${apiUpstream.address().port}/v1`,
+        apiKey: "provider-key", requestHeaders: {}
+      } : null,
+      getModelPricing: () => null
+    }
+  });
+  try {
+    const body = JSON.stringify({
+      id: "external-search-session", model: "external-search-model",
+      commands: { search_query: [{ q: "OpenAI 官网" }] }
+    });
+    const response = await gatewayFetch(harness, "/v1/alpha/search", {
+      headers: { ...codexHeaders("external-search-session", "search-turn"), "chatgpt-account-id": "must-not-leak" },
+      body
+    });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), output);
+    assert.equal(subscriptionCalls, 0);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "/v1/alpha/search");
+    assert.equal(requests[0].body, body);
+    assert.equal(requests[0].headers.authorization, "Bearer provider-key");
+    assert.equal(requests[0].headers["chatgpt-account-id"], undefined);
+    assert.equal(harness.tokenLogs.at(-1).upstream_id, "search-api");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
 test("optional Codex HTTP endpoints are explicitly proxied", async () => {
   const paths = [];
   const harness = await startHarness((req, res) => {

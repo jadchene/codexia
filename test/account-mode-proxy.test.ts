@@ -72,6 +72,32 @@ test("账号模式通过 API 服务透明转发 HTTP 并只观察 Responses", as
   }
 });
 
+test("账号代理模式透明转发独立搜索并保留账号凭证", async () => {
+  const body = JSON.stringify({ id: "account-search", model: "gpt-6-astra", commands: { search_query: [{ q: "OpenAI 官网" }] } });
+  const output = JSON.stringify({ output: "搜索结果", results: [] });
+  const received: Array<{ url: string; authorization: string | undefined; body: string }> = [];
+  const upstream = await listenHttp(async (request, response) => {
+    received.push({ url: request.url || "", authorization: request.headers.authorization, body: (await readBody(request)).toString("utf8") });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(output);
+  });
+  const harness = await createHarness(upstream.url, false);
+  try {
+    const response = await fetch(`${harness.gateway.status().url}/v1/alpha/search`, {
+      method: "POST",
+      headers: { authorization: "Bearer account-token", "content-type": "application/json" },
+      body
+    });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), output);
+    assert.deepEqual(received, [{ url: "/backend-api/codex/alpha/search", authorization: "Bearer account-token", body }]);
+    assert.equal(harness.tokenLogs.length, 0);
+  } finally {
+    await harness.close();
+    await upstream.close();
+  }
+});
+
 test("账号模式通过 API 服务透明转发 WebSocket 并只观察 Responses", async () => {
   const upstreamServer = http.createServer();
   const upstreamWebSocket = new WebSocketServer({ server: upstreamServer, perMessageDeflate: true });

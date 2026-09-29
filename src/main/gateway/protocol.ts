@@ -17,6 +17,7 @@ const GATEWAY_ROUTES: Record<string, string[]> = {
   "/v1/models": ["GET"],
   "/v1/responses": ["POST"],
   "/v1/responses/compact": ["POST"],
+  "/v1/alpha/search": ["POST"],
   "/v1/memories/trace_summarize": ["POST"],
   "/v1/images/generations": ["POST"],
   "/v1/images/edits": ["POST"],
