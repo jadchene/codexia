@@ -98,25 +98,32 @@ export function syncAccountUsageFromHeaders(
   const primaryResetAfter = numberHeader(headers, "x-codex-primary-reset-after-seconds");
   const secondaryUsed = numberHeader(headers, "x-codex-secondary-used-percent");
   const secondaryResetAfter = numberHeader(headers, "x-codex-secondary-reset-after-seconds");
+  const primaryMinutes = numberHeader(headers, "x-codex-primary-window-minutes") ?? 300;
+  const secondaryMinutes = numberHeader(headers, "x-codex-secondary-window-minutes") ?? 10080;
 
   const settings = store.getSettings?.() ?? {};
-  if (settings.ignore_five_hour_limit !== "true") {
+  for (const window of [
+    { used: primaryUsed, resetAfter: primaryResetAfter, minutes: primaryMinutes },
+    { used: secondaryUsed, resetAfter: secondaryResetAfter, minutes: secondaryMinutes }
+  ]) {
+    if (window.minutes !== 300 && window.minutes !== 10080) continue;
+    const weekly = window.minutes === 10080;
+    if (!weekly && settings.ignore_five_hour_limit === "true") continue;
     applyQuotaHeaderWindow(usage, account, {
-      used: primaryUsed,
-      resetAfter: primaryResetAfter,
-      usedField: "quota_5h_used_percent",
-      resetField: "quota_5h_reset_at",
+      used: window.used,
+      resetAfter: window.resetAfter,
+      usedField: weekly ? "quota_7d_used_percent" : "quota_5h_used_percent",
+      resetField: weekly ? "quota_7d_reset_at" : "quota_5h_reset_at",
       nowSeconds
     });
+    if (!weekly && (usage.quota_5h_used_percent !== undefined || usage.quota_5h_reset_at !== undefined)) usage.has_five_hour_quota = 1;
   }
-  applyQuotaHeaderWindow(usage, account, {
-    used: secondaryUsed,
-    resetAfter: secondaryResetAfter,
-    usedField: "quota_7d_used_percent",
-    resetField: "quota_7d_reset_at",
-    nowSeconds
-  });
   if (Object.keys(usage).length === 0) return false;
+  if (primaryMinutes === 10080 && secondaryUsed === null && secondaryResetAfter === null) {
+    usage.has_five_hour_quota = 0;
+    if (usage.quota_7d_used_percent !== undefined) usage.quota_5h_used_percent = usage.quota_7d_used_percent;
+    if (usage.quota_7d_reset_at !== undefined) usage.quota_5h_reset_at = usage.quota_7d_reset_at;
+  }
 
   usage.raw_usage_json = JSON.stringify({
     source: "gateway-response-headers",
@@ -131,6 +138,34 @@ export function syncAccountUsageFromHeaders(
   store.updateUsage(account.id, usage);
   return true;
 }
+
+/** 按实际窗口时长保存流式额度事件，兼容只有周额度的账号。 */
+export const syncAccountUsageFromEvent = (
+  account: GatewayAccountQuota | null | undefined,
+  event: Record<string, any>,
+  store: UsageStore
+): boolean => {
+  if (event.type !== "codex.rate_limits" || !account?.id || !store.updateUsage) return false;
+  const limits = event.rate_limits;
+  if (!limits || typeof limits !== "object") return false;
+  const headers: HeaderRecord = {};
+  for (const name of ["primary", "secondary"]) {
+    const window = limits[name] ?? limits[`${name}_window`];
+    if (!window || typeof window !== "object") continue;
+    const minutes = window.window_minutes ?? (window.limit_window_seconds != null ? Number(window.limit_window_seconds) / 60 : undefined);
+    if (window.used_percent != null) headers[`x-codex-${name}-used-percent`] = window.used_percent;
+    if (minutes != null) headers[`x-codex-${name}-window-minutes`] = minutes;
+    const resetAfter = window.reset_after_seconds ?? (window.reset_at != null ? Number(window.reset_at) - Math.floor(Date.now() / 1000) : undefined);
+    if (resetAfter != null) headers[`x-codex-${name}-reset-after-seconds`] = resetAfter;
+  }
+  return syncAccountUsageFromHeaders(account, headers, {
+    getSettings: () => store.getSettings?.() ?? {},
+    updateUsage: (id, usage) => store.updateUsage!(id, {
+      ...usage,
+      raw_usage_json: JSON.stringify({ source: "gateway-stream-event", at: Math.floor(Date.now() / 1000), event })
+    })
+  });
+};
 
 export function buildCodexQuotaHeaders(
   accounts: GatewayAccountQuota[],

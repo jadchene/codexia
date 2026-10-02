@@ -23,7 +23,7 @@ export function extractTokenUsage(body: unknown): TokenUsage {
   return parseUsageSse(text);
 }
 
-export function createSseUsageParser(): SseUsageParser {
+export function createSseUsageParser(onEvent?: (event: Record<string, unknown>) => void): SseUsageParser {
   const decoder = new TextDecoder();
   let tail = "";
   let latest = emptyUsage();
@@ -41,6 +41,7 @@ export function createSseUsageParser(): SseUsageParser {
         const event = JSON.parse(payload) as Record<string, unknown>;
         if (event.type === "response.completed") completed = true;
         if (event.type === "error" || event.type === "response.failed") terminalError = payload;
+        onEvent?.(event);
       } catch {}
       let usage = parseUsageJson(payload);
       if (!hasUsage(usage)) usage = parseUsageFromJsonTail(payload);
@@ -171,6 +172,7 @@ function hasUsage(usage: TokenUsage): boolean {
 
 function numberFrom(...values: unknown[]): number {
   for (const value of values) {
+    if (value === null || value === undefined || value === "" || typeof value === "boolean") continue;
     const number = Number(value);
     if (Number.isFinite(number)) return Math.max(0, Math.trunc(number));
   }

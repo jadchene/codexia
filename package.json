@@ -1,6 +1,6 @@
 {
   "name": "codexia",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "type": "module",
   "description": "Windows desktop app for Codex accounts, model channels, API access, and MCP service management.",
   "license": "MIT",

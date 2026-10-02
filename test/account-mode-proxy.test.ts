@@ -218,9 +218,74 @@ test("API 调试关闭或观察写入失败都不影响账号 Responses 转发",
   }
 });
 
+test("账号透明代理按实际身份同步 HTTP 头和 SSE 周额度", async () => {
+  const upstream = await listenHttp(async (request, response) => {
+    await readBody(request);
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "x-codex-primary-used-percent": "20",
+      "x-codex-primary-window-minutes": "10080"
+    });
+    response.end('data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":21,"window_minutes":10080}}}\n\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":7,"output_tokens":3}}}\n\n');
+  });
+  const harness = await createHarness(upstream.url, false);
+  harness.accounts.push({ id: "actual-account", account_id: "actual-workspace" });
+  harness.settings.ignore_five_hour_limit = "true";
+  try {
+    for (const workspace of ["actual-workspace", "unknown-workspace"]) {
+      const response = await fetch(`${harness.gateway.status().url}/v1/responses`, {
+        method: "POST", headers: { authorization: "Bearer account-token", "chatgpt-account-id": workspace }, body: "{}"
+      });
+      assert.match(await response.text(), /response.completed/);
+    }
+    assert.deepEqual(harness.quotaUpdates.map((usage) => [usage.id, usage.quota_7d_used_percent]), [["actual-account", 20], ["actual-account", 21]]);
+  } finally {
+    await harness.close();
+    await upstream.close();
+  }
+});
+
+test("账号透明代理在 WebSocket 完成响应后仍同步周额度并归属实际账号", async () => {
+  const server = http.createServer();
+  const sockets = new WebSocketServer({ server });
+  sockets.on("connection", (socket) => socket.once("message", () => {
+    socket.send('{"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":3}}}');
+    socket.send('{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":48,"window_minutes":10080},"secondary":null}}');
+  }));
+  const upstream = await listenExisting(server);
+  const harness = await createHarness(upstream.url, false);
+  harness.accounts.push({ id: "actual-account", account_id: "workspace-b", access_token: "account-token" });
+  harness.settings.ignore_five_hour_limit = "true";
+  let client: WebSocket | undefined;
+  try {
+    client = new WebSocket(`${harness.gateway.status().url.replace(/^http:/, "ws:")}/v1/responses`, {
+      headers: { authorization: "Bearer account-token", "chatgpt-account-id": "workspace-b" }
+    });
+    await onceOpen(client);
+    const messages = nextMessages(client, 2);
+    client.send('{"type":"response.create","model":"gpt-account-ws"}');
+    await messages;
+    assert.equal(harness.tokenLogs[0]?.account_id, "actual-account");
+    assert.equal(harness.tokenLogs[0]?.total_tokens, 15);
+    assert.equal(harness.quotaUpdates[0]?.id, "actual-account");
+    assert.equal(harness.quotaUpdates[0]?.quota_7d_used_percent, 48);
+    assert.equal(harness.quotaUpdates[0]?.has_five_hour_quota, 0);
+    const closed = onceClose(client);
+    client.close();
+    await closed;
+  } finally {
+    client?.terminate();
+    await harness.close();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await upstream.close();
+  }
+});
+
 const createHarness = async (upstreamBaseUrl: string, debugEnabled: boolean, failObservation = false) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-account-api-proxy-"));
   const tokenLogs: Array<Record<string, unknown>> = [];
+  const quotaUpdates: Array<Record<string, unknown>> = [];
+  const accounts: Array<Record<string, any>> = [];
   const settings: Record<string, string> = {
     gateway_host: "127.0.0.1",
     gateway_port: "0",
@@ -238,7 +303,8 @@ const createHarness = async (upstreamBaseUrl: string, debugEnabled: boolean, fai
     paths: { dataDir },
     getSettings: () => ({ ...settings }),
     saveSettings: (patch: Record<string, string>) => Object.assign(settings, patch),
-    listAccounts: () => [],
+    listAccounts: () => accounts,
+    updateUsage: (id: string, usage: Record<string, unknown>) => quotaUpdates.push({ id, ...usage }),
     addTokenLog: (entry: Record<string, unknown>) => {
       if (failObservation) throw new Error("database unavailable");
       tokenLogs.push(entry);
@@ -258,6 +324,8 @@ const createHarness = async (upstreamBaseUrl: string, debugEnabled: boolean, fai
     gateway,
     settings,
     tokenLogs,
+    accounts,
+    quotaUpdates,
     async close() {
       await gateway.stop();
       await gateway.apiDebugLogger.flush();

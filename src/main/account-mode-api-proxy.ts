@@ -10,6 +10,7 @@ import { createAccountModeResponsesObserver } from "./account-mode-responses-obs
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { emptyUsage, createSseUsageParser } from "./gateway/usage-parser.ts";
 import { buildResponsesRequestLog } from "./responses-request-log.ts";
+import { syncAccountUsageFromEvent, syncAccountUsageFromHeaders, type GatewayAccountQuota } from "./gateway/quota.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 const RESPONSES_PATH = "/backend-api/codex/responses";
@@ -24,6 +25,8 @@ interface AccountModeProxyOptions {
 }
 
 interface ProxyStore {
+  listAccounts?: () => GatewayAccountQuota[];
+  updateUsage?: (id: string, usage: Record<string, unknown>) => unknown;
   paths?: { dataDir?: string };
   getSettings: () => Record<string, string>;
   addTokenLog: (entry: Record<string, unknown>) => unknown;
@@ -96,7 +99,8 @@ const handleHttpRequest = async (
   const requestId = debugEnabled ? randomUUID() : "";
   const requestCapture = observed ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
   const responseCapture = debugEnabled ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
-  const usageParser = observed ? createSseUsageParser() : null;
+  const quotaAccount = resolveProxyAccount(request, store);
+  const usageParser = observed ? createSseUsageParser((event) => syncAccountUsageFromEvent(quotaAccount, event, store)) : null;
   const upstreamUrl = new URL(`${mappedPath.pathname}${mappedPath.search}`, upstreamBaseUrl(options));
   const outgoingHeaders = transparentRequestHeaders(request.headers);
   const transport = upstreamUrl.protocol === "https:" ? https : http;
@@ -109,7 +113,7 @@ const handleHttpRequest = async (
     const model = modelFromBody(requestCapture?.snapshot().body || "");
     try {
       store.addTokenLog(buildResponsesRequestLog({
-        account: selectedAccount(settings),
+        account: quotaAccount || selectedAccount(settings),
         method: request.method || "POST",
         requestPath: PUBLIC_RESPONSES_PATH,
         upstreamPath: `${mappedPath.pathname}${mappedPath.search}`,
@@ -133,6 +137,7 @@ const handleHttpRequest = async (
       method: request.method,
       headers: outgoingHeaders
     }, (upstreamResponse) => {
+      if (observed) safelyObserve(store, () => syncAccountUsageFromHeaders(quotaAccount, upstreamResponse.headers, store));
       response.writeHead(upstreamResponse.statusCode || 502, transparentResponseHeaders(upstreamResponse.headers));
       upstreamResponse.on("data", (chunk: Buffer) => {
         usageParser?.feed(chunk);
@@ -234,6 +239,7 @@ const createAccountProxyWebSocketServer = (
     });
     upstream.once("upgrade", (upstreamResponse) => {
       responseHeaders = transparentWebSocketResponseHeaders(upstreamResponse.rawHeaders);
+      if (observed) safelyObserve(store, () => syncAccountUsageFromHeaders(resolveProxyAccount(request, store), upstreamResponse.headers, store));
     });
     upstream.once("unexpected-response", (_client, upstreamResponse) => {
       rejected = true;
@@ -264,7 +270,8 @@ const createAccountProxyWebSocketServer = (
         notifyStatus();
         const observer = observed ? createAccountModeResponsesObserver({
           store,
-          accountId: String(settings.codex_selected_account_id || ""),
+          accountId: resolveProxyAccount(request, store)?.id || String(settings.codex_selected_account_id || ""),
+          quotaAccount: resolveProxyAccount(request, store),
           request,
           requestPath: PUBLIC_RESPONSES_PATH,
           upstreamPath: `${mappedPath.pathname}${mappedPath.search}`,
@@ -417,6 +424,17 @@ const webSocketBaseUrl = (options: AccountModeProxyOptions): string => upstreamB
 const selectedAccount = (settings: Record<string, string>): { id: string } | null => {
   const id = String(settings.codex_selected_account_id || "").trim();
   return id ? { id } : null;
+};
+
+/** 根据实际转发的身份匹配额度账号，避免切换选中账号后写错快照。 */
+const resolveProxyAccount = (request: IncomingMessage, store: ProxyStore): GatewayAccountQuota | null => {
+  const accounts = store.listAccounts?.() ?? [];
+  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const accountId = String(request.headers["chatgpt-account-id"] || "");
+  const matching = accounts.filter((account) => accountId
+    ? (account.account_id || account.workspace_id) === accountId
+    : Boolean(token && account.access_token === token));
+  return matching.find((account) => token && account.access_token === token) ?? (matching.length === 1 ? matching[0]! : null);
 };
 
 const modelFromBody = (body: string): string => {

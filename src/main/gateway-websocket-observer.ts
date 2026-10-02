@@ -3,6 +3,7 @@ import type { RawData } from "ws";
 import type { Settings } from "../shared/contracts/settings";
 import type { ModelPricing } from "../shared/contracts/upstreams";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
+import { syncAccountUsageFromEvent } from "./gateway/quota.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
@@ -51,7 +52,10 @@ interface ObserverOptions {
   settings: Settings;
   onIdleTimeout: () => void;
   routing: { setCooldown: (id: string, durationMs: number) => void; clearCooldown: (id: string) => void };
-  hooks: { refreshAllUsage?: (reason: string) => Promise<Array<{ id: string; ok: boolean }>> };
+  hooks: {
+    refreshAllUsage?: (reason: string) => Promise<Array<{ id: string; ok: boolean }>>;
+    upstreamService?: { getModelPricing?: (upstreamId: string, modelId: string) => ModelPricing | null | undefined };
+  };
 }
 
 interface CurrentRequest {
@@ -121,7 +125,12 @@ export function createWebSocketObserver(options: ObserverOptions) {
   function finishRequest(status: number, message: string | null): void {
     if (!currentRequest) return;
     clearIdleTimer();
-    const estimated = estimateUpstreamCost(currentRequest.usage, target?.modelPricing, settings.billing_currency);
+    // 长连接内每次结算读取最新费率，避免保存新价格后仍使用连接建立时的快照。
+    const pricing = options.hooks.upstreamService?.getModelPricing?.(
+      target?.id || "builtin-chatgpt-subscription-pool",
+      target?.upstreamModel || currentRequest.upstreamModel || currentRequest.clientModel
+    ) ?? target?.modelPricing;
+    const estimated = estimateUpstreamCost(currentRequest.usage, pricing, settings.billing_currency);
     store.addTokenLog?.({
       account_id: account?.id || null,
       upstream_id: target?.id || (account ? "builtin-chatgpt-subscription-pool" : null),
@@ -151,15 +160,7 @@ export function createWebSocketObserver(options: ObserverOptions) {
   }
 
   function observeRateLimits(event: JsonEvent): void {
-    if (!account || event.type !== "codex.rate_limits") return;
-    const usage: Record<string, unknown> = {};
-    if (settings.ignore_five_hour_limit !== "true") {
-      applyRateLimitWindow(usage, event.rate_limits?.primary, "quota_5h_used_percent", "quota_5h_reset_at");
-    }
-    applyRateLimitWindow(usage, event.rate_limits?.secondary, "quota_7d_used_percent", "quota_7d_reset_at");
-    if (Object.keys(usage).length === 0) return;
-    usage.raw_usage_json = JSON.stringify({ source: "gateway-websocket-event", at: Math.floor(Date.now() / 1000), event });
-    store.updateUsage?.(account.id, usage);
+    syncAccountUsageFromEvent(account ? { ...account } : null, event, { ...store, getSettings: () => settings });
   }
 
   function observeQuotaError(event: JsonEvent, data: RawData): boolean {
@@ -186,14 +187,6 @@ export function createWebSocketObserver(options: ObserverOptions) {
     onClose,
     dispose: clearIdleTimer
   };
-}
-
-function applyRateLimitWindow(target: Record<string, unknown>, window: any, usedField: string, resetField: string): void {
-  if (!window || typeof window !== "object") return;
-  const used = Number(window.used_percent);
-  const resetAt = Number(window.reset_at);
-  if (Number.isFinite(used)) target[usedField] = Math.max(0, Math.min(100, used));
-  if (Number.isFinite(resetAt) && resetAt > 0) target[resetField] = Math.trunc(resetAt);
 }
 
 function isTerminalError(event: JsonEvent | null): boolean {

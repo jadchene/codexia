@@ -15,6 +15,7 @@ import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter
 import { AUTO_REVIEW_MODEL_ID, isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import {
   syncAccountUsageFromHeaders,
+  syncAccountUsageFromEvent,
   buildCodexQuotaHeaders,
   buildCodexQuotaHeaderDetail,
   buildCodexQuotaSnapshot,
@@ -436,7 +437,9 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       }
       res.statusCode = response.status;
       copyHeadersToResponse(response.headers, res, settings, store, target?.kind !== "responses_api");
-      const usageParser = createSseUsageParser();
+      const usageParser = createSseUsageParser((event) => {
+        if (target?.kind !== "responses_api") syncAccountUsageFromEvent(account, event, store);
+      });
       let completedResponseForwarded = false;
       if (response.body) {
         const reader = response.body.getReader();

@@ -4,16 +4,19 @@ import type { Settings } from "../shared/contracts/settings";
 import type { ModelPricing } from "../shared/contracts/upstreams";
 import { extractTokenUsage, emptyUsage, type TokenUsage } from "./gateway/usage-parser.ts";
 import { buildResponsesRequestLog } from "./responses-request-log.ts";
+import { syncAccountUsageFromEvent, type GatewayAccountQuota } from "./gateway/quota.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 interface ResponsesObserverStore {
   addTokenLog: (entry: Record<string, unknown>) => unknown;
+  updateUsage?: (id: string, usage: Record<string, unknown>) => unknown;
 }
 
 interface ResponsesObserverOptions {
   store: ResponsesObserverStore;
   accountId: string;
+  quotaAccount?: GatewayAccountQuota | null;
   request: IncomingMessage;
   requestPath: string;
   upstreamPath: string;
@@ -33,7 +36,7 @@ interface CurrentRequest {
 type JsonEvent = Record<string, any>;
 
 /**
- * 旁路观察账号模式 Responses WebSocket，不包含额度和路由副作用。
+ * 旁路观察账号模式 Responses WebSocket，并同步已核实身份的账号额度。
  */
 export const createAccountModeResponsesObserver = (options: ResponsesObserverOptions) => {
   let currentRequest: CurrentRequest | null = null;
@@ -89,11 +92,12 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
       armIdleTimer();
     },
     onUpstreamMessage(data: RawData, isBinary: boolean): void {
-      if (!currentRequest) return;
-      armIdleTimer();
+      if (currentRequest) armIdleTimer();
       if (isBinary) return;
       const event = parseJson(data);
       if (!event) return;
+      syncAccountUsageFromEvent(options.quotaAccount, event, { ...options.store, getSettings: () => options.settings });
+      if (!currentRequest) return;
       const model = modelFromEvent(event);
       if (model) {
         currentRequest.clientModel ||= model;
