@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../shared/quota-normalization";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "./app/layout/AppShell";
@@ -259,12 +260,14 @@ function App() {
 
   async function saveSettings(next: Settings): Promise<Settings> {
     try {
-      const quotaModeChanged = next.ignore_five_hour_limit !== settings.ignore_five_hour_limit;
+      const quotaModeChanged = ["ignore_five_hour_limit", ...Object.keys(QUOTA_NORMALIZATION_DEFAULT_SETTINGS)]
+        .some((key) => next[key] !== settings[key]);
       const restartReminder = settingsRestartReminder(settings, next, gateway.running, mcpGateway.running);
       const saved = await api.saveSettings(next);
       setSettings(saved);
       applyAppearancePreferences(appearanceFromSettings(saved));
       if (quotaModeChanged) {
+        await queryClient.invalidateQueries({ queryKey: ["upstreams"] });
         try {
           setQuotaSummary(await api.quotaSummary());
         } catch (error) {

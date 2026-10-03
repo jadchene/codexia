@@ -1,3 +1,5 @@
+import { quotaPlanMultiplier, type QuotaNormalizationOptions } from "../../shared/quota-normalization.ts";
+
 export interface GatewayAccountQuota {
   id: string;
   name?: string;
@@ -33,7 +35,7 @@ interface HeaderSource {
 
 type HeaderRecord = Record<string, string | string[] | number | undefined>;
 
-export interface QuotaOptions {
+export interface QuotaOptions extends QuotaNormalizationOptions {
   ignoreFiveHourLimit?: boolean;
 }
 
@@ -249,12 +251,12 @@ function buildCodexQuotaSnapshotDetail(
   const detail = buildAccountPoolQuotaDetail(accounts, nowSeconds, options);
   const { pool, primary, secondary, summary } = detail;
   const ignoreFiveHour = options.ignoreFiveHourLimit === true;
-  const secondaryUsed = roundHeaderPercent(protocolUsedPercent(summary.secondary.remaining_percent));
+  const secondaryUsed = roundHeaderPercent(protocolUsedPercent(summary.secondary.remaining_percent, summary.capacity_percent, options));
   const snapshot: CodexQuotaSnapshot = {
     primary: {
       used_percent: ignoreFiveHour
         ? secondaryUsed
-        : roundHeaderPercent(protocolUsedPercent(summary.primary.remaining_percent)),
+        : roundHeaderPercent(protocolUsedPercent(summary.primary.remaining_percent, summary.capacity_percent, options)),
       window_minutes: ignoreFiveHour ? 10080 : 300,
       reset_after_seconds: summary.primary.reset_after_seconds,
       reset_at: summary.primary.reset_at
@@ -280,17 +282,19 @@ function buildAccountPoolQuotaDetail(
   const pool = accounts.filter((account) => account
     && account.enabled
     && account.status !== "disabled"
-    && account.access_token);
+    && account.access_token
+    && quotaPlanMultiplier(account.subscription_plan, options) > 0);
   const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
   const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
   const ignoreFiveHour = options.ignoreFiveHourLimit === true;
-  const secondaryRemaining = roundDisplayPercent(totalRemainingPercent(pool, "quota_7d_used_percent"));
+  const displayPercent = (value: number): number => options.normalizeQuotaToPlus ? value : roundDisplayPercent(value);
+  const secondaryRemaining = displayPercent(totalRemainingPercent(pool, "quota_7d_used_percent", options));
   const summary: AccountPoolQuotaSummary = {
-    capacity_percent: pool.length * 100,
+    capacity_percent: pool.reduce((sum, account) => sum + quotaPlanMultiplier(account.subscription_plan, options) * 100, 0),
     primary: {
       remaining_percent: ignoreFiveHour
         ? secondaryRemaining
-        : roundDisplayPercent(totalRemainingPercent(pool, "quota_5h_used_percent")),
+        : displayPercent(totalRemainingPercent(pool, "quota_5h_used_percent", options)),
       reset_after_seconds: ignoreFiveHour ? secondary.value : primary.value,
       reset_at: ignoreFiveHour ? (secondary.selected?.reset_at ?? 0) : (primary.selected?.reset_at ?? 0)
     },
@@ -369,16 +373,21 @@ function headerGet(headers: HeaderSource | HeaderRecord, name: string): unknown 
   return null;
 }
 
-function totalRemainingPercent(accounts: GatewayAccountQuota[], field: keyof GatewayAccountQuota): number {
+function totalRemainingPercent(accounts: GatewayAccountQuota[], field: keyof GatewayAccountQuota, options: QuotaOptions): number {
   return accounts
-    .map((account) => Number(account[field]))
-    .filter((value) => Number.isFinite(value))
-    .reduce((sum, value) => sum + Math.max(0, 100 - clampPercent(value)), 0);
+    .reduce((sum, account) => {
+      const value = Number(account[field]);
+      return Number.isFinite(value)
+        ? sum + Math.max(0, 100 - clampPercent(value)) * quotaPlanMultiplier(account.subscription_plan, options)
+        : sum;
+    }, 0);
 }
 
-function protocolUsedPercent(totalRemaining: number): number {
-  return 100 - Math.min(100, Math.max(0, totalRemaining));
-}
+/** 启用折算时响应头使用总容量占比，关闭时保持原有叠加规则。 */
+const protocolUsedPercent = (totalRemaining: number, capacity: number, options: QuotaOptions): number => {
+  const remaining = options.normalizeQuotaToPlus ? (capacity > 0 ? totalRemaining / capacity * 100 : 0) : totalRemaining;
+  return 100 - Math.min(100, Math.max(0, remaining));
+};
 
 function resetAfterSeconds(
   accounts: GatewayAccountQuota[],

@@ -25,6 +25,31 @@ test("WebSocket quota rewriting leaves incompatible payloads unchanged", () => {
   assert.strictEqual(rewriteUpstreamMessage(otherEvent, false, { codex_quota_headers_mode: "rewrite" }, store, helpers), otherEvent);
 });
 
+test("WebSocket handshake and rate limit events use Plus-weighted pool percentages", async () => {
+  const harness = await startHarness({
+    onConnection(websocket) {
+      websocket.on("message", () => websocket.send(JSON.stringify({ type: "codex.rate_limits", rate_limits: {} })));
+    }
+  }, { codex_quota_headers_mode: "rewrite", gpt_quota_normalization_enabled: "true" });
+  try {
+    Object.assign(harness.accounts[0], { subscription_plan: "plus", quota_5h_used_percent: 20, quota_7d_used_percent: 20 });
+    Object.assign(harness.accounts[1], { subscription_plan: "pro", quota_5h_used_percent: 60, quota_7d_used_percent: 60 });
+    const { websocket, response } = await connectGateway(harness, "/v1/realtime?call_id=weighted", { "session-id": "weighted" });
+    assert.equal(response.headers["x-codex-primary-used-percent"], "56.4");
+    const pending = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: "response.create" }));
+    const event = JSON.parse((await pending).toString());
+    assert.equal(event.rate_limits.primary.used_percent, 56.4);
+    assert.equal(event.rate_limits.secondary.used_percent, 56.4);
+    harness.store.saveSettings({ gpt_quota_multiplier_pro: "5" });
+    const updated = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: "response.create" }));
+    assert.equal(JSON.parse((await updated).toString()).rate_limits.primary.used_percent, 53.3);
+    websocket.close();
+    await nextClose(websocket);
+  } finally { await harness.close(); }
+});
+
 test("WebSocket gateway proxies compressed Responses messages and keeps upstream handshake metadata private", async () => {
   const requests = [];
   let resolveUpstreamPong;

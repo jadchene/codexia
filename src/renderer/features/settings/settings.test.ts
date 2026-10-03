@@ -12,6 +12,21 @@ import {
 import { formToSettings, SettingsPage, settingsToForm } from "./SettingsPage";
 
 describe("settings appearance and display units", () => {
+  it("round-trips quota normalization switches and custom multipliers", () => {
+    const defaults = settingsToForm({});
+    expect(defaults.gpt_quota_normalization_enabled).toBe(false);
+    expect(defaults.gpt_quota_multiplier_plus).toBe(1);
+    expect(defaults.gpt_quota_multiplier_prolite).toBe(5);
+    expect(defaults.gpt_quota_multiplier_pro).toBe(10);
+    expect(defaults.gpt_quota_multiplier_promax).toBe(25);
+    expect(defaults.gpt_quota_multiplier_free).toBe(0);
+    expect(defaults.gpt_quota_multiplier_go).toBe(0);
+    const saved = formToSettings({}, { ...defaults, gpt_quota_normalization_enabled: true, gpt_quota_multiplier_pro: 12.5 });
+    expect(saved.gpt_quota_normalization_enabled).toBe("true");
+    expect(saved.gpt_quota_multiplier_pro).toBe("12.5");
+    expect(settingsToForm(saved).gpt_quota_normalization_enabled).toBe(true);
+    expect(formToSettings(saved, { gpt_quota_normalization_enabled: false }).gpt_quota_normalization_enabled).toBe("false");
+  });
   beforeEach(() => localStorage.clear());
   afterEach(() => cleanup());
 
@@ -208,6 +223,10 @@ describe("settings appearance and display units", () => {
     expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
     expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("spinbutton", { name: "Pro Lite 倍率" }).getAttribute("value")).toBe("5");
+    expect(screen.getByRole("spinbutton", { name: "Pro 倍率" }).getAttribute("value")).toBe("10");
+    expect(screen.getByRole("spinbutton", { name: "Pro Max 倍率" }).getAttribute("value")).toBe("25");
     expect(screen.getByText("账号调度")).toBeTruthy();
     expect(screen.getByText("会话亲和有效期")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));

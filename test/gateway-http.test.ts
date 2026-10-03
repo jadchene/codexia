@@ -170,6 +170,29 @@ test("HTTP gateway rewrites account quota headers with the aggregate pool quota"
   }
 });
 
+test("HTTP quota headers normalize mixed plans and use newly saved multipliers", async () => {
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  }, { codex_quota_headers_mode: "rewrite", gpt_quota_normalization_enabled: "true" });
+  try {
+    Object.assign(harness.accounts[0], { subscription_plan: "plus", quota_5h_used_percent: 20, quota_7d_used_percent: 20 });
+    Object.assign(harness.accounts[1], { subscription_plan: "pro", quota_5h_used_percent: 60, quota_7d_used_percent: 60 });
+    const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("weighted-1", "weighted-1") });
+    assert.equal(response.headers.get("x-codex-primary-used-percent"), "56.4");
+    assert.equal(response.headers.get("x-codex-secondary-used-percent"), "56.4");
+    await response.text();
+    harness.store.saveSettings({ gpt_quota_multiplier_pro: "5" });
+    const customized = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("weighted-2", "weighted-2") });
+    assert.equal(customized.headers.get("x-codex-primary-used-percent"), "53.3");
+    await customized.text();
+    harness.store.saveSettings({ gpt_quota_normalization_enabled: "false" });
+    const legacy = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("weighted-3", "weighted-3") });
+    assert.equal(legacy.headers.get("x-codex-primary-used-percent"), "0");
+    await legacy.text();
+  } finally { await harness.close(); }
+});
+
 test("HTTP gateway removes hop-by-hop, connection-nominated, and cookie response headers", async () => {
   const harness = await startHarness((_req, res) => {
     res.writeHead(200, {

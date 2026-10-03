@@ -3,6 +3,7 @@ type Dynamic = any;
 import { notifySessionQuotaExhausted } from "./gateway/session-wakeup.ts";
 
 import { randomUUID } from "node:crypto";
+import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts";
 import { WebSocket, WebSocketServer } from "ws";
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { createWebSocketObserver } from "./gateway-websocket-observer.ts";
@@ -1037,7 +1038,7 @@ function responseHeadersForClient(headers: Dynamic, settings: Dynamic, store: Dy
     }
   }
   if (settings.codex_quota_headers_mode === "rewrite") {
-    for (const [key, value] of Object.entries(helpers.buildCodexQuotaHeaders(store.listAccounts(), undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" }))) {
+    for (const [key, value] of Object.entries(helpers.buildCodexQuotaHeaders(store.listAccounts(), undefined, { ...quotaNormalizationFromSettings(settings), ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" }))) {
       result.push(`${key}: ${value}`);
     }
   }
@@ -1045,12 +1046,13 @@ function responseHeadersForClient(headers: Dynamic, settings: Dynamic, store: Dy
 }
 
 function rewriteUpstreamMessage(data: Dynamic, isBinary: Dynamic, settings: Dynamic, store: Dynamic, helpers: Dynamic) {
+  settings = store.getSettings?.() ?? settings;
   if (isBinary || settings.codex_quota_headers_mode !== "rewrite") return data;
   const event = parseJson(data);
   if (event?.type !== "codex.rate_limits") return data;
   return Buffer.from(JSON.stringify({
     ...event,
-    rate_limits: helpers.buildCodexQuotaSnapshot(store.listAccounts(), undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" })
+    rate_limits: helpers.buildCodexQuotaSnapshot(store.listAccounts(), undefined, { ...quotaNormalizationFromSettings(settings), ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" })
   }));
 }
 

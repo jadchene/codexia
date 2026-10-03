@@ -128,6 +128,31 @@ test("subscription pool exposes total quota and respects the ignored five-hour w
   } finally { fixture.close(); }
 });
 
+test("subscription pool weights stored plans and applies setting changes immediately", () => {
+  const fixture = createFixture();
+  try {
+    for (const [id, plan, used] of [["plus", "plus", 20], ["pro", "pro", 60], ["free", "free", 0]] as const) {
+      fixture.store.saveAccount({ id, name: id, subscription_plan: plan, access_token: id, refresh_token: id, id_token: id, enabled: true, status: "active", quota_5h_used_percent: used, quota_7d_used_percent: used });
+    }
+    const service = createUpstreamService({ db: fixture.store.db, secretCodec: codec });
+    const pool = () => service.list().find((upstream) => upstream.kind === "chatgpt_subscription_pool")!.balance.subscriptionPool!;
+    assert.equal(fixture.store.getSettings().gpt_quota_normalization_enabled, "false");
+    assert.equal(pool().quotaCapacityPercent, 300);
+    fixture.store.saveSettings({ gpt_quota_normalization_enabled: "true" });
+    assert.equal(pool().quotaCapacityPercent, 1100);
+    assert.equal(pool().fiveHourRemainingPercent, 480);
+    assert.equal(pool().sevenDayRemainingPercent, 480);
+    fixture.store.saveSettings({ gpt_quota_multiplier_pro: "5" });
+    assert.equal(pool().quotaCapacityPercent, 600);
+    assert.equal(pool().sevenDayRemainingPercent, 280);
+    fixture.store.saveSettings({ ignore_five_hour_limit: "true" });
+    assert.equal(pool().fiveHourRemainingPercent, null);
+    fixture.store.saveSettings({ gpt_quota_normalization_enabled: "false" });
+    assert.equal(pool().quotaCapacityPercent, 300);
+    assert.equal(pool().sevenDayRemainingPercent, 220);
+  } finally { fixture.close(); }
+});
+
 test("service startup backfills missing historical estimates from per-model pricing", () => {
   const fixture = createFixture();
   try {

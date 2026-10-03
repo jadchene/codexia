@@ -1,6 +1,7 @@
 type Dynamic = any;
 
 import http from "node:http";
+import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts";
 import { randomUUID } from "node:crypto";
 import { pickGatewayAccount } from "./selection.ts";
 import { notifySessionQuotaExhausted } from "./gateway/session-wakeup.ts";
@@ -1100,7 +1101,7 @@ function copyHeadersToResponse(headers: Dynamic, res: Dynamic, settings: Dynamic
   });
   if (subscriptionPool && settings.codex_quota_headers_mode === "rewrite") {
     const accounts = store?.listAccounts ? store.listAccounts() : [];
-    const detail = buildCodexQuotaHeaderDetail(accounts, undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
+    const detail = buildCodexQuotaHeaderDetail(accounts, undefined, { ...quotaNormalizationFromSettings(settings), ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
     setCodexQuotaHeaders(res, detail.headers);
   } else if (!subscriptionPool) {
     setCodexQuotaHeaders(res, buildExternalQuotaHeaders());

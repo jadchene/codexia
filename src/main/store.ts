@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../shared/quota-normalization.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -209,6 +210,7 @@ function migrate(db: Db): void {
   addColumnIfMissing(db, "accounts", "reset_credits_json", "TEXT");
   addColumnIfMissing(db, "accounts", "has_five_hour_quota", "INTEGER");
   const defaults = {
+    ...QUOTA_NORMALIZATION_DEFAULT_SETTINGS,
     gateway_host: "localhost",
     gateway_port: "8436",
     gateway_api_key: randomGatewayApiKey(),

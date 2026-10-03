@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { applyAppearancePreferences, appearanceFromSettings } from "../../app/appearance";
 import { CURRENCY_OPTIONS } from "../../lib/currency";
+import { DEFAULT_QUOTA_PLAN_MULTIPLIERS, QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../../../shared/quota-normalization";
 
 type SettingsRecord = Record<string, string>;
 
@@ -73,6 +74,11 @@ const MIB_FIELDS: Record<string, string> = {
   gateway_websocket_max_payload_mib: "gateway_websocket_max_payload_bytes",
   gateway_websocket_buffer_high_water_mib: "gateway_websocket_buffer_high_water_bytes",
   gateway_websocket_pending_queue_limit_mib: "gateway_websocket_pending_queue_limit_bytes"
+};
+
+/** 设置页的套餐倍率名称。 */
+const QUOTA_PLAN_LABELS: Record<string, string> = {
+  plus: "Plus", prolite: "Pro Lite", pro: "Pro", promax: "Pro Max", free: "Free", go: "Go", other: "其他 / 未知套餐"
 };
 
 export const SettingsPage = ({
@@ -310,10 +316,24 @@ export const SettingsPage = ({
             <Typography.Text strong>忽略 5 小时限制</Typography.Text>
             <Typography.Text type="secondary" className="v1-block">账号选择和额度汇总只依据 7 天窗口。</Typography.Text>
           </div>
-          <Form.Item name="ignore_five_hour_limit_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
+          <Form.Item name="ignore_five_hour_limit_enabled" valuePropName="checked" noStyle><Switch aria-label="忽略 5 小时限制" /></Form.Item>
         </Flex>
       </SettingsSection>
-      <SettingsSection title="额度展示" description="设置 Codex 客户端看到的订阅账号额度。">
+      <SettingsSection title="额度展示" description="设置运行概览、账号池和 Codex 客户端看到的订阅额度。">
+        <Flex align="center" justify="space-between" className="v1-setting-switch-row">
+          <div>
+            <Typography.Text strong>按 Plus 基准折算额度</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">默认关闭。启用后，总剩余额度按套餐倍率叠加，可超过 100%；概览圆环和客户端额度按折算总容量计算，最高 100%。</Typography.Text>
+          </div>
+          <Form.Item name="gpt_quota_normalization_enabled" valuePropName="checked" noStyle><Switch aria-label="按 Plus 基准折算额度" /></Form.Item>
+        </Flex>
+        <div className="v1-settings-grid v1-settings-grid-2">
+          {Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS).map((plan) => (
+            <Form.Item key={plan} name={`gpt_quota_multiplier_${plan}`} label={`${QUOTA_PLAN_LABELS[plan]} 倍率`} rules={[{ required: true, message: "请输入套餐倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
+              <InputNumber min={0} max={1000} suffix="× Plus" style={{ width: "100%" }} />
+            </Form.Item>
+          ))}
+        </div>
         <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响订阅账号；第三方渠道始终显示可用。">
           <Segmented options={[
             { label: "隐藏账号额度", value: "block" },
@@ -538,6 +558,11 @@ const NumberField = ({
 
 export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => {
   const values = { ...settings } as SettingsFormValues;
+  values.gpt_quota_normalization_enabled = settings.gpt_quota_normalization_enabled === "true";
+  for (const plan of Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS)) {
+    const key = `gpt_quota_multiplier_${plan}`;
+    values[key] = Number(settings[key] ?? QUOTA_NORMALIZATION_DEFAULT_SETTINGS[key]);
+  }
   values.gateway_api_key = "";
   values.appearance_font_family = settings.appearance_font_family || "system";
   values.gateway_session_affinity_ttl_hours = settings.gateway_session_affinity_ttl_hours || "168";
@@ -558,6 +583,10 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
 export const formToSettings = (current: SettingsRecord, values: Partial<SettingsFormValues>): SettingsRecord => {
   const next: SettingsRecord = { ...current };
   for (const [key, value] of Object.entries(values)) {
+    if (key === "gpt_quota_normalization_enabled") {
+      next[key] = value ? "true" : "false";
+      continue;
+    }
     if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled")) continue;
     if (key === "gateway_api_key" && !String(value || "").trim()) continue;
     next[key] = String(value ?? "").trim();

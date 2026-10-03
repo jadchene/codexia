@@ -582,7 +582,7 @@ export const UpstreamsPage = () => {
 const BalanceCell = ({ upstream }: { upstream: UpstreamSummary }) => {
   if (upstream.balance.subscriptionPool) {
     const pool = upstream.balance.subscriptionPool;
-    const capacity = Math.max(1, pool.quotaCapacityPercent);
+    const capacity = pool.quotaCapacityPercent;
     return <Space orientation="vertical" size={4} className="v1-pool-balance">
       {pool.fiveHourRemainingPercent !== null && <PoolQuota label="5 小时" total={pool.fiveHourRemainingPercent} capacity={capacity} />}
       <PoolQuota label="7 天" total={pool.sevenDayRemainingPercent} capacity={capacity} />
@@ -597,7 +597,7 @@ const BalanceCell = ({ upstream }: { upstream: UpstreamSummary }) => {
 const PoolQuota = ({ label, total, capacity }: { label: string; total: number; capacity: number }) => (
   <div className="v1-pool-quota">
     <Flex justify="space-between" gap={8}><Typography.Text type="secondary">{label}总剩余</Typography.Text><Typography.Text>{total.toFixed(1)}%</Typography.Text></Flex>
-    <Progress percent={Math.max(0, Math.min(100, total / capacity * 100))} size="small" showInfo={false} />
+    <Progress percent={Math.max(0, Math.min(100, capacity > 0 ? total / capacity * 100 : 0))} size="small" showInfo={false} />
   </div>
 );
 

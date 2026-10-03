@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { PublicAccount } from "../shared/contracts/accounts";
 import type { Settings } from "../shared/contracts/settings";
+import { QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../shared/quota-normalization.ts";
 
 const EDITABLE_SETTING_KEYS = new Set([
+  ...Object.keys(QUOTA_NORMALIZATION_DEFAULT_SETTINGS),
   "gateway_host", "gateway_port", "gateway_api_key", "upstream_base_url",
   "gateway_connect_timeout_ms", "gateway_stream_idle_timeout_ms", "gateway_unary_timeout_ms",
   "gateway_shutdown_grace_ms", "gateway_request_body_limit_bytes", "gateway_error_body_limit_bytes",
@@ -55,6 +57,7 @@ const ENUM_SETTINGS = {
   close_behavior: ["exit", "tray"],
   codex_quota_headers_mode: ["block", "rewrite"],
   ignore_five_hour_limit: ["true", "false"],
+  gpt_quota_normalization_enabled: ["true", "false"],
   debug_api_logging: ["true", "false"],
   codex_config_use_openai_base_url: ["true", "false"],
   gateway_websocket_reject_http_only_model_upgrade: ["true", "false"],
@@ -107,6 +110,9 @@ export function editableSettingsPatch(patch: unknown): Settings {
     const integerRange = INTEGER_SETTINGS[key as keyof typeof INTEGER_SETTINGS];
     const enumValues = ENUM_SETTINGS[key as keyof typeof ENUM_SETTINGS];
     if (integerRange) validateIntegerSetting(key, text, integerRange);
+    if (key.startsWith("gpt_quota_multiplier_") && (!text || !Number.isFinite(Number(text)) || Number(text) < 0 || Number(text) > 1000)) {
+      throw new Error(`套餐额度倍率必须在 0-1000 之间：${key}`);
+    }
     if (enumValues && !enumValues.includes(text)) throw new Error(`设置项取值无效：${key}`);
     if (key === "gateway_api_key" && /[\u0000-\u001f\u007f]/.test(text)) throw new Error("API Key 不能包含控制字符。");
     if (key === "appearance_font_family" && (text.length > 200 || /[\u0000-\u001f\u007f]/.test(text))) {

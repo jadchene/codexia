@@ -171,7 +171,8 @@ const ServiceAddressCard = ({ gatewayBase, mcpGatewayUrl }: { gatewayBase: strin
 
 const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined }) => {
   const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
-  const progress = Math.round(Math.max(0, Math.min(100, remaining / Math.max(1, Number(capacity || 100)) * 100)) * 10) / 10;
+  const totalCapacity = Number(capacity ?? 100);
+  const progress = Math.round(Math.max(0, Math.min(100, totalCapacity > 0 ? remaining / totalCapacity * 100 : 0)) * 10) / 10;
   return (
     <Card className="v1-overview-card v1-overview-status-card v1-overview-quota-card">
       <Typography.Text type="secondary">{title}</Typography.Text>

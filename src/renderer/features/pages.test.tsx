@@ -125,6 +125,32 @@ describe("Ant Design pages", () => {
     expect(onRefreshAccounts).toHaveBeenCalledOnce();
   });
 
+  it("shows Plus-stacked quota above 100% while overview rings use total capacity", () => {
+    renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
+      quotaSummary={{ capacity_percent: 1100, primary: { remaining_percent: 480 }, secondary: { remaining_percent: 1100 } }} settings={{ gpt_quota_normalization_enabled: "true" }} />);
+    expect(screen.getByText("480.0%")).toBeTruthy();
+    expect(screen.getByText("43.6%")).toBeTruthy();
+    expect(screen.getByText("1100.0%")).toBeTruthy();
+    expect(screen.getAllByRole("progressbar").map((bar) => Number(bar.getAttribute("aria-valuenow")))).toEqual([43, 100]);
+  });
+
+  it("renders normalized GPT pool totals and progress on model channels", async () => {
+    const pool = createUpstream("pool-normalized", "GPT 账号池", "chatgpt_subscription_pool");
+    Object.assign(pool.balance.subscriptionPool!, { quotaCapacityPercent: 1100, fiveHourRemainingPercent: 480, sevenDayRemainingPercent: 880 });
+    window.codexGateway.listUpstreams = vi.fn().mockResolvedValue([pool]);
+    renderWithQueries(<UpstreamsPage />);
+    expect(await screen.findByText("480.0%")).toBeTruthy();
+    expect(screen.getByText("880.0%")).toBeTruthy();
+    const bars = screen.getAllByRole("progressbar");
+    expect(bars.map((bar) => Number(bar.getAttribute("aria-valuenow")))).toEqual([43, 80]);
+  });
+
+  it.each([[0, 0, 0], [0.1, 0.05, 50]])("overview handles capacity %s without distorting its ratio", (capacity, remaining, expected) => {
+    renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
+      quotaSummary={{ capacity_percent: capacity, primary: { remaining_percent: remaining }, secondary: { remaining_percent: remaining } }} settings={{}} />);
+    expect(screen.getAllByRole("progressbar").map((bar) => Number(bar.getAttribute("aria-valuenow")))).toEqual([expected, expected]);
+  });
+
   it("opens account browser login", async () => {
     const user = userEvent.setup();
     const onStartLogin = vi.fn().mockResolvedValue(undefined);

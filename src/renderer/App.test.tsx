@@ -12,10 +12,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it("refreshes the quota summary after the five-hour limit setting changes", async () => {
+it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model channel data after %s setting changes", async (field) => {
   const user = userEvent.setup();
   const settings = {
-    ignore_five_hour_limit: "true",
+    ignore_five_hour_limit: field === "fiveHour" ? "true" : "false",
+    gpt_quota_normalization_enabled: "false",
+    gpt_quota_multiplier_pro: "10",
     usage_refresh_interval_secs: "900",
     usage_refresh_timeout_ms: "20000",
     gateway_quota_cooldown_ms: "60000",
@@ -43,12 +45,13 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
       mcpGateway: { running: false },
       paths: { dataDir: "", dbPath: "" }
     }),
-    saveSettings: vi.fn().mockResolvedValue({ ignore_five_hour_limit: "false" }),
+    saveSettings: vi.fn().mockImplementation(async (patch) => ({ ...settings, ...patch })),
     quotaSummary,
     listUpstreams: vi.fn().mockResolvedValue([])
   } as unknown as CodexGatewayBridge;
 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
   render(
     <MemoryRouter initialEntries={["/settings"]}>
       <QueryClientProvider client={queryClient}>
@@ -61,9 +64,16 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
   await user.click(screen.getByText("账号与额度"));
   await screen.findByText("忽略 5 小时限制");
   expect(screen.queryByText("重启服务后生效")).toBeNull();
-  await user.click(screen.getByRole("switch"));
+  if (field === "multiplier") {
+    const input = screen.getByRole("spinbutton", { name: "Pro 倍率" });
+    await user.clear(input);
+    await user.type(input, "12.5");
+  } else {
+    await user.click(screen.getByRole("switch", { name: field === "fiveHour" ? "忽略 5 小时限制" : "按 Plus 基准折算额度" }));
+  }
   await user.click(screen.getByRole("button", { name: /保存设置/ }));
   await waitFor(() => expect(quotaSummary).toHaveBeenCalledOnce());
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["upstreams"] });
   expect(screen.getByRole("status").textContent).toContain("配置已保存");
   expect(screen.getByRole("status").textContent).not.toContain("重启");
 

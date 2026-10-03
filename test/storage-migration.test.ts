@@ -281,6 +281,28 @@ test("升级到定时任务表时保留会话唤醒，定时配置和执行记�
   } finally { fixture.writer.close(); cleanupFixture(fixture.directory); }
 });
 
+test("quota normalization defaults backfill old databases and preserve saved values after reopening", () => {
+  const fixture = createLegacyFixture();
+  let store;
+  try {
+    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    const settings = store.getSettings();
+    assert.equal(settings.gpt_quota_normalization_enabled, "false");
+    assert.equal(settings.gpt_quota_multiplier_plus, "1");
+    assert.equal(settings.gpt_quota_multiplier_prolite, "5");
+    assert.equal(settings.gpt_quota_multiplier_pro, "10");
+    assert.equal(settings.gpt_quota_multiplier_promax, "25");
+    assert.equal(settings.gpt_quota_multiplier_free, "0");
+    assert.equal(settings.gpt_quota_multiplier_go, "0");
+    store.saveSettings({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5", gpt_quota_multiplier_go: "0.2" });
+    store.db.close();
+    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    assert.equal(store.getSettings().gpt_quota_normalization_enabled, "true");
+    assert.equal(store.getSettings().gpt_quota_multiplier_pro, "12.5");
+    assert.equal(store.getSettings().gpt_quota_multiplier_go, "0.2");
+  } finally { store?.db.close(); fixture.writer.close(); cleanupFixture(fixture.directory); }
+});
+
 function createLegacyFixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-v1-migration-"));
   const database = path.join(directory, "codex-gateway.sqlite");

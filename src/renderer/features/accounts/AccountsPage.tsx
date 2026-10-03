@@ -33,6 +33,7 @@ import type { TableColumnsType } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import type { ConsumeResetCreditResult, PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
+import { quotaNormalizationFromSettings, quotaPlanMultiplier } from "../../../shared/quota-normalization";
 import { formatTime, parseResetCredits, resetCreditStatusLabel } from "../../lib/formatters";
 
 interface AccountsPageProps {
@@ -103,12 +104,13 @@ export const AccountsPage = ({
   };
   const resetCredits = useMemo(() => parseResetCredits(detailAccount), [detailAccount]);
   const enabledAccounts = accounts.filter((account) => account.enabled && account.status !== "disabled");
+  const normalization = quotaNormalizationFromSettings(settings);
   const totalFiveHourRemaining = enabledAccounts.reduce(
-    (total, account) => total + Math.max(0, 100 - Number(account.quota_5h_used_percent || 0)),
+    (total, account) => total + Math.max(0, 100 - Number(account.quota_5h_used_percent || 0)) * quotaPlanMultiplier(account.subscription_plan, normalization),
     0
   );
   const totalSevenDayRemaining = enabledAccounts.reduce(
-    (total, account) => total + Math.max(0, 100 - Number(account.quota_7d_used_percent || 0)),
+    (total, account) => total + Math.max(0, 100 - Number(account.quota_7d_used_percent || 0)) * quotaPlanMultiplier(account.subscription_plan, normalization),
     0
   );
 

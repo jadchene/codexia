@@ -21,6 +21,7 @@ import { createScheduledTaskService } from "./scheduled-task-service.ts";
 import { createCodexTaskRunner } from "./codex-task-runner.ts";
 import { startStartupUsageRefresh } from "./startup-usage-refresh.ts";
 import { MAX_USAGE_RESET_REFRESH_ATTEMPTS, usageResetRefreshDelay } from "./usage-reset-refresh.ts";
+import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts";
 import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
@@ -663,6 +664,7 @@ function publicAccounts() {
 function gatewayQuotaSummary() {
   const settings = store.getSettings();
   return buildAccountPoolQuotaSummary(store.listAccounts() as Parameters<typeof buildAccountPoolQuotaSummary>[0], undefined, {
+    ...quotaNormalizationFromSettings(settings),
     ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true"
   });
 }

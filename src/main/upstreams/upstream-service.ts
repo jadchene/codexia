@@ -1,3 +1,4 @@
+import { quotaNormalizationFromSettings } from "../../shared/quota-normalization.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { isSensitiveHeaderName, usesInsecureRemoteTransport } from "../../shared/security/upstream.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -479,19 +480,20 @@ function publicUpstream(db: DatabaseSync, row: SqlRow, secretCodec: SecretCodec)
 
 function subscriptionPoolBalance(db: DatabaseSync) {
   const accounts = db.prepare(`
-    SELECT id, access_token, enabled, status, quota_5h_used_percent, quota_5h_reset_at,
+    SELECT id, access_token, enabled, status, subscription_plan, quota_5h_used_percent, quota_5h_reset_at,
       quota_7d_used_percent, quota_7d_reset_at,
       reset_credits_available_count FROM accounts
   `).all() as SqlRow[];
   const enabledAccounts = accounts.filter((account) => Boolean(account.enabled) && account.status !== "disabled");
   const available = accounts.filter((account) => Boolean(account.enabled) && account.status === "active").length;
   const credits = enabledAccounts.reduce((total, account) => total + Math.max(0, Number(account.reset_credits_available_count || 0)), 0);
-  const ignoreFiveHour = String((db.prepare("SELECT value FROM settings WHERE key = ?").get("ignore_five_hour_limit") as SqlRow | undefined)?.value || "false") === "true";
+  const settings = Object.fromEntries((db.prepare("SELECT key, value FROM settings").all() as SqlRow[]).map((row) => [String(row.key), row.value]));
+  const ignoreFiveHour = settings.ignore_five_hour_limit === "true";
   const quota = buildAccountPoolQuotaSummary(accounts.map((account) => ({
     ...account,
     id: String(account.id || ""),
     access_token: String(account.access_token || "")
-  })), undefined, { ignoreFiveHourLimit: ignoreFiveHour });
+  })), undefined, { ...quotaNormalizationFromSettings(settings), ignoreFiveHourLimit: ignoreFiveHour });
   const total = accounts.length;
   return {
     available: available > 0,

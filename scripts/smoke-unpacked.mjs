@@ -56,10 +56,47 @@ try {
     fs.writeFileSync(screenshotPath, await captureScreenshot(target.webSocketDebuggerUrl));
   }
   inspection.pageCount = await inspectLazyPages(target.webSocketDebuggerUrl, child);
+  inspection.quotaNormalization = await inspectQuotaNormalization(target.webSocketDebuggerUrl);
   inspection.sessionWakeupCrud = await inspectSessionWakeupCrud(target.webSocketDebuggerUrl);
   inspection.scheduledTaskCrud = await inspectScheduledTaskCrud(target.webSocketDebuggerUrl);
 } finally {
   stopProcessTree(child.pid);
+}
+
+/** 检查真实安装包中的额度配置、表单默认值及保存回读。 */
+async function inspectQuotaNormalization(webSocketDebuggerUrl) {
+  return evaluate(webSocketDebuggerUrl, `(async () => {
+    const api = window.codexGateway;
+    const defaults = { plus: '1', prolite: '5', pro: '10', promax: '25', free: '0', go: '0', other: '1' };
+    const original = (await api.bootstrap()).settings;
+    if (original.gpt_quota_normalization_enabled !== 'false') throw new Error('套餐额度折算没有默认关闭');
+    for (const [plan, value] of Object.entries(defaults)) {
+      if (original['gpt_quota_multiplier_' + plan] !== value) throw new Error('套餐默认倍率错误：' + plan);
+    }
+    const menu = Array.from(document.querySelectorAll('[role="menuitem"]')).find(item => item.textContent.includes('账号与额度'));
+    if (!menu) throw new Error('没有找到账号与额度设置');
+    menu.click();
+    for (let attempt = 0; attempt < 50 && !document.getElementById('gpt_quota_multiplier_pro'); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    for (const [plan, value] of Object.entries(defaults)) {
+      if (document.getElementById('gpt_quota_multiplier_' + plan)?.value !== value) throw new Error('套餐倍率表单错误：' + plan);
+    }
+    const toggle = document.querySelector('[aria-label="按 Plus 基准折算额度"]');
+    if (toggle?.getAttribute('aria-checked') !== 'false') throw new Error('折算开关的初始状态错误');
+    try {
+      await api.saveSettings({ gpt_quota_normalization_enabled: 'true', gpt_quota_multiplier_pro: '12.5' });
+      const saved = (await api.bootstrap()).settings;
+      if (saved.gpt_quota_normalization_enabled !== 'true' || saved.gpt_quota_multiplier_pro !== '12.5') throw new Error('套餐额度配置保存失败');
+      const quota = await api.quotaSummary();
+      if (!Number.isFinite(quota.capacity_percent) || !Number.isFinite(quota.primary.remaining_percent)) throw new Error('额度折算结果无效');
+    } finally {
+      await api.saveSettings({ gpt_quota_normalization_enabled: original.gpt_quota_normalization_enabled, gpt_quota_multiplier_pro: original.gpt_quota_multiplier_pro });
+    }
+    const restored = (await api.bootstrap()).settings;
+    if (restored.gpt_quota_normalization_enabled !== 'false' || restored.gpt_quota_multiplier_pro !== '10') throw new Error('额度配置恢复失败');
+    return true;
+  })()`);
 }
 
 async function inspectScheduledTaskCrud(webSocketDebuggerUrl) {
