@@ -292,7 +292,7 @@ export const AccountsPage = ({
       <Drawer
         title={detailAccount ? `${detailAccount.name} · 账号详情` : "账号详情"}
         open={Boolean(detailAccount)}
-        size={720}
+        size="min(900px, 100vw)"
         extra={<Button aria-label="刷新订阅信息" icon={<ReloadOutlined />} loading={subscriptionRefreshing} onClick={() => void refreshSubscription()}>刷新订阅信息</Button>}
         onClose={() => setDetailAccount(null)}
       >
@@ -319,9 +319,9 @@ export const AccountsPage = ({
           dataSource={resetCredits.credits}
           columns={[
             { title: "状态", dataIndex: "status", width: 90, render: (value) => <Tag>{resetCreditStatusLabel(value)}</Tag> },
-            { title: "重置类型", dataIndex: "title", width: 150, ellipsis: true, render: (value) => value || "-" },
-            { title: "有效期开始", dataIndex: "granted_at", width: 160, render: (value) => formatTime(value) },
-            { title: "有效期结束", dataIndex: "expires_at", width: 160, render: (value) => formatTime(value) },
+            { title: "重置类型", dataIndex: "title", ellipsis: true, render: (value) => value || "-" },
+            { title: "有效期开始", dataIndex: "granted_at", width: 220, className: "v1-nowrap", render: (value) => formatTime(value) },
+            { title: "有效期结束", dataIndex: "expires_at", width: 220, className: "v1-nowrap", render: (value) => formatTime(value) },
             {
               title: "操作",
               key: "actions",
@@ -350,7 +350,6 @@ export const AccountsPage = ({
               }
             }
           ]}
-          scroll={{ x: 660 }}
           tableLayout="fixed"
           locale={{ emptyText: <Empty description="暂无重置次数数据，请先刷新账号额度。" /> }}
         />

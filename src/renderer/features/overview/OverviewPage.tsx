@@ -90,10 +90,10 @@ export const OverviewPage = ({
           <ServiceAddressCard gatewayBase={gateway.running ? gatewayBase : "未启动"} mcpGatewayUrl={mcpGateway.url || "未启动"} />
         </Col>
         {settings.ignore_five_hour_limit !== "true" && (
-          <Col xs={24} md={12} xl={8}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} /></Col>
+          <Col xs={24} md={12} xl={8}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} normalizeQuotaToPlus={settings.gpt_quota_normalization_enabled === "true"} /></Col>
         )}
         <Col xs={24} md={12} xl={settings.ignore_five_hour_limit === "true" ? 12 : 8}>
-          <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} capacity={quotaSummary.capacity_percent} />
+          <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} capacity={quotaSummary.capacity_percent} normalizeQuotaToPlus={settings.gpt_quota_normalization_enabled === "true"} />
         </Col>
       </Row>
 
@@ -169,7 +169,7 @@ const ServiceAddressCard = ({ gatewayBase, mcpGatewayUrl }: { gatewayBase: strin
   </Card>
 );
 
-const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined }) => {
+const QuotaCard = ({ title, detail, capacity, normalizeQuotaToPlus }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined; normalizeQuotaToPlus: boolean }) => {
   const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
   const totalCapacity = Number(capacity ?? 100);
   const progress = Math.round(Math.max(0, Math.min(100, totalCapacity > 0 ? remaining / totalCapacity * 100 : 0)) * 10) / 10;
@@ -178,7 +178,7 @@ const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDe
       <Typography.Text type="secondary">{title}</Typography.Text>
       <div className="v1-overview-quota-body">
         <div>
-          <Typography.Title level={3}>{remaining.toFixed(1)}%</Typography.Title>
+          <Typography.Title level={3}>{remaining.toFixed(1)}%{normalizeQuotaToPlus ? " plus" : ""}</Typography.Title>
           <Typography.Text type="secondary">重置：{formatTime(detail?.reset_at)}</Typography.Text>
         </div>
         <Progress type="dashboard" percent={progress} size={92} strokeColor={progress < 20 ? "#dc2626" : "#2563eb"} />

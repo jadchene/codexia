@@ -78,8 +78,9 @@ it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model 
   expect(screen.getByRole("status").textContent).not.toContain("重启");
 
   await user.click(screen.getByText("运行概览"));
-  expect(await screen.findByText("170.0%")).toBeTruthy();
-  expect(screen.getByText("150.0%")).toBeTruthy();
+  const suffix = field === "normalization" ? " plus" : "";
+  expect(await screen.findByText(`170.0%${suffix}`)).toBeTruthy();
+  expect(screen.getByText(`150.0%${suffix}`)).toBeTruthy();
 });
 
 it("refreshes the visible model channels when background data changes", async () => {

@@ -635,7 +635,7 @@ function App() {
             }}
           />
         )}
-        {page === "upstreams" && <UpstreamsPage />}
+        {page === "upstreams" && <UpstreamsPage normalizeQuotaToPlus={settings.gpt_quota_normalization_enabled === "true"} />}
         </React.Suspense>
       </section>
     </AppShell>

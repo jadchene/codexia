@@ -62,7 +62,7 @@ interface FormValues {
 type BundledOverrideFormValues = BundledModelOverride;
 
 const EMPTY_CATALOG = "";
-export const UpstreamsPage = () => {
+export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuotaToPlus?: boolean }) => {
   const queryClient = useQueryClient();
   const [form] = Form.useForm<FormValues>();
   const [pricingForm] = Form.useForm<{ pricing: Record<string, ModelPricing> }>();
@@ -313,7 +313,7 @@ export const UpstreamsPage = () => {
     },
     {
       title: "额度", key: "balance", width: 310,
-      render: (_, upstream) => <BalanceCell upstream={upstream} />
+      render: (_, upstream) => <BalanceCell upstream={upstream} normalizeQuotaToPlus={normalizeQuotaToPlus} />
     },
     {
       title: "状态", key: "status", width: 175,
@@ -579,13 +579,13 @@ export const UpstreamsPage = () => {
   </section>;
 };
 
-const BalanceCell = ({ upstream }: { upstream: UpstreamSummary }) => {
+const BalanceCell = ({ upstream, normalizeQuotaToPlus }: { upstream: UpstreamSummary; normalizeQuotaToPlus: boolean }) => {
   if (upstream.balance.subscriptionPool) {
     const pool = upstream.balance.subscriptionPool;
     const capacity = pool.quotaCapacityPercent;
     return <Space orientation="vertical" size={4} className="v1-pool-balance">
-      {pool.fiveHourRemainingPercent !== null && <PoolQuota label="5 小时" total={pool.fiveHourRemainingPercent} capacity={capacity} />}
-      <PoolQuota label="7 天" total={pool.sevenDayRemainingPercent} capacity={capacity} />
+      {pool.fiveHourRemainingPercent !== null && <PoolQuota label="5 小时" total={pool.fiveHourRemainingPercent} capacity={capacity} normalizeQuotaToPlus={normalizeQuotaToPlus} />}
+      <PoolQuota label="7 天" total={pool.sevenDayRemainingPercent} capacity={capacity} normalizeQuotaToPlus={normalizeQuotaToPlus} />
     </Space>;
   }
   if (upstream.balance.summary) return <Typography.Text>{upstream.balance.summary}</Typography.Text>;
@@ -594,9 +594,9 @@ const BalanceCell = ({ upstream }: { upstream: UpstreamSummary }) => {
   return <Space orientation="vertical" size={0}>{upstream.balance.infos.map((info) => <Typography.Text key={info.currency}>{currencyName(info.currency)} {info.totalBalance}</Typography.Text>)}</Space>;
 };
 
-const PoolQuota = ({ label, total, capacity }: { label: string; total: number; capacity: number }) => (
+const PoolQuota = ({ label, total, capacity, normalizeQuotaToPlus }: { label: string; total: number; capacity: number; normalizeQuotaToPlus: boolean }) => (
   <div className="v1-pool-quota">
-    <Flex justify="space-between" gap={8}><Typography.Text type="secondary">{label}总剩余</Typography.Text><Typography.Text>{total.toFixed(1)}%</Typography.Text></Flex>
+    <Flex justify="space-between" gap={8}><Typography.Text type="secondary">{label}总剩余</Typography.Text><Typography.Text className="v1-nowrap">{total.toFixed(1)}%{normalizeQuotaToPlus ? " plus" : ""}</Typography.Text></Flex>
     <Progress percent={Math.max(0, Math.min(100, capacity > 0 ? total / capacity * 100 : 0))} size="small" showInfo={false} />
   </div>
 );
