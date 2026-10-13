@@ -256,6 +256,28 @@ textarea,
   margin-top: 16px;
 }
 
+.v1-request-details.ant-descriptions-bordered > .ant-descriptions-view > table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.v1-request-details.ant-descriptions-bordered .ant-descriptions-row > .ant-descriptions-item-label {
+  width: 144px;
+  padding: 10px 16px;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.v1-request-details.ant-descriptions-bordered .ant-descriptions-row > .ant-descriptions-item-content {
+  padding: 10px 16px;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: pre-wrap;
+  vertical-align: top;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .v1-analytics-summary {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

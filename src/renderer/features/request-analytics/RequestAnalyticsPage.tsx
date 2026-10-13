@@ -376,8 +376,14 @@ export const RequestAnalyticsPage = ({
             onChange={(page, pageSize) => runQuery(page, pageSize)}
           />
         </Flex>
-      <Drawer title="调用详情" open={Boolean(selectedLog)} size={680} extra={selectedLog && <Button icon={<CopyOutlined />} onClick={() => copyValue(JSON.stringify(selectedLog, null, 2))}>复制 JSON</Button>} onClose={() => setSelectedLog(null)}>
-        {selectedLog && <Descriptions bordered column={1} size="small" items={requestLogDetails(selectedLog, accountPoolName)} />}
+      <Drawer
+        title="调用详情"
+        open={Boolean(selectedLog)}
+        size="min(900px, 100vw)"
+        extra={selectedLog && <Button icon={<CopyOutlined />} onClick={() => copyValue(JSON.stringify(selectedLog, null, 2))}>复制 JSON</Button>}
+        onClose={() => setSelectedLog(null)}
+      >
+        {selectedLog && <Descriptions className="v1-request-details" bordered column={1} size="small" items={requestLogDetails(selectedLog, accountPoolName)} />}
       </Drawer>
 
     </section>
