@@ -873,6 +873,19 @@ test("isQuotaExhaustedResponse detects quota and rate limit failures", () => {
   assert.equal(isQuotaExhaustedResponse(500, Buffer.from("rate_limit_exceeded")), false);
 });
 
+test("model capacity errors do not exhaust account quota even with rate limit codes", () => {
+  for (const message of [
+    "Codex is at capacity, please try again later",
+    "Selected model is at capacity. Please try a different model"
+  ]) {
+    assert.equal(isQuotaExhaustedResponse(429, Buffer.from(JSON.stringify({
+      type: "error", status: 429, error: { code: "rate_limit_exceeded", message }
+    }))), false);
+  }
+  assert.equal(isQuotaExhaustedResponse(429, '{"error":{"code":"model_capacity_exceeded"}}'), false);
+  assert.equal(isQuotaExhaustedResponse(429, '{"error":{"code":"usage_limit_reached","message":"Usage limit exceeded"}}'), true);
+});
+
 test("isAuthExpiredResponse detects expired token failures", () => {
   assert.equal(isAuthExpiredResponse(401, Buffer.from('{"error":"invalid_token"}')), true);
   assert.equal(isAuthExpiredResponse(403, Buffer.from('{"error":"token expired"}')), true);

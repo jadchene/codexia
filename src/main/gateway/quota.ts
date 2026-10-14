@@ -310,6 +310,8 @@ function buildAccountPoolQuotaDetail(
 export function isQuotaExhaustedResponse(status: unknown, body: unknown): boolean {
   if (![400, 403, 429].includes(Number(status))) return false;
   const normalized = bodyText(body).toLowerCase();
+  // 模型容量不足可能同时携带 rate_limit 错误码，不能据此冷却账号或触发额度切换。
+  if (/\bat capacity\b|\b(?:model|server|service|codex)[_\s-]+(?:capacity|overloaded)(?:\b|_)/.test(normalized)) return false;
   return normalized.includes("rate_limit")
     || normalized.includes("limit_reached")
     || normalized.includes("usage_limit")

@@ -11,6 +11,8 @@ export interface SseUsageParser {
   latestUsage: () => TokenUsage;
   responseCompleted: () => boolean;
   terminalError: () => string;
+  /** 提取流内失败供请求日志使用，避免将握手成功误记为生成成功。 */
+  terminalFailure: () => { status: number; message: string } | null;
 }
 
 const MAX_TAIL_BYTES = 1024 * 1024;
@@ -52,6 +54,16 @@ export function createSseUsageParser(onEvent?: (event: Record<string, unknown>) 
 
   return {
     terminalError: () => terminalError,
+    terminalFailure: () => {
+      if (!terminalError) return null;
+      const event = JSON.parse(terminalError);
+      const error = event.response?.error || event.error || event;
+      const explicitStatus = [event.status, event.status_code, error.status, error.status_code]
+        .map(Number).find((status) => Number.isInteger(status) && status >= 400 && status <= 599);
+      const code = String(error.code || event.code || "");
+      const status = explicitStatus ?? (["rate_limit_exceeded", "usage_limit_reached", "insufficient_quota", "model_capacity_exceeded"].includes(code) ? 429 : 500);
+      return { status, message: String(error.message || event.message || code || "Upstream response failed.").slice(0, 1000) };
+    },
     feed(chunk: Uint8Array): void {
       consume(tail + decoder.decode(chunk, { stream: true }));
     },

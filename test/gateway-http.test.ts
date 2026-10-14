@@ -45,6 +45,33 @@ test("HTTP 选不到账号时仅在真实额度用尽的情况下登记唤醒", 
   } finally { await harness.close(); }
 });
 
+test("HTTP stream failures are logged as errors while preserving upstream SSE and capacity semantics", async () => {
+  for (const [event, status, message] of [
+    [{ type: "error", status: 503, error: { message: "Upstream unavailable" } }, 503, "Upstream unavailable"],
+    [{ type: "response.failed", response: { error: { code: "model_capacity_exceeded", message: "Selected model is at capacity. Please try a different model" } } }, 429, "Selected model is at capacity. Please try a different model"],
+    [{ type: "response.failed", response: { error: { code: "server_error", message: "Generation failed" } } }, 500, "Generation failed"]
+  ] as const) {
+    const notifications: string[] = [];
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    const harness = await startHarness((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(payload.slice(0, 25));
+      res.end(payload.slice(25));
+    }, {}, { onSessionQuotaExhausted: (id: string) => notifications.push(id) });
+    try {
+      harness.accounts.splice(1);
+      const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("capacity-session", "turn") });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), payload);
+      assert.equal(harness.tokenLogs.at(-1).status, status);
+      assert.equal(harness.tokenLogs.at(-1).message, message);
+      assert.deepEqual(notifications, []);
+    } finally {
+      await harness.close();
+    }
+  }
+});
+
 test("HTTP gateway streams SSE unchanged and preserves turn state", async () => {
   const harness = await startHarness((req, res) => {
     res.writeHead(200, {

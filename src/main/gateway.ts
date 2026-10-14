@@ -487,6 +487,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         res.end();
       }
       const tokenUsage = usageParser.latestUsage();
+      const streamFailure = usageParser.terminalFailure();
       if (target?.kind === "chatgpt_subscription_pool" && isQuotaExhaustedResponse(429, usageParser.terminalError())) {
         notifySessionQuotaExhausted(req.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
           hooks.onSessionQuotaExhausted, true, account?.id ? [account.id] : []);
@@ -498,12 +499,12 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         upstream_path: pathFromUrl(actualUpstreamUrl),
         session_id: sessionHeaderValue(req.headers),
         version: headerValue(req.headers.version),
-        status: response.status,
+        status: streamFailure?.status ?? response.status,
         duration_ms: Date.now() - started,
         ...tokenUsage,
         ...routeLogFields(result),
         ...costLogFields(result, tokenUsage, settings),
-        message: null
+        message: streamFailure?.message ?? null
       });
     } else {
       res.statusCode = response.status;

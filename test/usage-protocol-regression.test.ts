@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { syncAccountUsageFromHeaders, syncAccountUsageFromEvent } from "../src/main/gateway/quota.ts";
+import { syncAccountUsageFromHeaders, syncAccountUsageFromEvent, isQuotaExhaustedResponse } from "../src/main/gateway/quota.ts";
 import { createSseUsageParser, extractTokenUsage } from "../src/main/gateway/usage-parser.ts";
 import { estimateUpstreamCost } from "../src/main/upstreams/cost-estimator.ts";
 import { createAccountModeResponsesObserver } from "../src/main/account-mode-responses-observer.ts";
@@ -76,6 +76,34 @@ test("account-mode WebSocket observes quota events outside a response without cr
     assert.equal(updates[0].id, "actual");
     assert.equal(updates[0].quota_7d_used_percent, 39);
     assert.equal(logs.length, 0);
+  } finally {
+    observer.dispose();
+  }
+});
+
+test("WebSocket capacity failures stay visible without account cooldown or quota refresh", () => {
+  const logs: any[] = [];
+  const cooldowns: string[] = [];
+  let refreshes = 0;
+  const observer = createWebSocketObserver({
+    store: { addTokenLog: (log) => logs.push(log) }, account: { id: "a" },
+    request: { headers: {} } as IncomingMessage, requestPath: "/v1/responses", upstreamPath: "/responses",
+    helpers: { extractTokenUsage, isQuotaExhaustedResponse }, settings: {},
+    onIdleTimeout: () => {}, routing: { setCooldown: (id) => { cooldowns.push(id); }, clearCooldown: () => {} },
+    hooks: { refreshAllUsage: async () => { refreshes += 1; } }
+  });
+  try {
+    observer.onDownstreamMessage(Buffer.from('{"type":"response.create","model":"model"}'), false);
+    const message = "Codex is at capacity, please try again later";
+    const result = observer.onUpstreamMessage(Buffer.from(JSON.stringify({
+      type: "error", status: 429, error: { code: "rate_limit_exceeded", message }
+    })), false);
+    assert.equal(result.reconnectForQuota, false);
+    assert.deepEqual(cooldowns, []);
+    assert.equal(refreshes, 0);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].status, 429);
+    assert.equal(logs[0].message, message);
   } finally {
     observer.dispose();
   }
