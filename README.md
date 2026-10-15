@@ -2,13 +2,11 @@
 
 [中文文档](README_zh.md)
 
-## What This Project Is
-
 Codexia is a Windows desktop app for using ChatGPT subscription accounts and third-party model channels from Codex in one place.
 
 ![Codexia overview](docs/screenshots/overview.png)
 
-## Why Use It
+## Features
 
 - Pool multiple ChatGPT subscription accounts behind one local API service.
 - Add third-party Responses API channels and select all models from Codex.
@@ -20,73 +18,51 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts and thi
 ## Quick Start
 
 1. Install Codex CLI and confirm that the `codex` command is available.
-2. Open `Codexia.exe`.
+2. Extract the Windows unpacked build into a writable directory and open `Codexia.exe`. For source builds, see [Development](#development).
 3. Add a ChatGPT subscription account, a model channel, or both.
 4. Open **Integration Mode** and apply API mode.
 5. Start the API service from **Services**.
-6. Return to Codex and select a model.
+6. Restart Codex to load the applied configuration and select a model.
 
-API mode makes subscription and third-party models available together. Account mode uses one selected subscription account.
-
-## Core Features
+## Usage
 
 ### Subscription Accounts and Model Channels
 
 Sign in to a subscription account through the browser or import it from Codex. Codexia supports quota refresh, account enablement, reset-credit use, and account-pool routing.
 
-Third-party channels can configure an API address, API key, `models.json`, WebSocket support, balance lookup, request headers, and model prices. Preview the model catalog and run a connection test before use. Model IDs must be unique across channels. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
+Configure each third-party channel with an API address, API key, and model catalog, then preview and test it. Model IDs must be unique across channels. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
 
-The GPT account pool fetches the official model catalog at startup and on manual refresh, choosing accounts in this order: Pro, Pro Lite, Plus, Go, Free. If fetching fails, it uses the last successful remote catalog, then the local Codex bundled catalog. Third-party channels keep their own model configuration. An optional Codex Bundled override replaces the account-pool catalog with your JSON.
+The account-pool catalog updates at startup and on manual refresh, with cached and local Codex catalogs as fallbacks. Use the Codex Bundled override for a custom catalog.
+
+View pool quota on **Overview**. Optional Plus-baseline normalization is off by default and supports plan multipliers. Total remaining quota can exceed 100%; the overview ring and client show the percentage of total capacity.
 
 ### Integration and Services
 
-**Integration Mode** writes the selected configuration to Codex. API mode uses the local API service. Account mode uses one subscription account and can optionally proxy `/responses` through the same API service for request analytics.
+API mode combines subscription and third-party models. Account mode uses one subscription account, with an optional API proxy for request analytics.
 
 **Services** starts, stops, and restarts the API service and the optional [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the executable path and listening address before starting MCP for the first time. When `CODEX_HOME` is set, Codexia uses the Codex configuration in that directory; otherwise it uses the current user's `.codex` directory.
 
-> Known limitation: Codex CLI 0.154.0 may omit quota from `/status` and the status line in API-key mode. The gateway still uses quota data; view the remaining account-pool quota on Codexia's **Overview** page.
+API or MCP setting changes may require restarting the corresponding service.
+
+For other Responses API clients, use the service address with `/v1` as the base URL (default `http://localhost:8436/v1`) and the local access key from Settings. Model discovery uses `GET /v1/models`; requests use `POST /v1/responses`. Availability depends on the configured subscription accounts and channels.
 
 ### Session Wakeup
 
-**Session Wakeup** is intended for unattended long-running work. Register a session UUID, active time window, and maximum attempt count:
-
-- When the subscription pool is out of quota and no account can take over, Codexia waits for the nearest reset and wakes the session only after refreshed quota is available.
-- **Resume Goal** reactivates an unfinished Goal; otherwise Codexia sends a normal continuation message.
-- Disabling, deleting, expiry, or reaching the attempt limit stops pending work. Waiting state survives app restarts, while uncertain deliveries are not automatically duplicated.
-
-Keep Codexia and the target Codex session running, ensure `codex` is available, and use the same `CODEX_HOME`.
+Register a session UUID, active window, and attempt limit. When pool quota is exhausted, Codexia waits for a reset, refreshes quota, and sends a continuation message after recovery. **Resume Goal** reactivates an unfinished Goal. Disabling, deleting, expiry, or reaching the limit stops pending wakeups.
 
 ### Scheduled Tasks
 
-**Scheduled Tasks** sends ordinary messages to an Agent on a schedule:
+Send messages to an existing session or start a new session in a chosen directory on each run. Use the visual builder or a five-field Cron expression; `0 22 * * *` runs daily at 22:00 local time. A task never overlaps itself, and missed runs after restart or sleep are not replayed. Slash commands sent to existing sessions remain plain text.
 
-- Target an existing session, or start a new session in a selected working directory each time.
-- Configure the message, active window, and enabled state. The builder supports minute-step, hourly, daily, and weekly schedules, or enter five-field Cron directly. `0 22 * * *` runs daily at 22:00 in local time.
-- The same task never overlaps itself, and missed occurrences are not replayed after restart or sleep. Disabling or deleting a task does not interrupt work already started.
+Both features require Codexia to stay running and `codex` to be available. Existing sessions must stay running and use the same `CODEX_HOME`.
 
-Slash commands sent to an existing session remain plain text. Keep Codexia running; existing sessions must use the same `CODEX_HOME`.
+### Data and Debugging
 
-### Settings
+Packaged data lives in `data/` beside the executable; development uses the project's `data/`. Preserve it during upgrades and close the app before backup. Credentials use Windows encryption and may not work under another user or on another machine.
 
-| Area | Available settings |
-| --- | --- |
-| General | Launch with Windows, close behavior, theme, and interface density. |
-| API and MCP | Addresses, ports, access key, configuration file, and automatic startup. |
-| Accounts and quotas | Refresh policy, account selection, Session affinity, failure cooldown, and quota display. |
-| Logs and billing | Retention, billing currency, data location, and cleanup actions. |
-| Advanced network | Timeouts, connection limits, request size, and fallback for HTTP-only models. Defaults suit normal use. |
+Database upgrade backups live in `data/backups/`; backups older than 24 hours are removed at startup or during cleanup.
 
-Some service settings take effect after the corresponding service is restarted.
-
-### Data, Security, and Debugging
-
-Packaged application data is stored in `data/` beside the app. Preserve it during upgrades and back it up before moving or replacing the application. Do not share it because it contains account and channel configuration.
-
-Database upgrades create an encrypted backup under `data/backups/` and remove it after 24 hours. A backup is bound to the Windows user that created it.
-
-API debug logging is disabled by default. When enabled, request and response bodies are temporarily written under `data/logs/`, while sensitive headers are redacted. Debugging lasts at most 10 minutes, and its logs are deleted when disabled, expired, or the app exits. Bodies may contain sensitive data, so enable it only for troubleshooting.
-
-This project is intended for personal local use. Use your own accounts and API keys, and follow each provider's terms.
+API debugging is off by default. When enabled, request and response bodies are saved temporarily in `data/logs/` for up to 10 minutes and deleted when debugging stops, expires, or the app exits. Bodies may contain sensitive data; enable debugging only for troubleshooting.
 
 ## Development
 
