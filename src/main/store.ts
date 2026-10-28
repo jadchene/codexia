@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../shared/quota-normalization.ts";
+import { SERVICE_TIER_DEFAULT_SETTINGS, normalizeServiceTier } from "../shared/service-tier.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -12,7 +13,7 @@ type Db = any;
 type Row = Record<string, any>;
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-const LATEST_SCHEMA_VERSION = 7;
+const LATEST_SCHEMA_VERSION = 8;
 const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite(?:\.enc)?$/;
 const PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
@@ -83,6 +84,7 @@ export function createStore(options: StoreOptions = {}): Store {
     migrateV5(db, options.migrationHooks);
     migrateV6(db, options.migrationHooks);
     migrateV7(db, options.migrationHooks);
+    migrateV8(db, options.migrationHooks);
     migrateSecrets(db, secretCodec);
   } catch (error) {
     db.close();
@@ -259,6 +261,8 @@ function migrate(db: Db): void {
     codex_bundled_override_json: "",
     model_management_json: "[]",
     billing_currency: "USD",
+    show_session_wakeups_menu: "false",
+    show_scheduled_tasks_menu: "false",
     request_log_retention_days: "30",
     app_log_retention_days: "14",
     login_session_retention_days: "7"
@@ -471,6 +475,26 @@ const migrateV7 = (db: Db, hooks: MigrationHooks = {}): void => {
     hooks.beforeMigrationCommit?.({ db, version: 7 });
     db.prepare("INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(7, now());
     db.exec("PRAGMA user_version = 7");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+};
+
+/** 新增优先级及当次计费倍率，旧记录保持未记录状态。 */
+const migrateV8 = (db: Db, hooks: MigrationHooks = {}): void => {
+  if (schemaVersion(db) >= 8) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    addColumnIfMissing(db, "request_logs", "requested_service_tier", "TEXT");
+    addColumnIfMissing(db, "request_logs", "service_tier", "TEXT");
+    addColumnIfMissing(db, "request_logs", "service_tier_source", "TEXT");
+    addColumnIfMissing(db, "request_logs", "service_tier_multiplier", "REAL");
+    for (const [key, value] of Object.entries(SERVICE_TIER_DEFAULT_SETTINGS)) insertDefaultSetting(db, key, value);
+    hooks.beforeMigrationCommit?.({ db, version: 8 });
+    db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(8, now());
+    db.exec("PRAGMA user_version = 8");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -856,6 +880,7 @@ function addTokenLog(db: Db, entry: Row): void {
       input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
       message, upstream_id, upstream_name, upstream_kind, client_model, upstream_model,
       attempt_count, attempt_chain_json, fallback_from, fallback_reason, credential_ref, estimated_cost, cost_unit,
+      requested_service_tier, service_tier, service_tier_source, service_tier_multiplier,
       created_at
     )
     VALUES (
@@ -863,6 +888,7 @@ function addTokenLog(db: Db, entry: Row): void {
       @input_tokens, @cached_input_tokens, @output_tokens, @reasoning_output_tokens, @total_tokens,
       @message, @upstream_id, @upstream_name, @upstream_kind, @client_model, @upstream_model,
       @attempt_count, @attempt_chain_json, @fallback_from, @fallback_reason, @credential_ref, @estimated_cost, @cost_unit,
+      @requested_service_tier, @service_tier, @service_tier_source, @service_tier_multiplier,
       @created_at
     )
   `).run({
@@ -892,6 +918,11 @@ function addTokenLog(db: Db, entry: Row): void {
     credential_ref: entry.credential_ref || null,
     estimated_cost: Number.isFinite(Number(entry.estimated_cost)) ? Number(entry.estimated_cost) : null,
     cost_unit: entry.cost_unit || null,
+    requested_service_tier: normalizeServiceTier(entry.requested_service_tier),
+    service_tier: normalizeServiceTier(entry.service_tier),
+    service_tier_source: ["response", "request", "default"].includes(entry.service_tier_source) ? entry.service_tier_source : null,
+    service_tier_multiplier: typeof entry.service_tier_multiplier === "number" && Number.isFinite(entry.service_tier_multiplier) && entry.service_tier_multiplier >= 0
+      ? entry.service_tier_multiplier : null,
     created_at: now()
   });
 }

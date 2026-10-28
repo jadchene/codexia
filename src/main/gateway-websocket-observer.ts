@@ -4,6 +4,7 @@ import type { Settings } from "../shared/contracts/settings";
 import type { ModelPricing } from "../shared/contracts/upstreams";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { syncAccountUsageFromEvent } from "./gateway/quota.ts";
+import { normalizeServiceTier, serviceTierFromObject, serviceTierLogFields } from "../shared/service-tier.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
@@ -33,6 +34,8 @@ interface ObserverTarget {
 }
 
 interface ObserverStore {
+  /** 长连接内读取当前计费设置。 */
+  getSettings?: () => Settings;
   addTokenLog?: (entry: Record<string, unknown>) => unknown;
   updateUsage?: (id: string, usage: Record<string, unknown>) => unknown;
   addAppLog?: (entry: Record<string, unknown>) => unknown;
@@ -59,6 +62,8 @@ interface ObserverOptions {
 }
 
 interface CurrentRequest {
+  /** 每次 response.create 独立记录请求优先级。 */
+  requestedServiceTier: string | null;
   startedAt: number;
   prewarm: boolean;
   clientModel: string;
@@ -84,6 +89,7 @@ export function createWebSocketObserver(options: ObserverOptions) {
     const event = parseJson(data);
     if (event?.type !== "response.create") return;
     currentRequest = {
+      requestedServiceTier: normalizeServiceTier(request.headers["openai-service-tier"]) ?? serviceTierFromObject(event),
       startedAt: Date.now(),
       prewarm: event.generate === false,
       clientModel: modelFromEvent(event),
@@ -130,7 +136,9 @@ export function createWebSocketObserver(options: ObserverOptions) {
       target?.id || "builtin-chatgpt-subscription-pool",
       target?.upstreamModel || currentRequest.upstreamModel || currentRequest.clientModel
     ) ?? target?.modelPricing;
-    const estimated = estimateUpstreamCost(currentRequest.usage, pricing, settings.billing_currency);
+    const billingSettings = store.getSettings?.() ?? settings;
+    const tierFields = serviceTierLogFields(currentRequest.requestedServiceTier, billingSettings);
+    const estimated = estimateUpstreamCost(currentRequest.usage, pricing, billingSettings.billing_currency, tierFields.service_tier_multiplier);
     store.addTokenLog?.({
       account_id: account?.id || null,
       upstream_id: target?.id || (account ? "builtin-chatgpt-subscription-pool" : null),
@@ -151,6 +159,7 @@ export function createWebSocketObserver(options: ObserverOptions) {
       status,
       duration_ms: Date.now() - currentRequest.startedAt,
       ...currentRequest.usage,
+      ...tierFields,
       ...(estimated ? { estimated_cost: estimated.amount, cost_unit: estimated.unit } : {}),
       message: currentRequest.prewarm
         ? ["WebSocket prewarm", message].filter(Boolean).join(": ")

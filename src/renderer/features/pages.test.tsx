@@ -479,7 +479,11 @@ describe("Ant Design pages", () => {
         output_tokens: 56,
         status: 200,
         duration_ms: 2000,
-        estimated_cost: 0.1234
+        estimated_cost: 0.1234,
+        requested_service_tier: "ultrafast",
+        service_tier: "fast",
+        service_tier_source: "response" as const,
+        service_tier_multiplier: 2
       }]
     };
     const summary = {
@@ -522,11 +526,30 @@ describe("Ant Design pages", () => {
     expect(requestRow).toBeTruthy();
     await user.click(within(requestRow!).getByText("ChatGPT 订阅账号池"));
     expect(await screen.findByText("账号 A · a@example.com")).toBeTruthy();
+    expect(screen.getByText("超快速（ultrafast）")).toBeTruthy();
+    expect(screen.getByText("快速（fast）")).toBeTruthy();
+    expect(screen.getByText("历史响应值")).toBeTruthy();
+    expect(screen.getByText("2 倍")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /查询/ }));
     expect(onQuery).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: /重置/ }));
     expect(onQuery).toHaveBeenCalledTimes(2);
     expect(onQuery.mock.calls[1]?.[0]).not.toHaveProperty("accountId");
+  });
+
+  it("shows an unspecified request tier as standard in request details", async () => {
+    const user = userEvent.setup();
+    const pageData = { ...emptyRequestPage, total: 1, items: [{
+      id: 2, created_at: 1, client_model: "standard-request-test", requested_service_tier: null,
+      service_tier: "default", service_tier_source: "default" as const, service_tier_multiplier: 1
+    }] };
+    renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={emptySummary} accounts={[]} settings={{}} onMessage={vi.fn()} onQuery={vi.fn()} />);
+    await user.click(screen.getByText("standard-request-test"));
+    expect(await screen.findByText("标准（未指定）")).toBeTruthy();
+    expect(screen.getByText("标准（default）")).toBeTruthy();
+    expect(screen.getByText("未指定，按标准")).toBeTruthy();
+    expect(screen.getByText("1 倍")).toBeTruthy();
+    expect(screen.queryByText("响应确认")).toBeNull();
   });
 
   it("filters analytics by session and selected models and clears them on reset", async () => {

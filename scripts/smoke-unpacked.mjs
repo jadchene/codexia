@@ -261,6 +261,20 @@ async function waitForRenderer(webSocketDebuggerUrl, processHandle) {
 }
 
 async function inspectLazyPages(webSocketDebuggerUrl, processHandle) {
+  // 检查默认菜单状态，再在隔离副本中开启可选菜单以覆盖全部页面。
+  const menusHidden = await evaluate(webSocketDebuggerUrl, `(async () => {
+    const settings = (await window.codexGateway.bootstrap()).settings;
+    const labels = Array.from(document.querySelectorAll('.v1-navigation [role="menuitem"]')).map(item => item.textContent);
+    return settings.show_session_wakeups_menu === 'false' && settings.show_scheduled_tasks_menu === 'false'
+      && !labels.some(label => label.includes('会话唤醒') || label.includes('定时任务'));
+  })()`);
+  if (!menusHidden) throw new Error("可选菜单没有默认关闭");
+  await evaluate(webSocketDebuggerUrl, `(async () => {
+    await window.codexGateway.saveSettings({ show_session_wakeups_menu: 'true', show_scheduled_tasks_menu: 'true' });
+    return true;
+  })()`);
+  await evaluate(webSocketDebuggerUrl, "location.reload(); true");
+  await waitForRenderer(webSocketDebuggerUrl, processHandle);
   const pages = [
     ["overview", "运行概览"],
     ["accounts", "订阅账号"],
@@ -414,7 +428,7 @@ function verifyLegacyUpgrade(databasePath, applicationRoot) {
       }
     });
     const browserMarkerPreserved = fs.existsSync(path.join(applicationRoot, "data", "browser", "v0-browser-marker.txt"));
-    if (version !== 7 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
+    if (version !== 8 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
       || !compactAdaptColumn || legacyRoutingTableCount !== 0 || encryptedBackups.length < 1 || !browserMarkerPreserved) {
       throw new Error("Packaged legacy upgrade did not preserve data, reach the current schema, or create an encrypted backup.");
     }

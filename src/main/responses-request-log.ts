@@ -3,6 +3,7 @@ import type { Settings } from "../shared/contracts/settings";
 import type { TokenUsage } from "./gateway/usage-parser.ts";
 import type { ModelPricing } from "../shared/contracts/upstreams";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
+import { serviceTierLogFields } from "../shared/service-tier.ts";
 
 interface LogAccount {
   id: string;
@@ -21,6 +22,8 @@ interface LogTarget {
 }
 
 interface ResponsesRequestLogInput {
+  /** 客户端请求的优先级。 */
+  requestedServiceTier?: string | null;
   account?: LogAccount | null;
   target?: LogTarget | null;
   method: string;
@@ -41,10 +44,12 @@ interface ResponsesRequestLogInput {
  * 生成 HTTP 与 WebSocket 共用的 Responses 调用日志字段。
  */
 export const buildResponsesRequestLog = (input: ResponsesRequestLogInput): Record<string, unknown> => {
+  const tierFields = serviceTierLogFields(input.requestedServiceTier, input.settings);
   const estimated = estimateUpstreamCost(
     input.usage,
     input.target?.modelPricing || input.modelPricing,
-    input.settings.billing_currency
+    input.settings.billing_currency,
+    tierFields.service_tier_multiplier
   );
   return {
     account_id: input.account?.id || null,
@@ -64,6 +69,7 @@ export const buildResponsesRequestLog = (input: ResponsesRequestLogInput): Recor
     status: input.status,
     duration_ms: input.durationMs,
     ...input.usage,
+    ...tierFields,
     ...(estimated ? { estimated_cost: estimated.amount, cost_unit: estimated.unit } : {}),
     message: input.message || null
   };

@@ -1,4 +1,8 @@
+import { serviceTierFromObject } from "../../shared/service-tier.ts";
+
 export interface TokenUsage {
+  /** 响应确认的优先级，独立于是否返回 Token 用量。 */
+  service_tier?: string;
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
@@ -21,7 +25,7 @@ export function extractTokenUsage(body: unknown): TokenUsage {
   const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body || "");
   if (!text.trim()) return emptyUsage();
   const direct = parseUsageJson(text);
-  if (hasUsage(direct)) return direct;
+  if (hasUsage(direct) || direct.service_tier) return direct;
   return parseUsageSse(text);
 }
 
@@ -46,8 +50,9 @@ export function createSseUsageParser(onEvent?: (event: Record<string, unknown>) 
         onEvent?.(event);
       } catch {}
       let usage = parseUsageJson(payload);
-      if (!hasUsage(usage)) usage = parseUsageFromJsonTail(payload);
-      if (hasUsage(usage)) latest = usage;
+      if (!hasUsage(usage)) usage = { ...usage, ...parseUsageFromJsonTail(payload) };
+      if (hasUsage(usage)) latest = { ...latest, ...usage };
+      else if (usage.service_tier) latest.service_tier = usage.service_tier;
     }
     if (tail.length > MAX_TAIL_BYTES) tail = tail.slice(-MAX_TAIL_BYTES);
   };
@@ -125,14 +130,17 @@ function parseUsageSse(text: string): TokenUsage {
     const payload = trimmed.slice(5).trim();
     if (!payload || payload === "[DONE]") continue;
     const usage = parseUsageJson(payload);
-    if (hasUsage(usage)) latest = usage;
+    if (hasUsage(usage)) latest = { ...latest, ...usage };
+    else if (usage.service_tier) latest.service_tier = usage.service_tier;
   }
   return latest;
 }
 
 function usageFromObject(value: unknown): TokenUsage {
+  const serviceTier = serviceTierFromObject(value);
+  const tierFields = serviceTier ? { service_tier: serviceTier } : {};
   const usage = findUsage(value);
-  if (!usage) return emptyUsage();
+  if (!usage) return { ...emptyUsage(), ...tierFields };
   const input = numberFrom(usage.input_tokens, usage.prompt_tokens);
   const output = numberFrom(usage.output_tokens, usage.completion_tokens);
   const cached = numberFrom(
@@ -147,6 +155,7 @@ function usageFromObject(value: unknown): TokenUsage {
   );
   const total = numberFrom(usage.total_tokens, input + output);
   return {
+    ...tierFields,
     input_tokens: input,
     cached_input_tokens: cached,
     output_tokens: output,

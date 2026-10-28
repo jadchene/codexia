@@ -4,11 +4,14 @@ import type { Settings } from "../shared/contracts/settings";
 import type { ModelPricing } from "../shared/contracts/upstreams";
 import { extractTokenUsage, emptyUsage, type TokenUsage } from "./gateway/usage-parser.ts";
 import { buildResponsesRequestLog } from "./responses-request-log.ts";
+import { normalizeServiceTier, serviceTierFromObject } from "../shared/service-tier.ts";
 import { syncAccountUsageFromEvent, type GatewayAccountQuota } from "./gateway/quota.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 interface ResponsesObserverStore {
+  /** 长连接内读取当前计费设置。 */
+  getSettings?: () => Settings;
   addTokenLog: (entry: Record<string, unknown>) => unknown;
   updateUsage?: (id: string, usage: Record<string, unknown>) => unknown;
 }
@@ -26,6 +29,8 @@ interface ResponsesObserverOptions {
 }
 
 interface CurrentRequest {
+  /** 当前请求声明的优先级。 */
+  requestedServiceTier: string | null;
   startedAt: number;
   prewarm: boolean;
   clientModel: string;
@@ -65,7 +70,8 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
       status,
       durationMs: Date.now() - currentRequest.startedAt,
       usage: currentRequest.usage,
-      settings: options.settings,
+      requestedServiceTier: currentRequest.requestedServiceTier,
+      settings: options.store.getSettings?.() ?? options.settings,
       clientModel: currentRequest.clientModel,
       upstreamModel: currentRequest.upstreamModel,
       modelPricing: options.getModelPricing?.(currentRequest.upstreamModel || currentRequest.clientModel),
@@ -83,6 +89,7 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
       if (event?.type !== "response.create") return;
       const model = modelFromEvent(event);
       currentRequest = {
+        requestedServiceTier: normalizeServiceTier(options.request.headers["openai-service-tier"]) ?? serviceTierFromObject(event),
         startedAt: Date.now(),
         prewarm: event.generate === false,
         clientModel: model,
@@ -104,7 +111,8 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
         currentRequest.upstreamModel ||= model;
       }
       const usage = extractTokenUsage(data);
-      if (hasUsage(usage)) currentRequest.usage = usage;
+      if (hasUsage(usage)) currentRequest.usage = { ...currentRequest.usage, ...usage };
+      else if (usage.service_tier) currentRequest.usage.service_tier = usage.service_tier;
       if (event.type === "response.completed") finish(200, null);
       else if (event.type === "error" || event.type === "response.failed") finish(errorStatus(event), errorMessage(event));
     },
@@ -130,7 +138,7 @@ const modelFromEvent = (event: JsonEvent): string => {
   return String(event.model || response.model || "").trim();
 };
 
-const hasUsage = (usage: TokenUsage): boolean => Object.values(usage).some((value) => value > 0);
+const hasUsage = (usage: TokenUsage): boolean => usage.input_tokens > 0 || usage.output_tokens > 0 || usage.total_tokens > 0;
 
 const errorStatus = (event: JsonEvent): number => {
   const value = Number(event.status || event.status_code || event.error?.status || event.error?.status_code);

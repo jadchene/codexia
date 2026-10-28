@@ -190,7 +190,7 @@ function backfillMissingEstimatedCosts(db: DatabaseSync, upstreamId?: string): v
   const currency = String((db.prepare("SELECT value FROM settings WHERE key = ?").get("billing_currency") as SqlRow | undefined)?.value || "USD").toUpperCase();
   const rows = db.prepare(`
     SELECT request_logs.id, request_logs.input_tokens, request_logs.cached_input_tokens,
-      request_logs.output_tokens, upstream_models.pricing_json
+      request_logs.output_tokens, request_logs.service_tier_multiplier, upstream_models.pricing_json
     FROM request_logs
     JOIN upstream_models ON upstream_models.upstream_id = request_logs.upstream_id
       AND upstream_models.model_id = COALESCE(NULLIF(request_logs.upstream_model, ''), request_logs.client_model)
@@ -208,7 +208,7 @@ function backfillMissingEstimatedCosts(db: DatabaseSync, upstreamId?: string): v
         input_tokens: Number(row.input_tokens || 0),
         cached_input_tokens: Number(row.cached_input_tokens || 0),
         output_tokens: Number(row.output_tokens || 0)
-      }, pricing, currency);
+      }, pricing, currency, row.service_tier_multiplier == null ? 1 : Number(row.service_tier_multiplier));
       if (estimated) update.run(estimated.amount, estimated.unit, Number(row.id));
     }
     db.exec("COMMIT");

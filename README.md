@@ -11,8 +11,10 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts and thi
 - Pool multiple ChatGPT subscription accounts behind one local API service.
 - Add third-party Responses API channels and select all models from Codex.
 - View account quota, reset credits, request analytics, and estimated costs.
+- Request details show the requested tier, billing tier, and multiplier used for that call. Under **Logs & billing**, configure Standard / Fast / Ultrafast multipliers (defaults: 1 / 2 / 6); `priority` is treated as Fast. Estimates use only the requested tier; a missing or empty tier means Standard. The response tier does not affect estimates. Multipliers apply to input, cached input, and output costs and are saved per call. These are local estimates, not subscription quota consumption or guaranteed API billing rates.
 - Wake unattended long-running sessions after account quota becomes available.
 - Send scheduled messages to existing sessions or start new Codex sessions.
+- Session Wakeups and Scheduled Tasks menus are hidden by default. Enable them individually under **Settings → General → Optional menus**. Hiding a menu does not stop existing tasks; manage their enabled state on the corresponding page.
 - Manage Codex integration and an optional MCP service in one desktop app.
 
 ## Quick Start

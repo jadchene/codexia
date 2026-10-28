@@ -12,6 +12,46 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it.each(["sessionWakeups", "scheduledTasks"])("hides optional menus by default and persists independent switches from %s", async (route) => {
+  const user = userEvent.setup();
+  let settings: Record<string, string> = {};
+  const bootstrap = vi.fn(async () => ({
+    app: { version: "1.9.5" }, settings, accounts: [],
+    tokenLogs: { items: [], total: 0, page: 1, pageSize: 10 }, tokenSummary: { total: {}, byAccount: [] },
+    quotaSummary: { primary: {}, secondary: {} }, appLogs: { items: [], total: 0, page: 1, pageSize: 10 },
+    gateway: { running: false }, mcpGateway: { running: false }, paths: { dataDir: "", dbPath: "" }
+  }));
+  window.codexGateway = {
+    bootstrap, listUpstreams: vi.fn().mockResolvedValue([]),
+    saveSettings: vi.fn(async (patch) => { settings = { ...settings, ...patch }; return settings; })
+  } as unknown as CodexGatewayBridge;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const view = () => render(<MemoryRouter initialEntries={[`/${route}`]}><QueryClientProvider client={client}><AntApp><App /></AntApp></QueryClientProvider></MemoryRouter>);
+  view();
+  await screen.findByRole("menuitem", { name: /设置中心/ });
+  expect(screen.queryByRole("menuitem", { name: /会话唤醒/ })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: /定时任务/ })).toBeNull();
+  await user.click(screen.getByRole("menuitem", { name: /设置中心/ }));
+  const wakeups = await screen.findByRole("switch", { name: "显示会话唤醒菜单" });
+  expect(wakeups.getAttribute("aria-checked")).toBe("false");
+  expect(screen.getByRole("switch", { name: "显示定时任务菜单" }).getAttribute("aria-checked")).toBe("false");
+  await user.click(wakeups);
+  await user.click(screen.getByRole("button", { name: /保存设置/ }));
+  expect(await screen.findByRole("menuitem", { name: /会话唤醒/ })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: /定时任务/ })).toBeNull();
+  await user.click(screen.getByRole("switch", { name: "显示会话唤醒菜单" }));
+  await user.click(screen.getByRole("switch", { name: "显示定时任务菜单" }));
+  await user.click(screen.getByRole("button", { name: /保存设置/ }));
+  expect(await screen.findByRole("menuitem", { name: /定时任务/ })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: /会话唤醒/ })).toBeNull();
+  expect(settings.show_session_wakeups_menu).toBe("false");
+  expect(settings.show_scheduled_tasks_menu).toBe("true");
+  cleanup();
+  render(<MemoryRouter initialEntries={["/settings"]}><QueryClientProvider client={client}><AntApp><App /></AntApp></QueryClientProvider></MemoryRouter>);
+  expect(await screen.findByRole("menuitem", { name: /定时任务/ })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: /会话唤醒/ })).toBeNull();
+});
+
 it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model channel data after %s setting changes", async (field) => {
   const user = userEvent.setup();
   const settings = {

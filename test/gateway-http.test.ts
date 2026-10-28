@@ -1475,7 +1475,19 @@ test("HTTP gateway passes compaction responses through unchanged when the adapta
   }
 });
 
-test("HTTP gateway estimates built-in subscription model cost from its configured model rate", async () => {
+test.each([
+  { requested: undefined, actual: undefined, multiplier: 1, stream: true },
+  { requested: undefined, actual: "ultrafast", multiplier: 1, stream: true },
+  { requested: null, actual: "default", multiplier: 1, stream: true },
+  { requested: "", actual: "default", multiplier: 1, stream: false },
+  { requested: "  ", actual: "default", multiplier: 1, stream: true },
+  { requested: "priority", actual: "default", multiplier: 2, stream: true },
+  { requested: "priority", actual: "fast", multiplier: 2, stream: true },
+  { requested: "ultrafast", actual: "ultrafast", multiplier: 6, stream: true },
+  { requested: "ultrafast", actual: "default", multiplier: 6, stream: true },
+  { requested: "fast", actual: undefined, multiplier: 2, stream: false },
+  { requested: "auto", actual: "ultrafast", multiplier: 1, stream: false }
+])("HTTP gateway estimates priority cost: $requested -> $actual (stream=$stream)", async ({ requested, actual, multiplier, stream }) => {
   const hooks = {
     upstreamService: {
       getModelPricing(upstreamId, modelId) {
@@ -1486,18 +1498,22 @@ test("HTTP gateway estimates built-in subscription model cost from its configure
     }
   };
   const harness = await startHarness((_req, res) => {
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end('data: {"type":"response.completed","response":{"model":"gpt-priced","usage":{"input_tokens":1000,"cached_input_tokens":500,"output_tokens":100,"total_tokens":1100}}}\n\n');
+    res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
+    const response = { model: "gpt-priced", service_tier: actual, usage: { input_tokens: 1000, cached_input_tokens: 500, output_tokens: 100, total_tokens: 1100 } };
+    res.end(stream ? `data: ${JSON.stringify({ type: "response.completed", response })}\n\n` : JSON.stringify(response));
   }, { billing_currency: "USD" }, hooks);
   try {
     const response = await gatewayFetch(harness, "/v1/responses", {
       headers: codexHeaders("priced-model", "turn-priced"),
-      body: JSON.stringify({ model: "gpt-priced", input: "hello" })
+      body: JSON.stringify({ model: "gpt-priced", input: "hello", service_tier: requested, stream })
     });
     assert.equal(response.status, 200);
     await response.text();
     assert.equal(harness.tokenLogs.at(-1).upstream_kind, "chatgpt_subscription_pool");
-    assert.equal(harness.tokenLogs.at(-1).estimated_cost, 0.0023);
+    assert.equal(harness.tokenLogs.at(-1).estimated_cost, 0.0023 * multiplier);
+    assert.equal(harness.tokenLogs.at(-1).requested_service_tier, requested?.trim() || null);
+    assert.equal(harness.tokenLogs.at(-1).service_tier, requested?.trim() || "default");
+    assert.equal(harness.tokenLogs.at(-1).service_tier_multiplier, multiplier);
     assert.equal(harness.tokenLogs.at(-1).cost_unit, "USD");
   } finally {
     await harness.close();

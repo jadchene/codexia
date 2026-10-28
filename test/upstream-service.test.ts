@@ -153,7 +153,7 @@ test("subscription pool weights stored plans and applies setting changes immedia
   } finally { fixture.close(); }
 });
 
-test("service startup backfills missing historical estimates from per-model pricing", () => {
+test.each([null, 0, 2, 6])("service startup backfills missing costs with recorded multiplier %s", (multiplier) => {
   const fixture = createFixture();
   try {
     const service = createUpstreamService({ db: fixture.store.db, secretCodec: codec });
@@ -175,13 +175,14 @@ test("service startup backfills missing historical estimates from per-model pric
       input_tokens: 1000,
       cached_input_tokens: 500,
       output_tokens: 100,
-      total_tokens: 1100
+      total_tokens: 1100,
+      service_tier_multiplier: multiplier
     });
     assert.equal(fixture.store.listTokenLogs().items[0]?.estimated_cost, null);
 
     createUpstreamService({ db: fixture.store.db, secretCodec: codec });
     const backfilled = fixture.store.listTokenLogs().items[0];
-    assert.equal(backfilled?.estimated_cost, 0.0023);
+    assert.equal(backfilled?.estimated_cost, 0.0023 * (multiplier ?? 1));
     assert.equal(backfilled?.cost_unit, "USD");
   } finally { fixture.close(); }
 });

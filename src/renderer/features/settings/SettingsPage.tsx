@@ -22,6 +22,7 @@ import type { ReactNode } from "react";
 import { applyAppearancePreferences, appearanceFromSettings } from "../../app/appearance";
 import { CURRENCY_OPTIONS } from "../../lib/currency";
 import { DEFAULT_QUOTA_PLAN_MULTIPLIERS, QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../../../shared/quota-normalization";
+import { SERVICE_TIER_DEFAULT_SETTINGS, serviceTierMultiplier } from "../../../shared/service-tier";
 
 type SettingsRecord = Record<string, string>;
 
@@ -224,6 +225,20 @@ export const SettingsPage = ({
     </Space>
   );
 
+  const optionalMenus = (
+    <SettingsSection title="可选菜单" description="默认隐藏，开启并保存后显示对应菜单。已有任务的启停仍在对应页面管理。">
+      {[
+        { key: "show_session_wakeups_menu", label: "会话唤醒" },
+        { key: "show_scheduled_tasks_menu", label: "定时任务" }
+      ].map(({ key, label }) => (
+        <Flex key={key} align="center" justify="space-between" className="v1-setting-switch-row">
+          <Typography.Text strong>{label}</Typography.Text>
+          <Form.Item name={key} valuePropName="checked" noStyle><Switch aria-label={`显示${label}菜单`} /></Form.Item>
+        </Flex>
+      ))}
+    </SettingsSection>
+  );
+
   const gatewayTab = (
     <SettingsSection title="服务监听" description="设置 API 服务的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
@@ -374,6 +389,16 @@ export const SettingsPage = ({
           <Select options={CURRENCY_OPTIONS} />
         </Form.Item>
       </SettingsSection>
+      <SettingsSection title="优先级倍率" description="估算费用 = 模型 Token 费用 × 请求优先级倍率。未指定优先级时按标准计算，响应优先级不影响估算；修改仅影响后续调用。">
+        <div className="v1-settings-grid v1-settings-grid-3">
+          {(["standard", "fast", "ultrafast"] as const).map((tier, index) => (
+            <Form.Item key={tier} name={`billing_service_tier_${tier}_multiplier`} label={`${["标准", "快速", "超快速"][index]}倍率`} rules={[{ required: true, message: "请输入优先级倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
+              <InputNumber min={0} max={1000} step={0.1} style={{ width: "100%" }} />
+            </Form.Item>
+          ))}
+        </div>
+        <Typography.Text type="secondary">默认倍率为 1 / 2 / 6，用于本地费用估算。订阅内含额度消耗和 API 实际账单以渠道规则为准。</Typography.Text>
+      </SettingsSection>
     </Space>
   );
 
@@ -487,7 +512,7 @@ export const SettingsPage = ({
           />
           <div className="v1-settings-panel">
             {{
-              general: generalTab,
+              general: <Space orientation="vertical" size={16} style={{ width: "100%" }}>{generalTab}{optionalMenus}</Space>,
               gateway: gatewayTab,
               quota: quotaTab,
               logs: logsBillingTab,
@@ -558,6 +583,11 @@ const NumberField = ({
 
 export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => {
   const values = { ...settings } as SettingsFormValues;
+  values.show_session_wakeups_menu = settings.show_session_wakeups_menu === "true";
+  values.show_scheduled_tasks_menu = settings.show_scheduled_tasks_menu === "true";
+  for (const key of Object.keys(SERVICE_TIER_DEFAULT_SETTINGS)) {
+    values[key] = serviceTierMultiplier(key.replace("billing_service_tier_", "").replace("_multiplier", ""), settings);
+  }
   values.gpt_quota_normalization_enabled = settings.gpt_quota_normalization_enabled === "true";
   for (const plan of Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS)) {
     const key = `gpt_quota_multiplier_${plan}`;

@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { RequestLog, RequestLogPage, TokenAccountSummary, TokenSummary, TokenTotals } from "../../../shared/contracts/logs";
 import type { Settings } from "../../../shared/contracts/settings";
+import { serviceTierLabel } from "../../../shared/service-tier";
 import { currencyName } from "../../lib/currency";
 import {
   cacheHitRate,
@@ -454,6 +455,7 @@ const sumTokenUsage = (items: TokenAccountSummary[]): TokenTotals => {
   ])) as TokenTotals;
 };
 
+/** 展示当次优先级与倍率快照，避免将历史缺失值误认为标准。 */
 const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
   const account = [log.account_name, log.account_email]
     .filter((value, index, values) => value && values.indexOf(value) === index)
@@ -465,6 +467,11 @@ const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
     ...(log.account_id ? { 订阅账号: account } : {}),
     客户端模型: log.client_model || "-",
     渠道模型: log.upstream_model || "-",
+    请求优先级: log.requested_service_tier ? serviceTierLabel(log.requested_service_tier) : log.service_tier_source ? "标准（未指定）" : "未记录",
+    计费优先级: serviceTierLabel(log.service_tier),
+    计费依据: log.service_tier_source ? { response: "历史响应值", request: "请求优先级", default: "未指定，按标准" }[log.service_tier_source] : "未记录",
+    优先级倍率: log.service_tier_multiplier == null ? "未记录" : `${log.service_tier_multiplier} 倍`,
+    估算费用: log.estimated_cost == null ? "-" : `${log.estimated_cost} ${log.cost_unit || ""}`.trim(),
     会话: log.session_id || "-",
     客户端路径: log.request_path || "-",
     渠道路径: log.upstream_path || "-",

@@ -39,14 +39,23 @@ const pages = [
 
 type BrowserLoginPhase = "idle" | "starting" | "waiting" | "success" | "failed";
 
+/** 默认隐藏的可选菜单及其持久化开关。 */
+const optionalMenuSettings: Record<string, string> = {
+  sessionWakeups: "show_session_wakeups_menu",
+  scheduledTasks: "show_scheduled_tasks_menu"
+};
+
 function App() {
   const api = window.codexGateway;
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const page = location.pathname.replace(/^\//, "") || "overview";
+  const requestedPage = location.pathname.replace(/^\//, "") || "overview";
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState<Settings>({});
+  const visiblePages = pages.filter(({ id }) => !optionalMenuSettings[id] || settings[optionalMenuSettings[id]] === "true");
+  const pageDisabled = Boolean(optionalMenuSettings[requestedPage] && settings[optionalMenuSettings[requestedPage]] !== "true");
+  const page = pageDisabled ? "overview" : requestedPage;
   const [accounts, setAccounts] = useState<PublicAccount[]>([]);
   const [tokenLogs, setTokenLogs] = useState<RequestLogPage>({ items: [], total: 0, page: 1, pageSize: 10 });
   const [tokenSummary, setTokenSummary] = useState<TokenSummary>({ total: {}, byAccount: [] });
@@ -127,6 +136,10 @@ function App() {
   useEffect(() => {
     reload().catch((error) => setMessage(error.message));
   }, []);
+
+  useEffect(() => {
+    if (ready && pageDisabled) navigate("/overview", { replace: true });
+  }, [ready, pageDisabled, navigate]);
 
   useEffect(() => {
     tokenLogsRef.current = tokenLogs;
@@ -491,7 +504,7 @@ function App() {
           .catch((error) => setMessage(`保存导航状态失败：${errorMessage(error)}`));
       }}
       onNavigate={(nextPage) => navigate(`/${nextPage}`)}
-      pages={pages}
+      pages={visiblePages}
     >
       <section className="v1-app-content">
         {message && <div className="toast" role="status">{message}</div>}

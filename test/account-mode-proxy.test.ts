@@ -8,7 +8,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { createGateway } from "../src/main/gateway.ts";
 import { applyAccountMode, readOpenaiBaseUrl } from "../src/main/codex-cli-auth.ts";
 
-test("账号模式通过 API 服务透明转发 HTTP 并只观察 Responses", async () => {
+test.each(["hello", "x".repeat(1024 * 1024 + 1)])("账号代理完整记录优先级且保持请求透明", async (input) => {
   const received: Array<{ url: string; headers: IncomingMessage["headers"]; body: Buffer }> = [];
   const upstream = await listenHttp(async (request, response) => {
     const body = await readBody(request);
@@ -23,7 +23,7 @@ test("账号模式通过 API 服务透明转发 HTTP 并只观察 Responses", as
   });
   const harness = await createHarness(upstream.url, true);
   try {
-    const body = JSON.stringify({ model: "gpt-account-proxy", input: "hello" });
+    const body = JSON.stringify({ model: "gpt-account-proxy", input, service_tier: "ultrafast" });
     const response = await fetch(`${harness.gateway.status().url}/v1/responses?stream=true`, {
       method: "POST",
       headers: {
@@ -48,7 +48,10 @@ test("账号模式通过 API 服务透明转发 HTTP 并只观察 Responses", as
       status: 200,
       input_tokens: 7,
       output_tokens: 3,
-      estimated_cost: 0.000009,
+      requested_service_tier: "ultrafast",
+      service_tier: "ultrafast",
+      service_tier_multiplier: 6,
+      estimated_cost: 0.000009 * 6,
       cost_unit: "USD"
     }));
 

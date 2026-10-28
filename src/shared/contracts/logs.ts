@@ -51,6 +51,14 @@ export interface RequestLog {
   credential_ref?: string | null;
   estimated_cost?: number | null;
   cost_unit?: string | null;
+  /** 客户端请求的原始优先级。 */
+  requested_service_tier?: string | null;
+  /** 当次费用估算采用的优先级。 */
+  service_tier?: string | null;
+  /** 计费依据：请求声明或默认标准；response 仅兼容历史记录。 */
+  service_tier_source?: "response" | "request" | "default" | null;
+  /** 结算时的倍率快照，历史记录不受后续设置影响。 */
+  service_tier_multiplier?: number | null;
   created_at: number;
 }
 

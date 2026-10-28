@@ -10,6 +10,7 @@ import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
 import { createAccountModeApiProxy } from "./account-mode-api-proxy.ts";
 import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
+import { normalizeServiceTier, serviceTierFromObject, serviceTierLogFields } from "../shared/service-tier.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
 import { adaptCompactionStream, isCompactionTriggerRequest, prepareCompactionSummaryRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
 import { rewriteSubscriptionReasoningRequest } from "./gateway/reasoning-adapter.ts";
@@ -362,6 +363,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
   let accountForLog: Dynamic = null;
   let targetForLog: Dynamic = null;
   let routeResultForLog: Dynamic = null;
+  let requestedServiceTier: string | null = null;
   let releaseAccountLoad = () => {};
   let disposeUpstream = () => {};
   try {
@@ -397,6 +399,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       accountForLog = account;
     };
     const payload = parseResponsesPayload(incomingBody);
+    requestedServiceTier = normalizeServiceTier(req.headers["openai-service-tier"]) ?? serviceTierFromObject(payload);
     const selectedModel = String(payload?.model || "");
     const isAutoReview = isAutoReviewRequest(payload);
     const apiUpstream = selectedModel
@@ -515,7 +518,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         duration_ms: Date.now() - started,
         ...tokenUsage,
         ...routeLogFields(result),
-        ...costLogFields(result, tokenUsage, settings),
+        ...costLogFields(result, tokenUsage, settings, requestedServiceTier),
         message: streamFailure?.message ?? null
       });
     } else {
@@ -533,7 +536,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         duration_ms: Date.now() - started,
         ...errorUsage,
         ...routeLogFields(result),
-        ...costLogFields(result, errorUsage, settings),
+        ...costLogFields(result, errorUsage, settings, requestedServiceTier),
         message: null
       });
     }
@@ -557,6 +560,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         status,
         duration_ms: Date.now() - started,
         ...emptyUsage(),
+        ...serviceTierLogFields(requestedServiceTier, settings),
         ...routeLogFields(routeResultForLog || { account: accountForLog, target: targetForLog }),
         message: gatewayErrorMessage(error, message)
       });
@@ -852,9 +856,10 @@ function routeLogFields(result: Dynamic = {}) {
   };
 }
 
-function costLogFields(result: Dynamic, usage: Dynamic, settings: Dynamic) {
-  const estimated = estimateUpstreamCost(usage, result?.target?.modelPricing, settings?.billing_currency);
-  return estimated ? { estimated_cost: estimated.amount, cost_unit: estimated.unit } : {};
+function costLogFields(result: Dynamic, usage: Dynamic, settings: Dynamic, requestedServiceTier: string | null) {
+  const tierFields = serviceTierLogFields(requestedServiceTier, settings);
+  const estimated = estimateUpstreamCost(usage, result?.target?.modelPricing, settings?.billing_currency, tierFields.service_tier_multiplier);
+  return { ...tierFields, ...(estimated ? { estimated_cost: estimated.amount, cost_unit: estimated.unit } : {}) };
 }
 
 function gatewayRouteError(statusCode: Dynamic, code: Dynamic, message: Dynamic): Dynamic {

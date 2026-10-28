@@ -24,7 +24,7 @@ test("migrations create a verified backup, model pricing storage, and remove obs
       dataDir: fixture.directory,
       dbPath: fixture.database
     });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 8);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     const compactColumn = store.db.prepare("PRAGMA table_info(upstreams)").all()
       .find((column) => column.name === "compact_adapt_enabled");
@@ -84,7 +84,7 @@ test("current migration upgrades an existing v1 database with its own verified b
   const fixture = createV1Fixture();
   try {
     const store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 8);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     store.db.close();
     const backups = backupFiles(fixture.directory);
@@ -98,6 +98,48 @@ test("current migration upgrades an existing v1 database with its own verified b
   } finally {
     cleanupFixture(fixture.directory);
   }
+});
+
+test("v8 migration preserves historical costs, rolls back failures and stores tier snapshots", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-service-tier-"));
+  const database = path.join(directory, "codex-gateway.sqlite");
+  const options = { secretCodec: passthroughCodec, dataDir: directory, dbPath: database };
+  try {
+    const original = createStore(options);
+    original.addTokenLog({ method: "POST", estimated_cost: 12.5, cost_unit: "USD" });
+    for (const column of ["requested_service_tier", "service_tier", "service_tier_source", "service_tier_multiplier"]) {
+      original.db.exec(`ALTER TABLE request_logs DROP COLUMN ${column}`);
+    }
+    original.db.exec("DELETE FROM schema_migrations WHERE version = 8; PRAGMA user_version = 7");
+    original.db.exec("DELETE FROM settings WHERE key LIKE 'billing_service_tier_%'");
+    original.db.close();
+    assert.throws(() => createStore({ ...options, migrationHooks: { beforeMigrationCommit: ({ version }) => { if (version === 8) throw new Error("rollback-v8"); } } }), /rollback-v8/);
+    const failed = new DatabaseSync(database);
+    assert.equal(failed.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(failed.prepare("PRAGMA table_info(request_logs)").all().some((row) => row.name === "service_tier"), false);
+    failed.close();
+    const upgraded = createStore(options);
+    const historical = upgraded.listTokenLogs().items[0];
+    assert.equal(historical.estimated_cost, 12.5);
+    assert.equal(historical.service_tier, null);
+    assert.equal(historical.service_tier_multiplier, null);
+    assert.equal(upgraded.getSettings().billing_service_tier_standard_multiplier, "1");
+    assert.equal(upgraded.getSettings().billing_service_tier_fast_multiplier, "2");
+    assert.equal(upgraded.getSettings().billing_service_tier_ultrafast_multiplier, "6");
+    upgraded.addTokenLog({ method: "POST", requested_service_tier: "priority", service_tier: "fast", service_tier_source: "response", service_tier_multiplier: 2, estimated_cost: 5 });
+    upgraded.saveSettings({ billing_service_tier_fast_multiplier: "3" });
+    upgraded.db.close();
+    const restarted = createStore(options);
+    try {
+      assert.equal(restarted.getSettings().billing_service_tier_fast_multiplier, "3");
+      const current = restarted.listTokenLogs().items.find((row) => row.requested_service_tier === "priority");
+      assert.equal(current.service_tier, "fast");
+      assert.equal(current.service_tier_source, "response");
+      assert.equal(current.service_tier_multiplier, 2);
+      assert.equal(current.estimated_cost, 5);
+      assert.equal(restarted.tokenSummary().total.estimated_cost, 17.5);
+    } finally { restarted.db.close(); }
+  } finally { cleanupFixture(directory); }
 });
 
 test("migration backups are automatically removed after one day", () => {
@@ -265,7 +307,7 @@ test("升级到定时任务表时保留会话唤醒，定时配置和执行记�
     let store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
     const wakeup = { id: "wake-before-v7", sessionId: "session", status: "waiting", attempts: 1 };
     createSessionWakeupStore(store.db).put(wakeup);
-    store.db.exec("DROP TABLE scheduled_tasks; DELETE FROM schema_migrations WHERE version = 7; PRAGMA user_version = 6");
+    store.db.exec("DROP TABLE scheduled_tasks; DELETE FROM schema_migrations WHERE version >= 7; PRAGMA user_version = 6");
     store.db.close();
     store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
     assert.deepEqual(createSessionWakeupStore(store.db).list(), [wakeup]);
@@ -332,7 +374,7 @@ function createV1Fixture() {
   const database = path.join(directory, "codex-gateway.sqlite");
   const store = createStore({ secretCodec: passthroughCodec, dataDir: directory, dbPath: database });
   store.db.exec("ALTER TABLE request_logs DROP COLUMN attempt_chain_json");
-  store.db.exec("DELETE FROM schema_migrations WHERE version = 2; PRAGMA user_version = 1");
+  store.db.exec("DELETE FROM schema_migrations WHERE version >= 2; PRAGMA user_version = 1");
   store.db.close();
   return { directory, database };
 }

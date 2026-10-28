@@ -14,7 +14,8 @@ interface EstimatedCost {
 export function estimateUpstreamCost(
   usage: BillableTokenUsage,
   factors: ModelPricing | null | undefined,
-  currency = "USD"
+  currency = "USD",
+  priorityMultiplier = 1
 ): EstimatedCost | null {
   if (!factors) return null;
   const inputRate = validRate(factors.inputPerMillion);
@@ -30,7 +31,7 @@ export function estimateUpstreamCost(
     uncached * (inputRate ?? 0)
     + cached * (cachedRate ?? 0)
     + output * (outputRate ?? 0)
-  ) / 1_000_000;
+  ) / 1_000_000 * (Number.isFinite(priorityMultiplier) && priorityMultiplier >= 0 ? priorityMultiplier : 1);
   return { amount, unit: String(currency || "USD").toUpperCase() };
 }
 

@@ -30,6 +30,16 @@ describe("settings appearance and display units", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => cleanup());
 
+  it("round-trips priority multipliers without changing saved defaults", () => {
+    const defaults = settingsToForm({});
+    expect(defaults.billing_service_tier_standard_multiplier).toBe(1);
+    expect(defaults.billing_service_tier_fast_multiplier).toBe(2);
+    expect(defaults.billing_service_tier_ultrafast_multiplier).toBe(6);
+    const saved = formToSettings({}, { ...defaults, billing_service_tier_fast_multiplier: 2.5, billing_service_tier_ultrafast_multiplier: 0 });
+    expect(saved.billing_service_tier_fast_multiplier).toBe("2.5");
+    expect(settingsToForm(saved).billing_service_tier_ultrafast_multiplier).toBe(0);
+  });
+
   it("persists normalized theme and density while notifying the provider", () => {
     const listener = vi.fn();
     window.addEventListener(APPEARANCE_CHANGED_EVENT, listener);
@@ -185,6 +195,9 @@ describe("settings appearance and display units", () => {
     }));
 
     await user.click(screen.getByRole("menuitem", { name: "日志与计费" }));
+    expect(Number((screen.getByRole("spinbutton", { name: "标准倍率" }) as HTMLInputElement).value)).toBe(1);
+    expect(Number((screen.getByRole("spinbutton", { name: "快速倍率" }) as HTMLInputElement).value)).toBe(2);
+    expect(Number((screen.getByRole("spinbutton", { name: "超快速倍率" }) as HTMLInputElement).value)).toBe(6);
     const retentionInput = screen.getByRole("spinbutton", { name: "调用记录保留" });
     await user.clear(retentionInput);
     await user.type(retentionInput, "0");

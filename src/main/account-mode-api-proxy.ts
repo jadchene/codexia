@@ -10,9 +10,11 @@ import { createAccountModeResponsesObserver } from "./account-mode-responses-obs
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { emptyUsage, createSseUsageParser } from "./gateway/usage-parser.ts";
 import { buildResponsesRequestLog } from "./responses-request-log.ts";
+import { normalizeServiceTier, serviceTierFromObject } from "../shared/service-tier.ts";
 import { syncAccountUsageFromEvent, syncAccountUsageFromHeaders, type GatewayAccountQuota } from "./gateway/quota.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
+const DEFAULT_REQUEST_METADATA_LIMIT_BYTES = 16 * 1024 * 1024;
 const RESPONSES_PATH = "/backend-api/codex/responses";
 const PUBLIC_RESPONSES_PATH = "/v1/responses";
 const DEFAULT_UPSTREAM_BASE_URL = "https://chatgpt.com";
@@ -97,7 +99,9 @@ const handleHttpRequest = async (
   const settings = store.getSettings();
   const debugEnabled = observed && settings.debug_api_logging === "true" && apiDebugLogger.isEnabled();
   const requestId = debugEnabled ? randomUUID() : "";
-  const requestCapture = observed ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
+  const requestCapture = debugEnabled ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
+  // 计费字段按网关请求体上限采集，避免较小的调试日志上限截断模型和优先级。
+  const metadataCapture = observed ? createBodyCapture(positiveInteger(settings.gateway_request_body_limit_bytes, DEFAULT_REQUEST_METADATA_LIMIT_BYTES)) : null;
   const responseCapture = debugEnabled ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
   const quotaAccount = resolveProxyAccount(request, store);
   const usageParser = observed ? createSseUsageParser((event) => syncAccountUsageFromEvent(quotaAccount, event, store)) : null;
@@ -110,7 +114,8 @@ const handleHttpRequest = async (
   const finishLog = (statusCode: number, message: string | null): void => {
     if (!observed || finished) return;
     finished = true;
-    const model = modelFromBody(requestCapture?.snapshot().body || "");
+    const requestBody = metadataCapture?.snapshot().body || "";
+    const model = modelFromBody(requestBody);
     try {
       store.addTokenLog(buildResponsesRequestLog({
         account: quotaAccount || selectedAccount(settings),
@@ -121,6 +126,7 @@ const handleHttpRequest = async (
         status: statusCode,
         durationMs: Date.now() - startedAt,
         usage: usageParser?.latestUsage() || emptyUsage(),
+        requestedServiceTier: normalizeServiceTier(request.headers["openai-service-tier"]) ?? serviceTierFromBody(requestBody),
         settings,
         clientModel: model,
         upstreamModel: model,
@@ -154,7 +160,10 @@ const handleHttpRequest = async (
     activeRequests.add(clientRequest);
     notifyStatus();
     clientRequest.once("error", reject);
-    request.on("data", (chunk: Buffer) => requestCapture?.push(chunk));
+    request.on("data", (chunk: Buffer) => {
+      requestCapture?.push(chunk);
+      metadataCapture?.push(chunk);
+    });
     request.once("end", () => {
       if (!debugEnabled) return;
       apiDebugLogger.write({
@@ -184,6 +193,15 @@ const handleHttpRequest = async (
     if (clientRequest) activeRequests.delete(clientRequest);
     notifyStatus();
   });
+};
+
+/** 从已捕获的请求体读取优先级，缺失时按标准估算。 */
+const serviceTierFromBody = (body: string): string | null => {
+  try {
+    return serviceTierFromObject(JSON.parse(body));
+  } catch {
+    return null;
+  }
 };
 
 const createAccountProxyWebSocketServer = (
