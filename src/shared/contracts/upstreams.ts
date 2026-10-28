@@ -1,5 +1,5 @@
 export type UpstreamKind = "chatgpt_subscription_pool" | "responses_api";
-export type UpstreamHealthStatus = "unknown" | "healthy" | "unhealthy";
+type UpstreamHealthStatus = "unknown" | "healthy" | "unhealthy";
 export type BalanceQueryType = "none" | "deepseek";
 
 export interface ModelPricing {
@@ -8,19 +8,19 @@ export interface ModelPricing {
   outputPerMillion: number;
 }
 
-export interface SecretHeaderSummary {
+interface SecretHeaderSummary {
   name: string;
   fingerprint: string;
 }
 
-export interface BalanceInfo {
+interface BalanceInfo {
   currency: string;
   totalBalance: string;
   grantedBalance: string;
   toppedUpBalance: string;
 }
 
-export interface UpstreamBalance {
+interface UpstreamBalance {
   available: boolean | null;
   infos: BalanceInfo[];
   summary: string | null;
@@ -127,13 +127,6 @@ export interface SaveModelManagementResult {
 export interface SaveBundledModelOverrideResult {
   override: BundledModelOverride;
   catalog: ModelCatalogBuildResult;
-}
-
-export interface ModelCatalogSaveResult {
-  upstreamId: string;
-  count: number;
-  savedAt: number;
-  models: UpstreamModel[];
 }
 
 export interface UpstreamHealthResult {

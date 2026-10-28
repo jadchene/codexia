@@ -163,7 +163,7 @@ export function createAuthService(
   return { startLogin, completeCallback, loginStatus, cancelLogin, stop };
 }
 
-export function loginRedirectUri(): string {
+function loginRedirectUri(): string {
   return `http://${LOGIN_HOST}:${LOGIN_PORT}/auth/callback`;
 }
 

@@ -46,5 +46,3 @@ export const saveResponsesApiUpstreamSchema = z.object({
     });
   }
 });
-
-export type SaveResponsesApiUpstream = z.infer<typeof saveResponsesApiUpstreamSchema>;

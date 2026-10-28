@@ -6,7 +6,7 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
-export interface SseUsageParser {
+interface SseUsageParser {
   feed: (chunk: Uint8Array) => void;
   latestUsage: () => TokenUsage;
   responseCompleted: () => boolean;

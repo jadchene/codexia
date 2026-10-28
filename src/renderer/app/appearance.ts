@@ -1,5 +1,5 @@
-export type AppearanceTheme = "light" | "dark" | "system";
-export type AppearanceDensity = "comfortable" | "compact";
+type AppearanceTheme = "light" | "dark" | "system";
+type AppearanceDensity = "comfortable" | "compact";
 
 export interface AppearancePreferences {
   theme: AppearanceTheme;

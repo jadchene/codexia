@@ -1,12 +1,12 @@
 import type { ModelPricing } from "../../shared/contracts/upstreams";
 
-export interface BillableTokenUsage {
+interface BillableTokenUsage {
   input_tokens?: number;
   cached_input_tokens?: number;
   output_tokens?: number;
 }
 
-export interface EstimatedCost {
+interface EstimatedCost {
   amount: number;
   unit: string;
 }

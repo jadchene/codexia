@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { ResetCreditConsumeStatus } from "../shared/contracts/accounts";
 
-export interface ResetCreditLike {
+interface ResetCreditLike {
   id?: string;
   status?: string;
   expires_at?: number | null;
 }
 
-export interface ResetCreditAccountLike {
+interface ResetCreditAccountLike {
   access_token?: string;
   account_id?: string;
   workspace_id?: string;
@@ -111,7 +111,7 @@ export function normalizeConsumeResult(payload: unknown): { status: ResetCreditC
   return { status: "error", message: `无法识别的重置结果：${detail || "空响应"}` };
 }
 
-export function consumeStatusMessage(status: ResetCreditConsumeStatus): string {
+function consumeStatusMessage(status: ResetCreditConsumeStatus): string {
   switch (status) {
     case "reset":
       return "重置成功";

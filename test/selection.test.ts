@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { pickBalancedGatewayAccount, pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScore } from "../src/main/selection.ts";
+import { pickBalancedGatewayAccount, pickGatewayAccount, quotaWindowExhausted, resetSelectionState } from "../src/main/selection.ts";
 import { createGatewayRouting, sessionIdFromHeaders, turnIdFromHeaders } from "../src/main/gateway-routing.ts";
 import { buildAuthorizeUrl } from "../src/main/auth.ts";
 import { gatewayProviderBlock, insertProviderBlockIntoConfig, nextGatewayConfig, replaceGatewayProviderBlock } from "../src/main/codex-cli-auth.ts";
-import { buildMcpGatewayCommand, mcpGatewayPath, mcpGatewayUrl } from "../src/main/mcp-gateway-service.ts";
+import { buildMcpGatewayCommand, mcpGatewayUrl } from "../src/main/mcp-gateway-service.ts";
 import { buildSubscriptionRoutingHint, setSubscriptionRoutingHint } from "../src/main/gateway/protocol.ts";
 import {
   buildCodexQuotaHeaders,
@@ -56,10 +56,6 @@ test("pickGatewayAccount can exclude failed accounts", () => {
     { id: "second", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 20 }
   ], "", ["first"]);
   assert.equal(account.id, "second");
-});
-
-test("usageScore uses the highest active quota window", () => {
-  assert.equal(usageScore({ quota_5h_used_percent: 12, quota_7d_used_percent: 34 }), 34);
 });
 
 test("quotaWindowExhausted marks accounts with a depleted window unavailable", () => {
@@ -982,7 +978,6 @@ test("mcp gateway command omits optional HTTP arguments by default", () => {
 });
 
 test("mcp gateway path is normalized with leading slash", () => {
-  assert.equal(mcpGatewayPath({ mcp_gateway_path: "mcp" }), "/mcp");
   assert.equal(
     mcpGatewayUrl({ mcp_gateway_host: "0.0.0.0", mcp_gateway_port: "3100", mcp_gateway_path: "mcp" }),
     "http://0.0.0.0:3100/mcp"

@@ -185,7 +185,7 @@ export function gatewayProviderBlock(settings: Settings, options: CodexPathOptio
   ].join("\n");
 }
 
-export function gatewayProviderBaseHost(host: unknown): string {
+function gatewayProviderBaseHost(host: unknown): string {
   const value = String(host || "").trim();
   if (!value || value === "0.0.0.0") return "localhost";
   return value;
@@ -216,18 +216,6 @@ export function insertProviderBlockIntoConfig(current: unknown, block: unknown):
   const after = lines.slice(insertIndex).join(newline);
   const prefix = before ? `${before}${newline}${newline}` : "";
   return `${prefix}${normalizedBlock.replace(/\n/g, newline)}${newline}${newline}${after}`;
-}
-
-export function removeGatewayProviderConfig(options: CodexPathOptions = {}): boolean {
-  const file = configPath(options);
-  if (!fs.existsSync(file)) return false;
-  const current = fs.readFileSync(file, "utf8");
-  const next = withoutGatewayProvider(current);
-  if (next === current) return false;
-  writeFilesTransaction([{ file, content: next }], () => {
-    if (hasGatewayProvider(readText(file))) throw new Error("移除 Codexia Provider 后校验失败。");
-  });
-  return true;
 }
 
 export function withoutGatewayProvider(current: unknown): string {
@@ -291,16 +279,6 @@ export function detectCodexAuthMode(settings: Settings, accounts: AccountRecord[
   }
 
   return { mode: "unknown", accountId: "" };
-}
-
-export function repairConfigSpacing(options: CodexPathOptions = {}): boolean {
-  const file = configPath(options);
-  if (!fs.existsSync(file)) return false;
-  const current = fs.readFileSync(file, "utf8");
-  const next = current.replace(/("gpt-[^"\r\n]+"\s*=\s*"[^"\r\n]+")\s+(model_provider\s*=)/g, "$1\n$2");
-  if (next === current) return false;
-  writeFilesTransaction([{ file, content: next }]);
-  return true;
 }
 
 function hasGatewayProvider(config: string): boolean {

@@ -225,10 +225,6 @@ function cleanMcpGatewayPath(value: unknown): string {
   return text.startsWith("/") ? text : `/${text}`;
 }
 
-export function mcpGatewayPath(settings: Settings = {}): string {
-  return cleanMcpGatewayPath(settings.mcp_gateway_path);
-}
-
 function killProcessTree(processHandle: ChildProcess): void {
   if (!processHandle?.pid) return;
   if (process.platform !== "win32") {

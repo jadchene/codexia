@@ -1,6 +1,6 @@
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]"]);
 
-export function clientReachableHost(host: unknown): string {
+function clientReachableHost(host: unknown): string {
   const value = String(host || "").trim();
   return WILDCARD_HOSTS.has(value.toLowerCase()) ? "127.0.0.1" : (value || "127.0.0.1");
 }

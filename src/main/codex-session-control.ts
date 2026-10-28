@@ -29,7 +29,7 @@ export const resolveCodexExecutable = (): string => {
   throw new Error("未找到 Codex CLI 原生程序，请修复 Codex CLI 安装。");
 };
 
-export const connectCodexControl = (executable: string, codexHome: string) => {
+const connectCodexControl = (executable: string, codexHome: string) => {
   const child: ChildProcessWithoutNullStreams = spawn(executable, ["app-server"], {
     env: { ...process.env, CODEX_HOME: codexHome }, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], shell: false
   });

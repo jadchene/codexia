@@ -1,6 +1,6 @@
 type JsonObject = Record<string, any>;
 
-export interface NormalizedUsage {
+interface NormalizedUsage {
   raw_usage_json: string;
   has_five_hour_quota?: number;
   quota_5h_used_percent?: number;
@@ -136,7 +136,7 @@ function readUsedPercent(limit: any): number | null {
   return percentFromLimit(limit);
 }
 
-export function collectRateLimitWindows(root: any): JsonObject[] {
+function collectRateLimitWindows(root: any): JsonObject[] {
   const windows: JsonObject[] = [];
   addLimitGroup(windows, root.rate_limit);
   addLimitGroup(windows, root.code_review_rate_limit);

@@ -24,7 +24,7 @@ interface SecretCodec {
   decrypt: (value: string) => string;
 }
 
-export interface RuntimeUpstream {
+interface RuntimeUpstream {
   id: string;
   name: string;
   kind: UpstreamKind;

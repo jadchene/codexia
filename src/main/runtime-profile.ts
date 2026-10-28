@@ -1,10 +1,10 @@
 import path from "node:path";
 import type { Settings } from "../shared/contracts/settings";
 
-export const ISOLATED_DEV_FLAG = "--isolated-dev";
-export const CODEX_TEST_DIR_PREFIX = "--codex-test-dir=";
+const ISOLATED_DEV_FLAG = "--isolated-dev";
+const CODEX_TEST_DIR_PREFIX = "--codex-test-dir=";
 
-export interface RuntimeProfile {
+interface RuntimeProfile {
   mode: "isolated-dev" | "production";
   isolated: boolean;
   isolatedRequested: boolean;
@@ -103,7 +103,7 @@ export function codexAccessOptions(profile: RuntimeProfile): { codexDir?: string
   );
 }
 
-export function runtimeProfileError(code: string, message: string): Error & { code: string } {
+function runtimeProfileError(code: string, message: string): Error & { code: string } {
   const error = new Error(message);
   return Object.assign(error, { code });
 }

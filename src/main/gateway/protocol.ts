@@ -1,13 +1,13 @@
 type HeaderValue = string | string[] | number | undefined;
-export type HeaderMap = Record<string, HeaderValue>;
+type HeaderMap = Record<string, HeaderValue>;
 
-export interface GatewayRouteMatch {
+interface GatewayRouteMatch {
   pathAllowed: boolean;
   methodAllowed: boolean;
   allowedMethods: string[];
 }
 
-export interface GatewayUpstreamAccount {
+interface GatewayUpstreamAccount {
   access_token: string;
   account_id?: string;
   workspace_id?: string;

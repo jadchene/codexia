@@ -16,7 +16,7 @@ export function isSensitiveHeaderName(value: unknown): boolean {
   return /(?:^|[-_])(api[-_]?key|(?:access[-_]?|auth[-_]?)?token|secret|password|credential)(?:$|[-_])/.test(name);
 }
 
-export function isLoopbackHttpUrl(value: unknown): boolean {
+function isLoopbackHttpUrl(value: unknown): boolean {
   try {
     const url = new URL(String(value || ""));
     if (url.protocol !== "http:") return false;

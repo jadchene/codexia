@@ -41,16 +41,6 @@ export function quotaWindowExhausted(account: GatewayAccount, nowSeconds = Math.
   });
 }
 
-export function usageScore(account: GatewayAccount, options: SelectionOptions = {}): number {
-  const windows = [account.quota_7d_used_percent];
-  if (!options.ignoreFiveHourLimit) windows.push(account.quota_5h_used_percent);
-  const values = windows
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value));
-  if (values.length === 0) return 0;
-  return Math.max(...values);
-}
-
 let lastSelectedAccountId = "";
 
 export function pickGatewayAccount(accounts: GatewayAccount[], currentAccountId = "", excludeIds: string[] = [], options: SelectionOptions = {}): GatewayAccount | null {

@@ -18,7 +18,7 @@ const SENSITIVE_HEADERS = new Set([
   "api-key"
 ]);
 
-export interface ApiDebugLogEntry {
+interface ApiDebugLogEntry {
   ts: string;
   id: string;
   kind: "request" | "response";
@@ -34,7 +34,7 @@ export interface ApiDebugLogger {
   clear: () => Promise<void>;
 }
 
-export interface BodyPreview {
+interface BodyPreview {
   body: string;
   bodyBytes: number;
   truncated: boolean;

@@ -6,6 +6,37 @@ import path from "node:path";
 import { test } from "vitest";
 import { createGateway } from "../src/main/gateway.ts";
 
+test("畸形 HTTP 和 WebSocket 请求返回 400 且不影响后续请求", async () => {
+  const harness = await startHarness((_req, res) => res.end("{}"));
+  try {
+    for (const accountMode of [false, true]) {
+      harness.store.saveSettings({ codex_auth_mode: accountMode ? "account" : "gateway", account_mode_use_api_proxy: "true" });
+      for (const upgrade of [false, true]) {
+        for (const target of ["http://[", "//["]) {
+          const status = await new Promise((resolve, reject) => {
+            const request = http.request({
+              hostname: "127.0.0.1",
+              port: new URL(harness.gateway.status().url).port,
+              path: target,
+              headers: upgrade ? { Connection: "Upgrade", Upgrade: "websocket" } : {}
+            }, (response) => {
+              response.resume();
+              response.once("end", () => resolve(response.statusCode));
+            });
+            request.setTimeout(2000, () => request.destroy(new Error("请求超时")));
+            request.once("error", reject);
+            request.end();
+          });
+          assert.equal(status, 400);
+        }
+      }
+    }
+    assert.equal((await fetch(`${harness.gateway.status().url}/missing`)).status, 404);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("HTTP 账号池轮换用尽后登记唤醒，单个账号耗尽或认证失败不登记", async () => {
   for (const mode of ["quota", "failover", "auth", "sse"]) {
     const notifications = [];

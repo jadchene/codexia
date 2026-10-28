@@ -35,7 +35,7 @@ interface HeaderSource {
 
 type HeaderRecord = Record<string, string | string[] | number | undefined>;
 
-export interface QuotaOptions extends QuotaNormalizationOptions {
+interface QuotaOptions extends QuotaNormalizationOptions {
   ignoreFiveHourLimit?: boolean;
 }
 
@@ -52,7 +52,7 @@ interface ResetDetail {
   candidates: ResetCandidate[];
 }
 
-export interface CodexQuotaSnapshot {
+interface CodexQuotaSnapshot {
   primary: {
     used_percent: number;
     window_minutes: number;
@@ -74,7 +74,7 @@ export interface CodexQuotaSnapshot {
   };
 }
 
-export interface AccountPoolQuotaSummary {
+interface AccountPoolQuotaSummary {
   capacity_percent: number;
   primary: {
     remaining_percent: number;

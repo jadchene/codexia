@@ -128,6 +128,12 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       getModelPricing: (modelId) => hooks.upstreamService?.getModelPricing?.("builtin-chatgpt-subscription-pool", modelId)
     });
     server = http.createServer((req: Dynamic, res: Dynamic) => {
+      try {
+        new URL(req.url || "/", "http://localhost");
+      } catch {
+        sendJson(res, 400, { error: { message: "Invalid request URL." } });
+        return;
+      }
       if (useAccountModeGatewayProxy(store.getSettings(), req.url)) {
         void accountModeApiProxy.handleHttp(req, res).catch((error: Dynamic) => {
           if (!res.headersSent) sendJson(res, 502, { error: { message: "API 服务暂时无法完成账号模式代理请求。" } });
@@ -156,6 +162,12 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       }
     });
     server.on("upgrade", (request: Dynamic, socket: Dynamic, head: Dynamic) => {
+      try {
+        new URL(request.url || "/", "http://localhost");
+      } catch {
+        socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        return;
+      }
       if (useAccountModeGatewayProxy(store.getSettings(), request.url)) {
         accountModeApiProxy.handleUpgrade(request, socket, head);
         return;

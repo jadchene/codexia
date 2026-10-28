@@ -11,18 +11,6 @@ export const formatTokenNumber = (value: unknown): string => (
   new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(Number(value || 0))
 );
 
-export const formatCompactNumber = (value: unknown): string => (
-  new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 2 }).format(Number(value || 0))
-);
-
-export const formatUncachedInput = (input: unknown, cached: unknown): string => (
-  formatTokenNumber(Math.max(0, Number(input || 0) - Number(cached || 0)))
-);
-
-export const formatUncachedPair = (input: unknown, cached: unknown): string => (
-  `${formatTokenNumber(input)}（未命中 ${formatUncachedInput(input, cached)}）`
-);
-
 export const cacheHitRate = (input: unknown, cached: unknown): number => {
   const total = Number(input || 0);
   return total > 0 ? Math.max(0, Math.min(100, Number(cached || 0) / total * 100)) : 0;

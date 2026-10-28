@@ -152,7 +152,7 @@ export function parseBundledOverrideCatalog(raw: string): Catalog {
   return catalog;
 }
 
-export function mergeCatalogs(bundled: Catalog, external: ModelEntry[]): Catalog {
+function mergeCatalogs(bundled: Catalog, external: ModelEntry[]): Catalog {
   const models = [...bundled.models];
   const owners = new Set(models.map((model) => model.slug));
   for (const model of external) {
@@ -163,7 +163,7 @@ export function mergeCatalogs(bundled: Catalog, external: ModelEntry[]): Catalog
   return { ...bundled, models };
 }
 
-export function applyModelManagement(catalog: Catalog, management: ModelManagementInput[]): Catalog {
+function applyModelManagement(catalog: Catalog, management: ModelManagementInput[]): Catalog {
   if (management.length === 0) return catalog;
   const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
   const models = buildModelManagement(catalog, management)
@@ -176,7 +176,7 @@ export function applyModelManagement(catalog: Catalog, management: ModelManageme
   return { ...catalog, models };
 }
 
-export function buildModelManagement(catalog: Catalog, management: ModelManagementInput[]): ModelManagementItem[] {
+function buildModelManagement(catalog: Catalog, management: ModelManagementInput[]): ModelManagementItem[] {
   const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
   const ordered: ModelEntry[] = [];
   const configured = new Map(management.map((model) => [model.slug, model]));

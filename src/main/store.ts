@@ -28,7 +28,7 @@ interface StoreOptions {
   dbPath?: string;
   migrationHooks?: MigrationHooks;
 }
-export interface Store {
+interface Store {
   db: Db;
   paths: { dataDir: string; dbPath: string };
   getSettings: () => Settings;

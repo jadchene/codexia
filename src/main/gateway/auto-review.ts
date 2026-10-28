@@ -1,7 +1,7 @@
 type Dynamic = any;
 
 export const AUTO_REVIEW_MODEL_ID = "codex-auto-review";
-export const AUTO_REVIEW_CACHE_KEY_PREFIX = "guardian:";
+const AUTO_REVIEW_CACHE_KEY_PREFIX = "guardian:";
 
 export function isAutoReviewRequest(body: Dynamic): boolean {
   return String(body?.model || "") === AUTO_REVIEW_MODEL_ID
