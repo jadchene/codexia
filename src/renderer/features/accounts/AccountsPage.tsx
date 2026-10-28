@@ -247,11 +247,11 @@ export const AccountsPage = ({
         </Col>
         {settings.ignore_five_hour_limit !== "true" && (
           <Col xs={24} md={6}>
-            <Card size="small"><Statistic title="5 小时总剩余额度" value={totalFiveHourRemaining} precision={1} suffix="%" /></Card>
+            <Card size="small"><Statistic title="5 小时总剩余额度" value={totalFiveHourRemaining} precision={1} suffix={normalization.normalizeQuotaToPlus ? "% plus" : "%"} /></Card>
           </Col>
         )}
         <Col xs={24} md={6}>
-          <Card size="small"><Statistic title="7 天总剩余额度" value={totalSevenDayRemaining} precision={1} suffix="%" /></Card>
+          <Card size="small"><Statistic title="7 天总剩余额度" value={totalSevenDayRemaining} precision={1} suffix={normalization.normalizeQuotaToPlus ? "% plus" : "%"} /></Card>
         </Col>
       </Row>
 
