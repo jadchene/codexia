@@ -5,9 +5,9 @@ import fs from "node:fs";
 import type { Server } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { browserDataDir } from "./paths.ts";
+import { browserDataDir, dbPath } from "./paths.ts";
 import { codexAccessOptions, createRuntimeProfile } from "./runtime-profile.ts";
-import { acquireSingleInstanceChannel, closeSingleInstanceChannel } from "./single-instance.ts";
+import { acquireSingleInstanceChannel, closeSingleInstanceChannel, readSingleInstanceSetting } from "./single-instance.ts";
 import { createStore } from "./store.ts";
 import { createSecretCodec } from "./secret-codec.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "./renderer-boundary.ts";
@@ -57,13 +57,15 @@ const runtimeProfile = createRuntimeProfile({
   projectRoot: path.resolve(__dirname, "..", "..")
 });
 const activeBrowserDataDir = runtimeProfile.paths?.browserDataDir || browserDataDir();
+const useSingleInstance = runtimeProfile.useSingleInstance
+  && readSingleInstanceSetting(runtimeProfile.paths?.dbPath || dbPath());
 
 fs.mkdirSync(activeBrowserDataDir, { recursive: true });
 app.setPath("userData", activeBrowserDataDir);
 app.setName(runtimeProfile.appName);
 app.setAppUserModelId(runtimeProfile.appUserModelId);
 
-const hasSingleInstanceLock = runtimeProfile.useSingleInstance
+const hasSingleInstanceLock = useSingleInstance
   ? app.requestSingleInstanceLock()
   : true;
 if (!hasSingleInstanceLock) app.quit();
@@ -101,7 +103,7 @@ function handleSecondInstance() {
 
 app.on("second-instance", handleSecondInstance);
 
-const singleInstanceChannel = runtimeProfile.useSingleInstance && hasSingleInstanceLock
+const singleInstanceChannel = useSingleInstance && hasSingleInstanceLock
   ? acquireSingleInstanceChannel({ onSecondInstance: handleSecondInstance })
   : Promise.resolve({ primary: true, endpoint: null, server: null });
 

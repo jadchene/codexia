@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import {
@@ -29,6 +29,30 @@ describe("settings appearance and display units", () => {
   });
   beforeEach(() => localStorage.clear());
   afterEach(() => cleanup());
+
+  it("默认开启单实例，保存关闭值并支持放弃更改", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      settings: {}, paths: {}, onSave, onMessage: vi.fn(),
+      onClearTokenLogs: vi.fn(), onClearAppLogs: vi.fn()
+    };
+    const view = render(createElement(SettingsPage, props));
+    const toggle = screen.getByRole("switch", { name: "单实例运行" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(/保存后重启应用生效/)).toBeTruthy();
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: "放弃更改" }));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: /保存设置/ }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ single_instance: "false" })));
+    view.rerender(createElement(SettingsPage, { ...props, settings: { single_instance: "false" } }));
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: /保存设置/ }));
+    await waitFor(() => expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ single_instance: "true" })));
+  });
 
   it("round-trips priority multipliers without changing saved defaults", () => {
     const defaults = settingsToForm({});

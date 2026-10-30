@@ -46,6 +46,8 @@ API mode combines subscription and third-party models. Account mode uses one sub
 
 API or MCP setting changes may require restarting the corresponding service.
 
+Single-instance mode is enabled by default. To run separate copies, turn off **Settings → General → App behavior → Single-instance mode**, save, and restart the app. Use separate program directories, service ports, and API keys for independent account pools. Only apply integration settings from the copy used by your local Codex, or use a separate `CODEX_HOME` for each copy.
+
 For other Responses API clients, use the service address with `/v1` as the base URL (default `http://localhost:8436/v1`) and the local access key from Settings. Model discovery uses `GET /v1/models`; requests use `POST /v1/responses`. Availability depends on the configured subscription accounts and channels.
 
 ### Session Wakeup

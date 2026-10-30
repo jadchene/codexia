@@ -193,6 +193,10 @@ export const SettingsPage = ({
               { label: "最小化到托盘", value: "tray" }
             ]} />
           </Form.Item>
+          <Form.Item name="single_instance" label="单实例运行" valuePropName="checked"
+            extra="默认开启，修改并保存后重启应用生效。多开时请使用不同程序目录和服务端口。">
+            <Switch aria-label="单实例运行" />
+          </Form.Item>
         </div>
       </SettingsSection>
       <SettingsSection title="外观" description="选择界面主题、显示密度和本机已安装字体。">
@@ -389,7 +393,10 @@ export const SettingsPage = ({
           <Select options={CURRENCY_OPTIONS} />
         </Form.Item>
       </SettingsSection>
-      <SettingsSection title="优先级倍率" description="估算费用 = 模型 Token 费用 × 请求优先级倍率。未指定优先级时按标准计算，响应优先级不影响估算；修改仅影响后续调用。">
+      <SettingsSection title="优先级倍率">
+        <Typography.Paragraph type="secondary">
+          估算费用 = 模型 Token 费用 × 请求优先级倍率。未指定优先级时按标准计算，响应优先级不影响估算；修改仅影响后续调用。
+        </Typography.Paragraph>
         <div className="v1-settings-grid v1-settings-grid-3">
           {(["standard", "fast", "ultrafast"] as const).map((tier, index) => (
             <Form.Item key={tier} name={`billing_service_tier_${tier}_multiplier`} label={`${["标准", "快速", "超快速"][index]}倍率`} rules={[{ required: true, message: "请输入优先级倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
@@ -584,6 +591,7 @@ const NumberField = ({
 export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => {
   const values = { ...settings } as SettingsFormValues;
   values.show_session_wakeups_menu = settings.show_session_wakeups_menu === "true";
+  values.single_instance = settings.single_instance !== "false";
   values.show_scheduled_tasks_menu = settings.show_scheduled_tasks_menu === "true";
   for (const key of Object.keys(SERVICE_TIER_DEFAULT_SETTINGS)) {
     values[key] = serviceTierMultiplier(key.replace("billing_service_tier_", "").replace("_multiplier", ""), settings);

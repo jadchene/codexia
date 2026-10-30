@@ -245,6 +245,7 @@ function migrate(db: Db): void {
     mcp_gateway_port: "3000",
     mcp_gateway_path: "/mcp",
     startup_launch: "disabled",
+    single_instance: "true",
     close_behavior: "exit",
     codex_quota_headers_mode: "block",
     codex_auth_mode: "gateway",

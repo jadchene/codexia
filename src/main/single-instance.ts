@@ -1,7 +1,25 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import { createRequire } from "node:module";
 import net, { type Server } from "node:net";
 import os from "node:os";
 import path from "node:path";
+
+/** 在获取启动锁前只读查询配置；缺失或读取失败时保留单实例限制。 */
+export function readSingleInstanceSetting(dbPath: string): boolean {
+  if (!fs.existsSync(dbPath)) return true;
+  const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+  let db: InstanceType<typeof DatabaseSync> | undefined;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db.prepare("SELECT value FROM settings WHERE key = ?").get("single_instance");
+    return row?.value !== "false";
+  } catch {
+    return true;
+  } finally {
+    db?.close();
+  }
+}
 
 interface SingleInstanceOptions {
   userIdentity?: string;
