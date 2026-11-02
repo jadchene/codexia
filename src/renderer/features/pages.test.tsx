@@ -125,6 +125,27 @@ describe("Ant Design pages", () => {
     expect(onRefreshAccounts).toHaveBeenCalledOnce();
   });
 
+  it.each([true, false])("counts the merged visible models once with the official channel enabled: %s", async (officialEnabled) => {
+    const pool = createUpstream("pool", "GPT 账号池", "chatgpt_subscription_pool");
+    const official = { ...createUpstream("openai", "OpenAI", "responses_api"), provider: "openai" as const, enabled: officialEnabled };
+    const custom = createUpstream("custom", "第三方", "responses_api");
+    const disabled = { ...createUpstream("disabled", "已停用渠道", "responses_api"), enabled: false, modelCount: 8 };
+    Object.assign(pool, { modelCount: 3 });
+    Object.assign(official, { modelCount: 3 });
+    vi.mocked(window.codexGateway.listUpstreams).mockResolvedValue([pool, official, custom, disabled]);
+    vi.mocked(window.codexGateway.getModelManagement).mockResolvedValue([
+      { slug: "gpt-a", displayName: "GPT A", sourceDisplayName: "GPT A", visible: true, priority: 1 },
+      { slug: "gpt-b", displayName: "GPT B", sourceDisplayName: "GPT B", visible: true, priority: 2 },
+      { slug: "gpt-hidden", displayName: "Hidden", sourceDisplayName: "Hidden", visible: false, priority: 3 },
+      { slug: "custom", displayName: "Custom", sourceDisplayName: "Custom", visible: true, priority: 4 }
+    ]);
+    renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1"
+      mcpGateway={{ running: false }} tokenSummary={emptySummary} quotaSummary={{}} settings={{}} />);
+    const statistic = (await screen.findByText("可选模型")).closest<HTMLElement>(".ant-statistic")!;
+    await waitFor(() => expect(within(statistic).getByText("3")).toBeTruthy());
+    expect(window.codexGateway.getModelManagement).toHaveBeenCalledOnce();
+  });
+
   it("shows Plus-stacked quota above 100% while overview rings use total capacity", () => {
     renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
       quotaSummary={{ capacity_percent: 1100, primary: { remaining_percent: 480 }, secondary: { remaining_percent: 1100 } }} settings={{ gpt_quota_normalization_enabled: "true" }} />);

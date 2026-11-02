@@ -61,6 +61,10 @@ export const OverviewPage = ({
     queryKey: ["upstreams", "overview"],
     queryFn: () => window.codexGateway.listUpstreams()
   });
+  const modelsQuery = useQuery({
+    queryKey: ["upstreams", "overview", "models"],
+    queryFn: () => window.codexGateway.getModelManagement()
+  });
   const usableAccounts = accounts.filter((account) => isUsableAccount(account, settings)).length;
   const total = tokenSummary?.total || {};
   const apiUpstreams = Array.isArray(upstreamQuery.data)
@@ -68,7 +72,7 @@ export const OverviewPage = ({
     : [];
   const healthyApiUpstreams = apiUpstreams.filter((upstream) => upstream.enabled && upstream.healthStatus === "healthy").length;
   const unhealthyApiUpstreams = apiUpstreams.filter((upstream) => upstream.enabled && upstream.healthStatus === "unhealthy");
-  const modelCount = (upstreamQuery.data ?? []).reduce((total, upstream) => total + upstream.modelCount, 0);
+  const modelCount = new Set((modelsQuery.data ?? []).filter((model) => model.visible).map((model) => model.slug)).size;
   const errorLogs = recentLogs.filter((log) => log.level === "error" || log.status === "failed").slice(0, 5);
 
   return (
@@ -81,7 +85,7 @@ export const OverviewPage = ({
         <Row gutter={[16, 16]}>
           <MetricCard icon={<TeamOutlined />} title="可用订阅账号" value={`${usableAccounts}/${accounts.length}`} />
           <MetricCard icon={<ApiOutlined />} title="可用第三方渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
-          <MetricCard icon={<DashboardOutlined />} title="可选模型" value={modelCount} loading={upstreamQuery.isLoading} />
+          <MetricCard icon={<DashboardOutlined />} title="可选模型" value={modelsQuery.isError ? "-" : modelCount} loading={modelsQuery.isLoading} />
         </Row>
       </div>
 

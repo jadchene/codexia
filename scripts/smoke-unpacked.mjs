@@ -66,6 +66,7 @@ try {
   inspection.pageCount = await inspectLazyPages(target.webSocketDebuggerUrl, child);
   inspection.quotaNormalization = await inspectQuotaNormalization(target.webSocketDebuggerUrl);
   inspection.officialPricing = await inspectOfficialPricing(target.webSocketDebuggerUrl);
+  inspection.overviewModelCount = await inspectOverviewModelCount(target.webSocketDebuggerUrl, child);
   inspection.sessionWakeupCrud = await inspectSessionWakeupCrud(target.webSocketDebuggerUrl);
   inspection.scheduledTaskCrud = await inspectScheduledTaskCrud(target.webSocketDebuggerUrl);
 } finally {
@@ -96,6 +97,34 @@ async function inspectOfficialPricing(webSocketDebuggerUrl) {
     }
     return true;
   })()`);
+}
+
+/** 在官方渠道与订阅池共享模型时，检查实际打包页面是否按可见模型去重统计。 */
+async function inspectOverviewModelCount(webSocketDebuggerUrl, processHandle) {
+  const fixture = await evaluate(webSocketDebuggerUrl, `(async () => {
+    const api = window.codexGateway;
+    const channel = await api.saveUpstream({ provider: 'openai', apiKey: 'packaged-model-count-test-key' });
+    return { id: channel.id, expected: (await api.getModelManagement()).filter(model => model.visible).length };
+  })()`);
+  try {
+    // 重新加载以清空查询缓存，确保读到的是官方渠道启用后的真实统计。
+    await evaluate(webSocketDebuggerUrl, "location.reload(); true");
+    await waitForRenderer(webSocketDebuggerUrl, processHandle);
+    await navigateToPage(webSocketDebuggerUrl, processHandle, "overview", "运行概览");
+    const actual = await evaluate(webSocketDebuggerUrl, `(async () => {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const title = Array.from(document.querySelectorAll('.ant-statistic-title')).find(item => item.textContent === '可选模型');
+        const value = title?.closest('.ant-statistic')?.querySelector('.ant-statistic-content-value')?.textContent;
+        if (value && value !== '-') return Number(value.replaceAll(',', ''));
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('打包页面未显示可选模型数量');
+    })()`);
+    if (actual !== fixture.expected) throw new Error(`可选模型数量重复统计：预期 ${fixture.expected}，实际 ${actual}`);
+    return { expected: fixture.expected, actual };
+  } finally {
+    await evaluate(webSocketDebuggerUrl, `window.codexGateway.deleteUpstream(${JSON.stringify(fixture.id)})`);
+  }
 }
 
 /** 检查真实安装包中的额度配置、表单默认值及保存回读。 */
