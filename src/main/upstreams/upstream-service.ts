@@ -63,6 +63,12 @@ export function createUpstreamService(options: {
     getModelPricing: (upstreamId: string, modelId: string) => getModelPricing(db, upstreamId, modelId),
     saveModelPricing: (upstreamId: string, pricing: Record<string, ModelPricing>) => saveModelPricing(db, upstreamId, pricing),
     save: (input: SaveResponsesApiUpstreamInput) => saveUpstream(db, secretCodec, input),
+    /** 单独修改渠道状态，保留密钥、模型和费率。 */
+    setEnabled: (upstreamId: string, enabled: boolean) => {
+      requireUpstream(db, upstreamId);
+      db.prepare("UPDATE upstreams SET enabled = ?, updated_at = ? WHERE id = ?").run(enabled ? 1 : 0, Date.now(), upstreamId);
+      return publicUpstream(db, requireUpstream(db, upstreamId), secretCodec);
+    },
     delete: (upstreamId: string) => deleteUpstream(db, upstreamId),
     refreshBalance: (upstreamId: string) => refreshBalance(db, secretCodec, fetchImpl, upstreamId),
     testConnection: (upstreamId: string) => testConnection(db, secretCodec, fetchImpl, upstreamId),
@@ -125,8 +131,8 @@ function listGatewayModels(db: DatabaseSync) {
       owned_by: String(value.upstream_name || value.upstream_id || "")
     };
   });
-  // 官方 API 与订阅池共用 ID，启用官方渠道时只展示实际接收请求的渠道。
-  return [...new Map(models.map((model) => [model.id, model])).values()];
+  // 查询已将账号池排在前面，同名模型保留首个渠道。
+  return models.filter((model, index) => models.findIndex((candidate) => candidate.id === model.id) === index);
 }
 
 function listGatewayModelOptions(db: DatabaseSync): GatewayModelSummary[] {
@@ -155,6 +161,12 @@ function runtimeUpstream(db: DatabaseSync, secretCodec: SecretCodec, upstreamId:
 function findRuntimeByModel(db: DatabaseSync, secretCodec: SecretCodec, rawModelId: string): RuntimeUpstream | null {
   const modelId = String(rawModelId || "").trim();
   if (!modelId) return null;
+  const poolModel = db.prepare(`
+    SELECT 1 FROM upstream_models JOIN upstreams ON upstreams.id = upstream_models.upstream_id
+    WHERE upstreams.id = ? AND upstreams.enabled = 1
+      AND upstream_models.model_id = ? AND upstream_models.available = 1
+  `).get(BUILTIN_SUBSCRIPTION_ID, modelId);
+  if (poolModel) return null;
   const rows = db.prepare(`
     SELECT upstreams.* FROM upstream_models
     JOIN upstreams ON upstreams.id = upstream_models.upstream_id

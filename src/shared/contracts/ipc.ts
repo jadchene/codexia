@@ -51,6 +51,7 @@ export type IpcContract = {
   "accounts:delete": IpcSpec<[id: string], PublicAccount[]>;
   "accounts:list": IpcSpec<[], PublicAccount[]>;
   "upstreams:list": IpcSpec<[], UpstreamSummary[]>;
+  "upstreams:setEnabled": IpcSpec<[upstreamId: string, enabled: boolean], UpstreamSummary>;
   "upstreams:models": IpcSpec<[upstreamId: string], UpstreamModel[]>;
   "upstreams:gatewayModels": IpcSpec<[], GatewayModelSummary[]>;
   "upstreams:save": IpcSpec<[input: SaveResponsesApiUpstreamInput], UpstreamSummary>;

@@ -16,7 +16,7 @@ it.each(["sessionWakeups", "scheduledTasks"])("hides optional menus by default a
   const user = userEvent.setup();
   let settings: Record<string, string> = {};
   const bootstrap = vi.fn(async () => ({
-    app: { version: "1.9.6" }, settings, accounts: [],
+    app: { version: "1.9.7" }, settings, accounts: [],
     tokenLogs: { items: [], total: 0, page: 1, pageSize: 10 }, tokenSummary: { total: {}, byAccount: [] },
     quotaSummary: { primary: {}, secondary: {} }, appLogs: { items: [], total: 0, page: 1, pageSize: 10 },
     gateway: { running: false }, mcpGateway: { running: false }, paths: { dataDir: "", dbPath: "" }

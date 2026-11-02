@@ -490,6 +490,12 @@ function registerIpc() {
   });
   handleIpc("accounts:list", () => publicAccounts());
   handleIpc("upstreams:list", () => upstreamService.list());
+  handleIpc("upstreams:setEnabled", (_event, upstreamId, enabled) => {
+    const result = upstreamService.setEnabled(upstreamId, enabled);
+    modelCatalogService.refresh();
+    notifyDataChanged(["upstreams", "upstreamModels"]);
+    return result;
+  });
   handleIpc("upstreams:models", (_event, upstreamId) => upstreamService.listModels(upstreamId));
   handleIpc("upstreams:gatewayModels", () => upstreamService.listGatewayModelOptions());
   handleIpc("upstreams:save", (_event, input) => {

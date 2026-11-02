@@ -312,6 +312,24 @@ describe("Ant Design pages", () => {
     expect(screen.queryByText("模型映射")).toBeNull();
   });
 
+  it.each(["chatgpt_subscription_pool", "responses_api"] as const)("toggles %s directly in the channel list", async (kind) => {
+    const upstream = createUpstream("toggle-channel", "测试渠道", kind);
+    upstream.enabled = true;
+    window.codexGateway.listUpstreams = vi.fn().mockImplementation(async () => [{ ...upstream }]);
+    window.codexGateway.setUpstreamEnabled = vi.fn().mockImplementation(async (_id, enabled) => {
+      upstream.enabled = enabled;
+      return { ...upstream };
+    });
+    renderWithQueries(<UpstreamsPage />);
+    const toggle = await screen.findByRole("switch", { name: "测试渠道启用状态" });
+    await userEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    expect(window.codexGateway.setUpstreamEnabled).toHaveBeenCalledWith("toggle-channel", false);
+    await userEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    expect(window.codexGateway.setUpstreamEnabled).toHaveBeenLastCalledWith("toggle-channel", true);
+  });
+
   it("saves an official channel with only an API key and no URL or model JSON", async () => {
     const user = userEvent.setup();
     window.codexGateway.saveUpstream = vi.fn().mockResolvedValue(createUpstream("official", "OpenAI 官方", "responses_api"));
@@ -322,7 +340,7 @@ describe("Ant Design pages", () => {
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "API 地址" })).toBeNull());
     expect(screen.queryByText("Codex 模型 JSON")).toBeNull();
     expect(screen.queryByText("高级请求头")).toBeNull();
-    expect(screen.getByText(/同名模型请求优先使用官方 API/)).toBeTruthy();
+    expect(screen.getByText(/同名模型优先使用已启用的账号池/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /保\s*存/ }));
     expect(await screen.findByText("请填写 OpenAI API Key")).toBeTruthy();
     expect(window.codexGateway.saveUpstream).not.toHaveBeenCalled();

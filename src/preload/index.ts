@@ -58,6 +58,7 @@ const api = {
   deleteAccount: (id: string): Promise<PublicAccount[]> => invoke("accounts:delete", id),
   listAccounts: (): Promise<PublicAccount[]> => invoke("accounts:list"),
   listUpstreams: (): Promise<UpstreamSummary[]> => invoke("upstreams:list"),
+  setUpstreamEnabled: (upstreamId: string, enabled: boolean): Promise<UpstreamSummary> => invoke("upstreams:setEnabled", upstreamId, enabled),
   listUpstreamModels: (upstreamId: string): Promise<UpstreamModel[]> => invoke("upstreams:models", upstreamId),
   listGatewayModels: (): Promise<GatewayModelSummary[]> => invoke("upstreams:gatewayModels"),
   saveUpstream: (input: SaveResponsesApiUpstreamInput): Promise<UpstreamSummary> => invoke("upstreams:save", input),

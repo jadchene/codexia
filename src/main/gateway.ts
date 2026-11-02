@@ -613,6 +613,9 @@ function selectRequestAccount(runtime: Dynamic, routeContext: Dynamic, accounts:
 
 async function callSubscriptionTarget(options: Dynamic) {
   const { req, request, settings, store, hooks, runtime, routeContext, signal, onAccountSelected } = options;
+  if (hooks.upstreamService?.getRuntime?.("builtin-chatgpt-subscription-pool")?.enabled === false) {
+    throw gatewayRouteError(503, "SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "The subscription account pool is disabled.");
+  }
   const routedRequest = requestForSubscriptionTarget(request, settings, hooks);
   let accounts = store.listAccounts();
   let firstAccount = selectRequestAccount(runtime, routeContext, accounts, store, settings);

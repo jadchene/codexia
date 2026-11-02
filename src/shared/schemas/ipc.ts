@@ -51,6 +51,7 @@ export const ipcArgumentSchemas = {
   "accounts:delete": z.tuple([id]),
   "accounts:list": empty,
   "upstreams:list": empty,
+  "upstreams:setEnabled": z.tuple([id, z.boolean()]),
   "upstreams:models": z.tuple([id]),
   "upstreams:gatewayModels": empty,
   "upstreams:save": z.tuple([saveResponsesApiUpstreamSchema]),

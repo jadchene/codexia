@@ -973,7 +973,7 @@ test("HTTP gateway routes an external model directly to its owning API channel",
   }
 });
 
-test("official channel routes a shared model with its API key and disabling it restores subscription requests", async () => {
+test("shared models prefer the pool and channel switches control HTTP routing", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-official-routing-"));
   const codec = { encrypt: (value: string) => value, decrypt: (value: string) => value, isEncrypted: () => true };
   const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
@@ -1015,20 +1015,35 @@ test("official channel routes a shared model with its API key and disabling it r
     }
   } });
   try {
+    const poolResponse = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("initial-pool", "initial-turn"),
+      body: JSON.stringify({ model: "shared-official-model", input: "hello" })
+    });
+    assert.equal((await poolResponse.json()).id, "subscription-response");
+    assert.equal(apiRequests.length, 0);
+    service.setEnabled("builtin-chatgpt-subscription-pool", false);
     const response = await gatewayFetch(harness, "/v1/responses", {
       headers: { ...codexHeaders("official-session", "official-turn"), "chatgpt-account-id": "subscription-only" },
       body: JSON.stringify({ model: "shared-official-model", input: "hello" })
     });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).id, "official-response");
-    assert.equal(subscriptionCalls, 0);
+    assert.equal(subscriptionCalls, 1);
     assert.equal(apiRequests[0].url, "/v1/responses");
     assert.equal(apiRequests[0].headers.authorization, "Bearer official-test-key");
     assert.equal(apiRequests[0].headers["chatgpt-account-id"], undefined);
     assert.equal(apiRequests[0].body.model, "shared-official-model");
     assert.equal(harness.tokenLogs.at(-1).upstream_id, official.id);
     assert.equal(harness.tokenLogs.at(-1).estimated_cost, 0.000014);
-    service.save({ id: official.id, provider: "openai", enabled: false });
+    service.setEnabled(official.id, false);
+    const disabled = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("disabled-session", "disabled-turn"),
+      body: JSON.stringify({ model: "shared-official-model", input: "hello" })
+    });
+    assert.equal(disabled.status, 503);
+    await disabled.text();
+    assert.equal(subscriptionCalls, 1);
+    service.setEnabled("builtin-chatgpt-subscription-pool", true);
     catalog.refresh();
     const fallback = await gatewayFetch(harness, "/v1/responses", {
       headers: codexHeaders("pool-session", "pool-turn"),
@@ -1036,7 +1051,7 @@ test("official channel routes a shared model with its API key and disabling it r
     });
     assert.equal(fallback.status, 200);
     assert.equal((await fallback.json()).id, "subscription-response");
-    assert.equal(subscriptionCalls, 1);
+    assert.equal(subscriptionCalls, 2);
     assert.equal(apiRequests.length, 1);
   } finally {
     await harness.close();

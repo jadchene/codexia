@@ -69,10 +69,11 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
       SELECT id FROM upstreams WHERE kind = 'responses_api' AND enabled = 1
         AND json_extract(capabilities_json, '$.provider') = 'openai' LIMIT 1
     `).get();
-    const effectiveBundled = officialEnabled ? {
+    const poolEnabled = options.db.prepare("SELECT enabled FROM upstreams WHERE id = ?").get(BUILTIN_SUBSCRIPTION_ID)?.enabled !== 0;
+    const effectiveBundled = !poolEnabled && officialEnabled ? {
       ...bundled,
       models: bundled.models.map((model) => ({ ...model, prefer_websockets: true, supports_websockets: true }))
-    } : bundled;
+    } : poolEnabled ? bundled : { ...bundled, models: [] };
     const nextSource = mergeCatalogs(effectiveBundled, external);
     const merged = applyModelManagement(nextSource, options.getModelManagement?.() || []);
     const files = [{ file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` }];

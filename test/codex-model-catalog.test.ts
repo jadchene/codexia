@@ -27,6 +27,8 @@ test("official API shares built-in IDs, follows directory updates and restores p
     assert.equal(saved.modelCount, 1);
     assert.equal("apiKey" in saved, false);
     assert.throws(() => upstreams.save({ provider: "openai", apiKey: "second-key" }), /官方渠道已存在/);
+    assert.equal(upstreams.findRuntimeByModel("gpt-built-in"), null);
+    upstreams.setEnabled(BUILTIN_SUBSCRIPTION_ID, false);
     assert.equal(upstreams.findRuntimeByModel("gpt-built-in")?.id, saved.id);
     const result = catalog.refresh();
     assert.equal(result.totalCount, 1);
@@ -48,12 +50,17 @@ test("official API shares built-in IDs, follows directory updates and restores p
     current = JSON.stringify({ models: [{ slug: "gpt-built-in" }] });
     catalog.refreshBundled();
     assert.equal(upstreams.findRuntimeByModel("new-official-model"), null);
-    upstreams.save({ id: saved.id, provider: "openai", enabled: false });
+    upstreams.setEnabled(saved.id, false);
+    assert.equal(catalog.refresh().totalCount, 0);
+    assert.equal(upstreams.listGatewayModels().length, 0);
+    upstreams.setEnabled(BUILTIN_SUBSCRIPTION_ID, true);
     catalog.refresh();
     assert.equal(upstreams.findRuntimeByModel("gpt-built-in"), null);
     assert.equal(upstreams.listGatewayModels().length, 1);
     assert.equal(upstreams.listGatewayModels()[0]?.owned_by, upstreams.list().find((item) => item.id === BUILTIN_SUBSCRIPTION_ID)?.name);
-    upstreams.save({ id: saved.id, provider: "openai", enabled: true });
+    upstreams.setEnabled(saved.id, true);
+    assert.equal(upstreams.findRuntimeByModel("gpt-built-in"), null);
+    upstreams.setEnabled(BUILTIN_SUBSCRIPTION_ID, false);
     catalog.refresh();
     assert.equal(upstreams.findRuntimeByModel("gpt-built-in")?.id, saved.id);
     upstreams.delete(saved.id);

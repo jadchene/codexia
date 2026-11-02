@@ -181,6 +181,10 @@ function createGatewayWebSocketGateway(options: Dynamic) {
         started
       });
     }
+    if (hooks.upstreamService?.getRuntime?.("builtin-chatgpt-subscription-pool")?.enabled === false) {
+      debugResponse(503, "The subscription account pool is disabled.");
+      return rejectUpgrade(socket, 503, "The subscription account pool is disabled.");
+    }
     let accounts = store.listAccounts();
     let firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
     if (!firstAccount && hooks.ensureUsableAccounts) {
@@ -560,6 +564,10 @@ async function selectDeferredResponsesRoute(options: Dynamic) {
   }
 
   const isAutoReview = isAutoReviewRequest(firstMessage.event);
+  if (hooks.upstreamService?.getRuntime?.("builtin-chatgpt-subscription-pool")?.enabled === false) {
+    if (isAutoReview) return connectAutoReviewWebSocketFallback({ ...options, clientModel: modelId });
+    throw routeError(503, "SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "The subscription account pool is disabled.");
+  }
   let accounts = store.listAccounts();
   let firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
   if (!firstAccount && hooks.ensureUsableAccounts) {
@@ -746,6 +754,10 @@ function createDeferredMessageTransformer(options: Dynamic) {
     if (isBinary) return undefined;
     const event = parseJson(data);
     if (event?.type !== "response.create") return undefined;
+    if (hooks.upstreamService?.getRuntime?.(target.id)?.enabled === false) {
+      closeWebSocketForReconnect(downstream, "channel disabled");
+      return false;
+    }
     if (target.kind === "chatgpt_subscription_pool" && !options.isSubscriptionAccountAvailable?.()) {
       options.onSubscriptionAccountUnavailable?.();
       closeWebSocketForReconnect(downstream, "subscription account disabled");

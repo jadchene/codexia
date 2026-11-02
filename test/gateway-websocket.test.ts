@@ -8,9 +8,75 @@ import { test } from "vitest";
 
 import gatewayModule from "../src/main/gateway.ts";
 import gatewayWebSocketModule from "../src/main/gateway-websocket.ts";
+import { createStore } from "../src/main/store.ts";
+import { createUpstreamService, BUILTIN_SUBSCRIPTION_ID } from "../src/main/upstreams/upstream-service.ts";
+import { createCodexModelCatalogService } from "../src/main/codex-model-catalog.ts";
 
 const { buildCodexQuotaSnapshot, createGateway } = gatewayModule;
 const { rewriteUpstreamMessage } = gatewayWebSocketModule;
+
+test("shared WebSocket models prefer the pool and disabled channels cannot reuse connections", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-ws-channel-switch-"));
+  const codec = { encrypt: (value: string) => value, decrypt: (value: string) => value, isEncrypted: () => true };
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  createCodexModelCatalogService({ db: store.db, dataDir: directory,
+    runBundledModels: () => JSON.stringify({ models: [{ slug: "gpt-5" }] }) }).refresh();
+  const service = createUpstreamService({ db: store.db, secretCodec: codec });
+  const official = service.save({ provider: "openai", apiKey: "official-ws-key" });
+  const requests = [];
+  let messages = 0;
+  let harness;
+  harness = await startHarness({
+    hooks: { upstreamService: {
+      ...service,
+      getRuntime: (id) => ({ ...service.getRuntime(id), baseUrl: harness.settings.upstream_base_url }),
+      findRuntimeByModel: (model) => {
+        const target = service.findRuntimeByModel(model);
+        return target ? { ...target, baseUrl: harness.settings.upstream_base_url } : null;
+      }
+    } },
+    onConnection(websocket, request) {
+      requests.push(request);
+      websocket.on("message", () => {
+        messages += 1;
+        websocket.send(JSON.stringify({ type: "response.completed", response: { model: "gpt-5" } }));
+      });
+    }
+  });
+  try {
+    const { websocket: pool } = await connectGateway(harness, "/v1/responses", { "session-id": "pool-priority" });
+    const completed = nextMessage(pool);
+    pool.send(JSON.stringify({ type: "response.create", model: "gpt-5" }));
+    await completed;
+    assert.notEqual(requests[0].headers.authorization, "Bearer official-ws-key");
+    service.setEnabled(BUILTIN_SUBSCRIPTION_ID, false);
+    const closed = nextCloseDetail(pool);
+    pool.send(JSON.stringify({ type: "response.create", model: "gpt-5" }));
+    assert.equal((await closed).code, 1012);
+    assert.equal(messages, 1);
+    const { websocket: api } = await connectGateway(harness, "/v1/responses", { "session-id": "official-priority" });
+    const apiCompleted = nextMessage(api);
+    api.send(JSON.stringify({ type: "response.create", model: "gpt-5" }));
+    await apiCompleted;
+    assert.equal(requests[1].headers.authorization, "Bearer official-ws-key");
+    service.setEnabled(official.id, false);
+    const apiClosed = nextCloseDetail(api);
+    api.send(JSON.stringify({ type: "response.create", model: "gpt-5" }));
+    assert.equal((await apiClosed).code, 1012);
+    assert.equal(messages, 2);
+    const { websocket: disabled } = await connectGateway(harness, "/v1/responses", { "session-id": "all-disabled" });
+    const error = nextMessage(disabled);
+    const disabledClosed = nextCloseDetail(disabled);
+    disabled.send(JSON.stringify({ type: "response.create", model: "gpt-5" }));
+    assert.equal(JSON.parse((await error).toString()).error.code, "SUBSCRIPTION_ACCOUNT_UNAVAILABLE");
+    await disabledClosed;
+    assert.equal(requests.length, 2);
+  } finally {
+    await harness.close();
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("WebSocket quota rewriting leaves incompatible payloads unchanged", () => {
   const text = Buffer.from("not-json");
