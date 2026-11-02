@@ -45,6 +45,8 @@ import type {
 import { currencyName } from "../../lib/currency";
 
 interface FormValues {
+  /** 官方渠道只需填写密钥。 */
+  provider: "custom" | "openai";
   id?: string;
   name: string;
   baseUrl: string;
@@ -79,6 +81,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
   const [modelManagementLoading, setModelManagementLoading] = useState(false);
   const [managedModels, setManagedModels] = useState<ModelManagementItem[]>([]);
   const watchedCatalog = Form.useWatch("modelCatalogJson", form) || EMPTY_CATALOG;
+  const isOfficial = Form.useWatch("provider", form) === "openai";
 
   const upstreamsQuery = useQuery({ queryKey: ["upstreams"], queryFn: () => window.codexGateway.listUpstreams() });
   const settingsQuery = useQuery({ queryKey: ["bootstrap", "billing-currency"], queryFn: () => window.codexGateway.bootstrap() });
@@ -175,8 +178,11 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
   });
 
   const openCreate = () => {
+    if (saveMutation.isPending) return;
     setEditing(null);
+    form.resetFields();
     form.setFieldsValue({
+      provider: "custom",
       name: "", baseUrl: "", apiKey: "", enabled: true, supportsWebSocket: false,
       compactAdaptEnabled: true, balanceQueryType: "none", modelCatalogJson: EMPTY_CATALOG, modelPricing: {},
       publicHeadersJson: "{}", secretHeadersJson: "{}"
@@ -188,6 +194,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
     const models = await window.codexGateway.listUpstreamModels(upstream.id);
     setEditing(upstream);
     form.setFieldsValue({
+      provider: upstream.provider || "custom",
       id: upstream.id,
       name: upstream.name,
       baseUrl: upstream.baseUrl,
@@ -257,6 +264,15 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
   };
 
   const save = async (values: FormValues) => {
+    if (saveMutation.isPending) return;
+    if (values.provider === "openai") {
+      await saveMutation.mutateAsync({
+        ...(editing ? { id: editing.id } : {}),
+        provider: "openai", name: values.name?.trim() || "OpenAI 官方",
+        ...(values.apiKey?.trim() ? { apiKey: values.apiKey.trim() } : {}), enabled: values.enabled
+      }).catch(() => undefined);
+      return;
+    }
     let publicHeaders: Record<string, string>;
     let secretHeaders: Record<string, string>;
     try {
@@ -270,6 +286,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
     }
     const input: SaveResponsesApiUpstreamInput = {
       ...(editing ? { id: editing.id } : {}),
+      provider: "custom",
       name: values.name,
       baseUrl: values.baseUrl,
       ...(values.apiKey ? { apiKey: values.apiKey } : {}),
@@ -299,7 +316,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
     {
       title: "渠道", key: "identity", width: 240,
       render: (_, upstream) => <Space orientation="vertical" size={2}>
-        <Space><Typography.Text strong>{upstream.name}</Typography.Text>{upstream.kind === "chatgpt_subscription_pool" && <Tag color="blue">内置</Tag>}</Space>
+        <Space><Typography.Text strong>{upstream.name}</Typography.Text>{upstream.kind === "chatgpt_subscription_pool" && <Tag color="blue">内置</Tag>}{upstream.provider === "openai" && <Tag color="green">OpenAI 官方</Tag>}</Space>
         <Typography.Text className="v1-mono" type="secondary" ellipsis={{ tooltip: upstream.baseUrl }}>{upstream.baseUrl}</Typography.Text>
       </Space>
     },
@@ -470,7 +487,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
 
     <Drawer
       title={editing ? "编辑模型渠道" : "新增模型渠道"}
-      width={760} open={drawerOpen} onClose={() => setDrawerOpen(false)}
+      width={760} open={drawerOpen} onClose={() => { if (!saveMutation.isPending) setDrawerOpen(false); }}
       extra={<Button type="primary" loading={saveMutation.isPending} onClick={() => form.submit()}>保存</Button>}
     >
       <Form
@@ -483,28 +500,41 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
         }}
         requiredMark="optional"
       >
+        <Form.Item name="provider" label="渠道类型">
+          <Select disabled={saveMutation.isPending} options={[
+            { value: "custom", label: "第三方 / 自定义" },
+            { value: "openai", label: "OpenAI 官方" }
+          ]} />
+        </Form.Item>
+        {isOfficial && <Alert showIcon type="info" style={{ marginBottom: 16 }}
+          title="填写 OpenAI API Key 即可使用，无需配置地址和模型 JSON。"
+          description="自动使用内置模型目录。启用后，同名模型请求优先使用官方 API；停用或删除后恢复使用订阅账号池。模型调用权限以 API Key 为准。"
+        />}
         <Typography.Title level={5}>连接信息</Typography.Title>
         <Flex gap={12} wrap>
-          <Form.Item name="name" label="渠道名称" rules={[{ required: true }]} style={{ flex: "1 1 260px" }}><Input maxLength={80} /></Form.Item>
-          <Form.Item name="baseUrl" label="API 地址" rules={[{ required: true }, { type: "url" }]} style={{ flex: "2 1 360px" }}><Input placeholder="https://api.example.com/v1" /></Form.Item>
+          <Form.Item name="name" label="渠道名称" rules={[{ required: !isOfficial }]} style={{ flex: "1 1 260px" }}><Input maxLength={80} placeholder={isOfficial ? "OpenAI 官方" : undefined} /></Form.Item>
+          {!isOfficial && <Form.Item name="baseUrl" label="API 地址" rules={[{ required: true }, { type: "url" }]} style={{ flex: "2 1 360px" }}><Input placeholder="https://api.example.com/v1" /></Form.Item>}
         </Flex>
         <Flex gap={12} wrap>
-          <Form.Item name="apiKey" label={editing ? "API Key（留空保持原值）" : "API Key"} style={{ flex: "1 1 320px" }}><Input.Password /></Form.Item>
-          <Form.Item name="balanceQueryType" label="余额查询方式" style={{ width: 220 }}>
+          <Form.Item name="apiKey" label={editing ? "API Key（留空保持原值）" : "API Key"}
+            rules={[{ required: isOfficial && !editing?.hasApiKey, whitespace: true, message: "请填写 OpenAI API Key" }]}
+            style={{ flex: "1 1 320px" }}><Input.Password /></Form.Item>
+          {!isOfficial && <Form.Item name="balanceQueryType" label="余额查询方式" style={{ width: 220 }}>
             <Select options={[{ value: "none", label: "不查询" }, { value: "deepseek", label: "DeepSeek" }]} />
-          </Form.Item>
+          </Form.Item>}
           <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item name="supportsWebSocket" label="支持 WS" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item
+          {!isOfficial && <Form.Item name="supportsWebSocket" label="支持 WS" valuePropName="checked"><Switch /></Form.Item>}
+          {!isOfficial && <Form.Item
             name="compactAdaptEnabled"
             label="适配远程压缩"
             valuePropName="checked"
             tooltip="通过生成交接摘要兼容远程压缩，支持 HTTP 和 WS。渠道原生支持远程压缩时可关闭。"
           >
             <Switch />
-          </Form.Item>
+          </Form.Item>}
         </Flex>
 
+        {!isOfficial && <>
         <Typography.Title level={5}>Codex 模型 JSON</Typography.Title>
         <Alert showIcon type="info" title="粘贴渠道提供的 Codex models.json，用于读取模型及其支持的能力。" style={{ marginBottom: 16 }} />
         <Form.Item name="modelCatalogJson" rules={[{ required: true }, { validator: validateCatalog }]}>
@@ -542,6 +572,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
             <Input.TextArea className="v1-code-editor v1-fixed-json-editor" spellCheck={false} />
           </Form.Item>
         </Flex>
+        </>}
       </Form>
     </Drawer>
 
@@ -565,6 +596,9 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
       onCancel={() => setPricingUpstream(null)} onOk={() => pricingForm.submit()}
     >
       <Typography.Paragraph type="secondary">币种：{currencyName(currency)}；单价按每百万 Token 计算。</Typography.Paragraph>
+      {pricingUpstream?.provider === "openai" && <Typography.Paragraph type="secondary">
+        默认沿用订阅账号池同名模型的费率。保存后使用此渠道单独设置的费率；未配置费率的模型无法估算成本。
+      </Typography.Paragraph>}
       <Form form={pricingForm} onFinish={(values) => pricingUpstream && pricingMutation.mutate({ id: pricingUpstream.id, pricing: values.pricing })}>
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           {pricingModels.map((model) => <div className="v1-model-price-row" key={model.modelId}>
@@ -605,7 +639,7 @@ const modelColumns = (currency: string): TableColumnsType<UpstreamModel> => [
   { title: "模型 ID", dataIndex: "modelId", width: 190, ellipsis: true, render: (value) => <Typography.Text className="v1-mono" copyable>{value}</Typography.Text> },
   { title: "显示名称", dataIndex: "displayName", width: 180, ellipsis: true },
   { title: "推理程度", width: 310, render: (_, model) => <Typography.Text className="v1-nowrap">{reasoningLevels(model.metadata).join(" / ") || "-"}</Typography.Text> },
-  { title: `费率（${currencyName(currency)}）`, width: 240, render: (_, model) => `${model.pricing.inputPerMillion.toFixed(4)} / ${model.pricing.cachedInputPerMillion.toFixed(4)} / ${model.pricing.outputPerMillion.toFixed(4)}` }
+  { title: `费率（${currencyName(currency)}）`, width: 240, render: (_, model) => model.pricingConfigured === false ? "未配置" : `${model.pricing.inputPerMillion.toFixed(4)} / ${model.pricing.cachedInputPerMillion.toFixed(4)} / ${model.pricing.outputPerMillion.toFixed(4)}` }
 ];
 
 function modelEntries(raw: string): Array<{ slug: string; metadata: Record<string, unknown> }> {

@@ -65,7 +65,15 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
       bundledSource = "cache";
     }
     const external = enabledExternalModels(options.db);
-    const nextSource = mergeCatalogs(bundled, external);
+    const officialEnabled = options.db.prepare(`
+      SELECT id FROM upstreams WHERE kind = 'responses_api' AND enabled = 1
+        AND json_extract(capabilities_json, '$.provider') = 'openai' LIMIT 1
+    `).get();
+    const effectiveBundled = officialEnabled ? {
+      ...bundled,
+      models: bundled.models.map((model) => ({ ...model, prefer_websockets: true, supports_websockets: true }))
+    } : bundled;
+    const nextSource = mergeCatalogs(effectiveBundled, external);
     const merged = applyModelManagement(nextSource, options.getModelManagement?.() || []);
     const files = [{ file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` }];
     if (remote && !override.enabled) files.push({ file: remoteCachePath, content: `${JSON.stringify(remote, null, 2)}\n` });
@@ -209,6 +217,7 @@ function enabledExternalModels(db: DatabaseSync): ModelEntry[] {
     FROM upstream_models
     JOIN upstreams ON upstreams.id = upstream_models.upstream_id
     WHERE upstreams.kind = 'responses_api' AND upstreams.enabled = 1
+      AND COALESCE(json_extract(upstreams.capabilities_json, '$.provider'), 'custom') <> 'openai'
       AND upstream_models.available = 1
     ORDER BY upstreams.created_at, upstream_models.model_id COLLATE NOCASE
   `).all() as Array<Record<string, unknown>>;
@@ -271,12 +280,39 @@ function syncBundledModels(db: DatabaseSync, models: ModelEntry[], source: Model
         timestamp
       );
     }
+    syncOfficialModels(db, models, timestamp);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
 }
+
+/** 官方渠道跟随内置目录更新能力和可用状态，保留已有模型费率。 */
+const syncOfficialModels = (db: DatabaseSync, models: ModelEntry[], timestamp: number): void => {
+  const upstreams = db.prepare(`
+    SELECT id FROM upstreams WHERE kind = 'responses_api'
+      AND json_extract(capabilities_json, '$.provider') = 'openai'
+  `).all() as Array<{ id: string }>;
+  const retire = db.prepare("UPDATE upstream_models SET available = 0, last_synced_at = ? WHERE upstream_id = ?");
+  const upsert = db.prepare(`
+    INSERT INTO upstream_models (
+      upstream_id, model_id, display_name, available, source, capabilities_json,
+      raw_metadata_json, pricing_json, last_seen_at, last_synced_at
+    ) VALUES (?, ?, ?, 1, 'openai_builtin', '{}', ?, '{}', ?, ?)
+    ON CONFLICT(upstream_id, model_id) DO UPDATE SET
+      display_name = excluded.display_name, available = 1, source = excluded.source,
+      raw_metadata_json = excluded.raw_metadata_json,
+      last_seen_at = excluded.last_seen_at, last_synced_at = excluded.last_synced_at
+  `);
+  for (const upstream of upstreams) {
+    retire.run(timestamp, upstream.id);
+    for (const model of models) {
+      upsert.run(upstream.id, model.slug, String(model.display_name || model.slug),
+        JSON.stringify({ ...model, prefer_websockets: true, supports_websockets: true }), timestamp, timestamp);
+    }
+  }
+};
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

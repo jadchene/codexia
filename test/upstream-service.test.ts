@@ -4,13 +4,71 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { createStore } from "../src/main/store.ts";
-import { createUpstreamService } from "../src/main/upstreams/upstream-service.ts";
+import { BUILTIN_SUBSCRIPTION_ID, createUpstreamService } from "../src/main/upstreams/upstream-service.ts";
+import { createCodexModelCatalogService } from "../src/main/codex-model-catalog.ts";
+import { buildResponsesRequestLog } from "../src/main/responses-request-log.ts";
 
 const codec = {
   encrypt: (value: string) => `enc:${Buffer.from(value).toString("base64")}`,
   decrypt: (value: string) => Buffer.from(value.replace(/^enc:/, ""), "base64").toString(),
   isEncrypted: (value: string) => value.startsWith("enc:")
 };
+
+test("official rates inherit existing model prices and repair legacy zero estimates with recorded tiers", () => {
+  const fixture = createFixture();
+  try {
+    const db = fixture.store.db;
+    const catalog = createCodexModelCatalogService({ db, dataDir: fixture.store.paths.dataDir,
+      runBundledModels: () => JSON.stringify({ models: [{ slug: "gpt-6.1-sol" }, { slug: "gpt-5.6-luna" }, { slug: "unpriced" }] }) });
+    catalog.refresh();
+    let service = createUpstreamService({ db, secretCodec: codec });
+    const sol = { inputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 10 };
+    const luna = { inputPerMillion: 0.2, cachedInputPerMillion: 0.02, outputPerMillion: 1.2 };
+    const zero = { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 };
+    service.saveModelPricing(BUILTIN_SUBSCRIPTION_ID, { "gpt-6.1-sol": sol, "gpt-5.6-luna": luna });
+    const official = service.save({ provider: "openai", apiKey: "fixture-key" });
+    assert.deepEqual(service.getModelPricing(official.id, "gpt-6.1-sol"), sol);
+    assert.equal(service.getModelPricing(official.id, "unpriced"), null);
+    const scenarios = [
+      { model: "gpt-6.1-sol", input: 144077, cached: 0, output: 35, multiplier: 2, expected: 0.577008 },
+      { model: "gpt-5.6-luna", input: 21643, cached: 0, output: 451, multiplier: 2, expected: 0.0097396 },
+      { model: "gpt-6.1-sol", input: 160822, cached: 149759, output: 395, multiplier: 2, expected: 0.0821038 },
+      { model: "gpt-6.1-sol", input: 144077, cached: 0, output: 35, multiplier: 0, expected: 0 }
+    ];
+    db.prepare("UPDATE upstream_models SET pricing_json = ? WHERE upstream_id = ?").run(JSON.stringify(zero), official.id);
+    for (const scenario of scenarios) {
+      fixture.store.addTokenLog({ upstream_id: official.id, client_model: scenario.model, upstream_model: scenario.model,
+        input_tokens: scenario.input, cached_input_tokens: scenario.cached, output_tokens: scenario.output,
+        estimated_cost: 0, cost_unit: "USD", service_tier_multiplier: scenario.multiplier });
+    }
+    fixture.store.addTokenLog({ upstream_id: official.id, client_model: "unpriced", input_tokens: 100, estimated_cost: 0, cost_unit: "USD" });
+    service = createUpstreamService({ db, secretCodec: codec });
+    const logs = db.prepare("SELECT estimated_cost FROM request_logs ORDER BY id").all();
+    scenarios.forEach((scenario, index) => assert.ok(Math.abs(logs[index].estimated_cost - scenario.expected) < 1e-10));
+    assert.equal(logs[4].estimated_cost, null);
+    const unknown = service.listModels(official.id).find((model) => model.modelId === "unpriced");
+    assert.equal(unknown?.pricingConfigured, false);
+    fixture.store.addTokenLog({ estimated_cost: null });
+    assert.equal(fixture.store.listTokenLogs().items[0]?.estimated_cost, null);
+    const log = buildResponsesRequestLog({ method: "POST", requestPath: "/v1/responses", upstreamPath: "/responses",
+      headers: {}, status: 200, durationMs: 1, settings: {}, requestedServiceTier: "priority",
+      usage: { input_tokens: 144077, cached_input_tokens: 0, output_tokens: 35, reasoning_output_tokens: 0, total_tokens: 144112 },
+      modelPricing: service.getModelPricing(official.id, "gpt-6.1-sol") });
+    assert.equal(log.estimated_cost, 0.577008);
+    service.save({ id: official.id, provider: "openai", name: "Renamed" });
+    service.saveModelPricing(BUILTIN_SUBSCRIPTION_ID, { "gpt-6.1-sol": { ...sol, inputPerMillion: 3 } });
+    assert.equal(service.getModelPricing(official.id, "gpt-6.1-sol")?.inputPerMillion, 3);
+    service.saveModelPricing(official.id, { "gpt-6.1-sol": zero });
+    service.save({ id: official.id, provider: "openai" });
+    catalog.refresh();
+    service = createUpstreamService({ db, secretCodec: codec });
+    assert.deepEqual(service.getModelPricing(official.id, "gpt-6.1-sol"), zero);
+    assert.equal(service.listModels(official.id).find((model) => model.modelId === "gpt-6.1-sol")?.pricingConfigured, true);
+    service.saveModelPricing(BUILTIN_SUBSCRIPTION_ID, { unpriced: sol });
+    assert.equal(service.getModelPricing(official.id, "unpriced")?.inputPerMillion, 2);
+    assert.equal(db.prepare("SELECT estimated_cost FROM request_logs WHERE client_model = 'unpriced'").get().estimated_cost, 0.0002);
+  } finally { fixture.close(); }
+});
 
 test("each model owns independent three-rate pricing and exact channel routing", () => {
   const fixture = createFixture();

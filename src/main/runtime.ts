@@ -523,7 +523,7 @@ function registerIpc() {
   handleIpc("upstreams:saveModelManagement", (_event, models) => saveModelManagement(models));
   handleIpc("upstreams:saveModelPricing", (_event, upstreamId, pricing) => {
     const result = upstreamService.saveModelPricing(upstreamId, pricing);
-    notifyDataChanged(["upstreams", "upstreamModels"]);
+    notifyDataChanged(["upstreams", "upstreamModels", "tokenLogs", "tokenSummary"]);
     return result;
   });
   handleIpc("upstreams:testConnection", async (_event, upstreamId) => {

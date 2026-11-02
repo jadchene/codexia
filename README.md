@@ -32,7 +32,9 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts and thi
 
 Sign in to a subscription account through the browser or import it from Codex. Codexia supports quota refresh, account enablement, reset-credit use, and account-pool routing.
 
-Configure each third-party channel with an API address, API key, and model catalog, then preview and test it. Model IDs must be unique across channels. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
+Select **OpenAI 官方** (Official OpenAI) when adding an official OpenAI channel and enter only your API key. No API address or model JSON is needed. It automatically uses the built-in model catalog. While enabled, requests for those model IDs use the official API; disabling or deleting the channel restores subscription-pool routing. Model access depends on your API key. Cost estimates inherit rates from the subscription pool's matching models by default. Override them in the official channel's model pricing dialog if needed. Models without configured rates show no estimated amount.
+
+Configure each third-party channel with an API address, API key, and model catalog, then preview and test it. Third-party model IDs must be unique across channels and the built-in catalog. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
 
 The account-pool catalog updates at startup and on manual refresh, with cached and local Codex catalogs as fallbacks. Use the Codex Bundled override for a custom catalog.
 

@@ -38,6 +38,8 @@ interface UpstreamBalance {
 }
 
 export interface UpstreamSummary {
+  /** API 渠道类型；旧配置默认为自定义渠道。 */
+  provider?: "custom" | "openai";
   id: string;
   name: string;
   kind: UpstreamKind;
@@ -60,18 +62,20 @@ export interface UpstreamSummary {
 }
 
 export interface SaveResponsesApiUpstreamInput {
+  /** 官方渠道自动填充连接信息并复用内置目录。 */
+  provider?: "custom" | "openai";
   id?: string;
-  name: string;
-  baseUrl: string;
+  name?: string;
+  baseUrl?: string;
   apiKey?: string;
-  enabled: boolean;
-  supportsWebSocket: boolean;
-  compactAdaptEnabled: boolean;
-  balanceQueryType: BalanceQueryType;
+  enabled?: boolean;
+  supportsWebSocket?: boolean;
+  compactAdaptEnabled?: boolean;
+  balanceQueryType?: BalanceQueryType;
   publicHeaders?: Record<string, string>;
   secretHeaders?: Record<string, string>;
-  modelCatalogJson: string;
-  modelPricing: Record<string, ModelPricing>;
+  modelCatalogJson?: string;
+  modelPricing?: Record<string, ModelPricing>;
 }
 
 export interface UpstreamModel {
@@ -81,6 +85,8 @@ export interface UpstreamModel {
   source: string;
   metadata: Record<string, unknown>;
   pricing: ModelPricing;
+  /** 未配置时不能把缺少的费率当作免费。 */
+  pricingConfigured?: boolean;
   lastSeenAt: number | null;
   lastSyncedAt: number | null;
 }

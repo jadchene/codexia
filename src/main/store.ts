@@ -917,7 +917,7 @@ function addTokenLog(db: Db, entry: Row): void {
     fallback_from: entry.fallback_from || null,
     fallback_reason: entry.fallback_reason || null,
     credential_ref: entry.credential_ref || null,
-    estimated_cost: Number.isFinite(Number(entry.estimated_cost)) ? Number(entry.estimated_cost) : null,
+    estimated_cost: entry.estimated_cost != null && Number.isFinite(Number(entry.estimated_cost)) ? Number(entry.estimated_cost) : null,
     cost_unit: entry.cost_unit || null,
     requested_service_tier: normalizeServiceTier(entry.requested_service_tier),
     service_tier: normalizeServiceTier(entry.service_tier),

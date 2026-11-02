@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { createGateway } from "../src/main/gateway.ts";
+import { createStore } from "../src/main/store.ts";
+import { createUpstreamService } from "../src/main/upstreams/upstream-service.ts";
+import { createCodexModelCatalogService } from "../src/main/codex-model-catalog.ts";
 
 test("畸形 HTTP 和 WebSocket 请求返回 400 且不影响后续请求", async () => {
   const harness = await startHarness((_req, res) => res.end("{}"));
@@ -967,6 +970,79 @@ test("HTTP gateway routes an external model directly to its owning API channel",
   } finally {
     await harness.close();
     await closeServer(apiUpstream);
+  }
+});
+
+test("official channel routes a shared model with its API key and disabling it restores subscription requests", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-official-routing-"));
+  const codec = { encrypt: (value: string) => value, decrypt: (value: string) => value, isEncrypted: () => true };
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  const catalog = createCodexModelCatalogService({ db: store.db, dataDir: directory,
+    runBundledModels: () => JSON.stringify({ models: [{ slug: "shared-official-model" }] }) });
+  catalog.refresh();
+  const service = createUpstreamService({ db: store.db, secretCodec: codec });
+  service.saveModelPricing("builtin-chatgpt-subscription-pool", {
+    "shared-official-model": { inputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 10 }
+  });
+  const official = service.save({ provider: "openai", apiKey: "official-test-key" });
+  const apiRequests = [];
+  const api = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    apiRequests.push({ url: req.url, headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString()) });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"id":"official-response","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}');
+  });
+  await listen(api);
+  let subscriptionCalls = 0;
+  const harness = await startHarness((_req, res) => {
+    subscriptionCalls += 1;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"id":"subscription-response"}');
+  }, {}, { upstreamService: {
+    ...service,
+    getRuntime: (id: string) => {
+      const runtime = service.getRuntime(id);
+      return runtime.kind === "chatgpt_subscription_pool"
+        ? { ...runtime, baseUrl: harness.store.getSettings().upstream_base_url } : runtime;
+    },
+    findRuntimeByModel: (model: string) => {
+      const runtime = service.findRuntimeByModel(model);
+      if (!runtime) return null;
+      assert.equal(runtime.baseUrl, "https://api.openai.com/v1");
+      // 仅在测试中将官方网络目的地替换为本机模拟服务。
+      return { ...runtime, baseUrl: `http://127.0.0.1:${api.address().port}/v1` };
+    }
+  } });
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: { ...codexHeaders("official-session", "official-turn"), "chatgpt-account-id": "subscription-only" },
+      body: JSON.stringify({ model: "shared-official-model", input: "hello" })
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, "official-response");
+    assert.equal(subscriptionCalls, 0);
+    assert.equal(apiRequests[0].url, "/v1/responses");
+    assert.equal(apiRequests[0].headers.authorization, "Bearer official-test-key");
+    assert.equal(apiRequests[0].headers["chatgpt-account-id"], undefined);
+    assert.equal(apiRequests[0].body.model, "shared-official-model");
+    assert.equal(harness.tokenLogs.at(-1).upstream_id, official.id);
+    assert.equal(harness.tokenLogs.at(-1).estimated_cost, 0.000014);
+    service.save({ id: official.id, provider: "openai", enabled: false });
+    catalog.refresh();
+    const fallback = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("pool-session", "pool-turn"),
+      body: JSON.stringify({ model: "shared-official-model", input: "hello" })
+    });
+    assert.equal(fallback.status, 200);
+    assert.equal((await fallback.json()).id, "subscription-response");
+    assert.equal(subscriptionCalls, 1);
+    assert.equal(apiRequests.length, 1);
+  } finally {
+    await harness.close();
+    await closeServer(api);
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 

@@ -4,6 +4,16 @@ import { saveResponsesApiUpstreamSchema } from "../src/shared/schemas/upstreams"
 const modelCatalogJson = JSON.stringify({ models: [{ slug: "provider-model", display_name: "Provider Model" }] });
 
 describe("saveResponsesApiUpstreamSchema", () => {
+  it("accepts an official API key without URL, name, catalog or pricing", () => {
+    const value = saveResponsesApiUpstreamSchema.parse({ provider: "openai", apiKey: "official-key" });
+    expect(value.baseUrl).toBe("https://api.openai.com/v1");
+    expect(value.name).toBe("OpenAI 官方");
+    expect(value.supportsWebSocket).toBe(true);
+    expect(value.compactAdaptEnabled).toBe(false);
+    expect(value.enabled).toBe(true);
+    expect(saveResponsesApiUpstreamSchema.safeParse({ provider: "custom", apiKey: "key" }).success).toBe(false);
+  });
+
   it("accepts required model JSON and three per-model prices", () => {
     const value = saveResponsesApiUpstreamSchema.parse({
       name: "Primary API",

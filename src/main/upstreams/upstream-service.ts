@@ -93,13 +93,15 @@ function listModels(db: DatabaseSync, upstreamId: string): UpstreamModel[] {
     ORDER BY available DESC, model_id COLLATE NOCASE ASC
   `).all(upstreamId).map((value) => {
     const row = value as SqlRow;
+    const pricing = getModelPricing(db, upstreamId, String(row.model_id || ""));
     return {
       modelId: String(row.model_id || ""),
       displayName: String(row.display_name || row.model_id || ""),
       available: Boolean(row.available),
       source: String(row.source || ""),
       metadata: parseJsonObject(row.raw_metadata_json),
-      pricing: normalizePricing(parseJsonObject(row.pricing_json)),
+      pricing: pricing || normalizePricing(null),
+      pricingConfigured: pricing !== null,
       lastSeenAt: numberOrNull(row.last_seen_at),
       lastSyncedAt: numberOrNull(row.last_synced_at)
     };
@@ -107,7 +109,7 @@ function listModels(db: DatabaseSync, upstreamId: string): UpstreamModel[] {
 }
 
 function listGatewayModels(db: DatabaseSync) {
-  return db.prepare(`
+  const models = db.prepare(`
     SELECT upstream_models.model_id, upstream_models.display_name, upstreams.id AS upstream_id,
       upstreams.name AS upstream_name
     FROM upstream_models JOIN upstreams ON upstreams.id = upstream_models.upstream_id
@@ -123,6 +125,8 @@ function listGatewayModels(db: DatabaseSync) {
       owned_by: String(value.upstream_name || value.upstream_id || "")
     };
   });
+  // 官方 API 与订阅池共用 ID，启用官方渠道时只展示实际接收请求的渠道。
+  return [...new Map(models.map((model) => [model.id, model])).values()];
 }
 
 function listGatewayModelOptions(db: DatabaseSync): GatewayModelSummary[] {
@@ -162,11 +166,31 @@ function findRuntimeByModel(db: DatabaseSync, secretCodec: SecretCodec, rawModel
   return rows[0] ? runtimeFromRow(rows[0], secretCodec) : null;
 }
 
-function getModelPricing(db: DatabaseSync, upstreamId: string, modelId: string): ModelPricing {
-  const row = db.prepare("SELECT pricing_json FROM upstream_models WHERE upstream_id = ? AND model_id = ?")
+function getModelPricing(db: DatabaseSync, upstreamId: string, modelId: string): ModelPricing | null {
+  const row = db.prepare(`
+    SELECT upstream_models.pricing_json, upstreams.capabilities_json
+    FROM upstream_models JOIN upstreams ON upstreams.id = upstream_models.upstream_id
+    WHERE upstream_id = ? AND model_id = ?
+  `)
     .get(upstreamId, modelId) as SqlRow | undefined;
-  return normalizePricing(parseJsonObject(row?.pricing_json));
+  const stored = parseJsonObject(row?.pricing_json);
+  const official = parseJsonObject(row?.capabilities_json).provider === "openai";
+  // 1.9.6 的官方渠道自动写入了全零费率；用户明确保存的零费率仍然有效。
+  const configured = hasConfiguredPricing(stored);
+  if (configured && (!official || stored.source === "manual" || Object.values(normalizePricing(stored)).some((rate) => rate > 0))) {
+    return normalizePricing(stored);
+  }
+  if (!official) return null;
+  const builtin = db.prepare("SELECT pricing_json FROM upstream_models WHERE upstream_id = ? AND model_id = ?")
+    .get(BUILTIN_SUBSCRIPTION_ID, modelId) as SqlRow | undefined;
+  const inherited = parseJsonObject(builtin?.pricing_json);
+  return hasConfiguredPricing(inherited) ? normalizePricing(inherited) : null;
 }
+
+/** 只有完整配置了三项费率，才能把估算结果作为已知金额展示。 */
+const hasConfiguredPricing = (value: Record<string, unknown>): boolean =>
+  ["inputPerMillion", "cachedInputPerMillion", "outputPerMillion"].every((key) =>
+    typeof value[key] === "number" && Number.isFinite(value[key]) && Number(value[key]) >= 0);
 
 function saveModelPricing(db: DatabaseSync, upstreamId: string, pricing: Record<string, ModelPricing>): UpstreamModel[] {
   requireUpstream(db, upstreamId);
@@ -174,7 +198,7 @@ function saveModelPricing(db: DatabaseSync, upstreamId: string, pricing: Record<
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const [modelId, value] of Object.entries(pricing || {})) {
-      const result = update.run(JSON.stringify(normalizePricing(value)), upstreamId, modelId);
+      const result = update.run(JSON.stringify({ ...normalizePricing(value), source: "manual" }), upstreamId, modelId);
       if (Number(result.changes || 0) === 0) throw upstreamError("MODEL_NOT_FOUND", `模型不存在：${modelId}`);
     }
     db.exec("COMMIT");
@@ -190,20 +214,32 @@ function backfillMissingEstimatedCosts(db: DatabaseSync, upstreamId?: string): v
   const currency = String((db.prepare("SELECT value FROM settings WHERE key = ?").get("billing_currency") as SqlRow | undefined)?.value || "USD").toUpperCase();
   const rows = db.prepare(`
     SELECT request_logs.id, request_logs.input_tokens, request_logs.cached_input_tokens,
-      request_logs.output_tokens, request_logs.service_tier_multiplier, upstream_models.pricing_json
+      request_logs.output_tokens, request_logs.service_tier_multiplier,
+      request_logs.upstream_id, request_logs.upstream_model, request_logs.client_model,
+      request_logs.estimated_cost, upstreams.capabilities_json
     FROM request_logs
     JOIN upstream_models ON upstream_models.upstream_id = request_logs.upstream_id
       AND upstream_models.model_id = COALESCE(NULLIF(request_logs.upstream_model, ''), request_logs.client_model)
-    WHERE request_logs.estimated_cost IS NULL
-      AND (? IS NULL OR request_logs.upstream_id = ?)
-  `).all(upstreamId || null, upstreamId || null) as SqlRow[];
+    JOIN upstreams ON upstreams.id = request_logs.upstream_id
+    WHERE (request_logs.estimated_cost IS NULL OR (
+      request_logs.estimated_cost = 0 AND json_extract(upstreams.capabilities_json, '$.provider') = 'openai'
+    ))
+      AND (? IS NULL OR request_logs.upstream_id = ? OR (
+        ? = 'builtin-chatgpt-subscription-pool' AND json_extract(upstreams.capabilities_json, '$.provider') = 'openai'
+      ))
+  `).all(upstreamId || null, upstreamId || null, upstreamId || null) as SqlRow[];
   if (rows.length === 0) return;
-  const update = db.prepare("UPDATE request_logs SET estimated_cost = ?, cost_unit = ? WHERE id = ? AND estimated_cost IS NULL");
+  const update = db.prepare("UPDATE request_logs SET estimated_cost = ?, cost_unit = ? WHERE id = ? AND (estimated_cost IS NULL OR estimated_cost = 0)");
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const row of rows) {
-      const pricing = normalizePricing(parseJsonObject(row.pricing_json));
-      if (pricing.inputPerMillion <= 0 && pricing.cachedInputPerMillion <= 0 && pricing.outputPerMillion <= 0) continue;
+      const pricing = getModelPricing(db, String(row.upstream_id), String(row.upstream_model || row.client_model || ""));
+      if (!pricing) {
+        if (row.estimated_cost === 0 && parseJsonObject(row.capabilities_json).provider === "openai") {
+          update.run(null, null, Number(row.id));
+        }
+        continue;
+      }
       const estimated = estimateUpstreamCost({
         input_tokens: Number(row.input_tokens || 0),
         cached_input_tokens: Number(row.cached_input_tokens || 0),
@@ -241,7 +277,12 @@ function runtimeFromRow(row: SqlRow, secretCodec: SecretCodec): RuntimeUpstream 
 
 function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveResponsesApiUpstreamInput): UpstreamSummary {
   const input = normalizeInput(raw);
-  const models = parseModelCatalog(input.modelCatalogJson).map((model) => ({
+  const catalogModels = input.provider === "openai"
+    ? listModels(db, BUILTIN_SUBSCRIPTION_ID).filter((model) => model.available).map((model) => ({
+      slug: model.modelId, displayName: model.displayName, metadata: model.metadata
+    }))
+    : parseModelCatalog(input.modelCatalogJson);
+  const models = catalogModels.map((model) => ({
     ...model,
     metadata: {
       ...model.metadata,
@@ -254,6 +295,15 @@ function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveRespo
     throw upstreamError("BUILTIN_UPSTREAM_READ_ONLY", "内置订阅账号池不能通过 API 上游表单修改。");
   }
   const retainsApiKey = Boolean(input.apiKey || existing?.api_key_encrypted);
+  if (input.provider === "openai") {
+    if (!retainsApiKey) throw upstreamError("API_KEY_REQUIRED", "请填写 OpenAI API Key。");
+    if (models.length === 0) throw upstreamError("MODEL_CATALOG_EMPTY", "内置模型目录为空，请先刷新账号池模型。");
+    const other = db.prepare("SELECT id, capabilities_json FROM upstreams WHERE kind = 'responses_api' AND id <> ?")
+      .all(String(existing?.id || "")) as SqlRow[];
+    if (other.some((row) => parseJsonObject(row.capabilities_json).provider === "openai")) {
+      throw upstreamError("OPENAI_CHANNEL_EXISTS", "OpenAI 官方渠道已存在，请编辑已有渠道。");
+    }
+  }
   const retainsSecretHeaders = input.secretHeaders === undefined
     ? Boolean(existing?.custom_headers_encrypted_json)
     : Object.keys(input.secretHeaders).length > 0;
@@ -264,7 +314,10 @@ function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveRespo
     );
   }
   const id = String(existing?.id || randomUUID());
-  assertUniqueModelOwners(db, id, models.map((model) => model.slug));
+  assertUniqueModelOwners(db, id, models.map((model) => model.slug), input.provider === "openai");
+  const previousPricing = existing && input.provider === "openai"
+    ? Object.fromEntries((db.prepare("SELECT model_id, pricing_json FROM upstream_models WHERE upstream_id = ?").all(id) as SqlRow[])
+      .map((model) => [String(model.model_id), parseJsonObject(model.pricing_json)])) : {};
   const timestamp = now();
   const encryptedApiKey = input.apiKey
     ? secretCodec.encrypt(input.apiKey)
@@ -275,7 +328,7 @@ function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveRespo
       ? secretCodec.encrypt(JSON.stringify(input.secretHeaders))
       : null;
   const previousState = parseJsonObject(existing?.capabilities_json);
-  const stateJson = JSON.stringify({ requestHeaders: input.publicHeaders, health: previousState.health || null });
+  const stateJson = JSON.stringify({ provider: input.provider, requestHeaders: input.publicHeaders, health: previousState.health || null });
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(`
@@ -308,7 +361,9 @@ function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveRespo
     for (const model of models) {
       insert.run(
         id, model.slug, model.displayName, JSON.stringify(model.metadata),
-        JSON.stringify(normalizePricing(input.modelPricing[model.slug])), timestamp, timestamp
+        JSON.stringify(input.modelPricing[model.slug]
+          ? { ...normalizePricing(input.modelPricing[model.slug]), source: "manual" }
+          : input.provider === "openai" ? previousPricing[model.slug] || {} : normalizePricing(null)), timestamp, timestamp
       );
     }
     db.exec("COMMIT");
@@ -462,6 +517,7 @@ function publicUpstream(db: DatabaseSync, row: SqlRow, secretCodec: SecretCodec)
   const storedBalance = parseStoredBalance(row);
   return {
     id: String(row.id || ""), name: String(row.name || ""),
+    provider: state.provider === "openai" ? "openai" : "custom",
     kind: builtin ? "chatgpt_subscription_pool" : "responses_api",
     enabled: Boolean(row.enabled), baseUrl: String(row.base_url || ""),
     hasApiKey: Boolean(encryptedKey),
@@ -555,31 +611,33 @@ function parseModelCatalog(raw: string): CatalogModel[] {
   });
 }
 
-function assertUniqueModelOwners(db: DatabaseSync, upstreamId: string, slugs: string[]): void {
+function assertUniqueModelOwners(db: DatabaseSync, upstreamId: string, slugs: string[], allowSubscription = false): void {
   const find = db.prepare(`
     SELECT upstreams.name FROM upstream_models
     JOIN upstreams ON upstreams.id = upstream_models.upstream_id
     WHERE upstream_models.model_id = ? AND upstream_models.available = 1
-      AND upstream_models.upstream_id <> ? LIMIT 1
+      AND upstream_models.upstream_id <> ?
+      AND (? = 0 OR upstreams.kind <> 'chatgpt_subscription_pool') LIMIT 1
   `);
   for (const slug of slugs) {
-    const owner = find.get(slug, upstreamId) as SqlRow | undefined;
+    const owner = find.get(slug, upstreamId, allowSubscription ? 1 : 0) as SqlRow | undefined;
     if (owner) throw upstreamError("MODEL_SLUG_CONFLICT", `模型 ${slug} 已属于上游“${owner.name}”，模型 ID 必须全局唯一。`);
   }
 }
 
 function normalizeInput(input: SaveResponsesApiUpstreamInput) {
-  const name = String(input.name || "").trim();
+  const official = input.provider === "openai";
+  const name = String(input.name || (official ? "OpenAI 官方" : "")).trim();
   if (!name || name.length > 80) throw upstreamError("INVALID_UPSTREAM", "上游名称长度必须为 1-80 个字符。" );
   return {
-    id: String(input.id || "").trim() || null, name,
-    baseUrl: normalizeHttpUrl(input.baseUrl, "上游 Base URL"),
+    id: String(input.id || "").trim() || null, name, provider: official ? "openai" : "custom",
+    baseUrl: official ? "https://api.openai.com/v1" : normalizeHttpUrl(input.baseUrl, "上游 Base URL"),
     apiKey: String(input.apiKey || "").trim(), enabled: input.enabled !== false,
-    supportsWebSocket: Boolean(input.supportsWebSocket),
-    compactAdaptEnabled: input.compactAdaptEnabled !== false,
-    balanceQueryType: balanceQueryType(input.balanceQueryType),
-    publicHeaders: normalizeHeaderMap(input.publicHeaders, "公开请求头", false),
-    secretHeaders: input.secretHeaders === undefined ? undefined : normalizeHeaderMap(input.secretHeaders, "机密请求头"),
+    supportsWebSocket: official || Boolean(input.supportsWebSocket),
+    compactAdaptEnabled: !official && input.compactAdaptEnabled !== false,
+    balanceQueryType: official ? "none" as const : balanceQueryType(input.balanceQueryType),
+    publicHeaders: official ? {} : normalizeHeaderMap(input.publicHeaders, "公开请求头", false),
+    secretHeaders: official ? {} : input.secretHeaders === undefined ? undefined : normalizeHeaderMap(input.secretHeaders, "机密请求头"),
     modelCatalogJson: String(input.modelCatalogJson || "").trim(),
     modelPricing: isObject(input.modelPricing) ? input.modelPricing as Record<string, ModelPricing> : {}
   };

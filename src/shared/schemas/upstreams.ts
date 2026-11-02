@@ -23,7 +23,23 @@ const modelPricing = z.object({
   outputPerMillion: z.number().finite().nonnegative().max(1_000_000)
 }).strict();
 
-export const saveResponsesApiUpstreamSchema = z.object({
+export const saveResponsesApiUpstreamSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !("provider" in value) || value.provider !== "openai") return value;
+  return {
+    ...value,
+    name: ("name" in value && value.name) || "OpenAI 官方",
+    baseUrl: "https://api.openai.com/v1",
+    enabled: "enabled" in value ? value.enabled : true,
+    supportsWebSocket: true,
+    compactAdaptEnabled: false,
+    balanceQueryType: "none",
+    modelCatalogJson: '{"models":[]}',
+    modelPricing: ("modelPricing" in value && value.modelPricing) || {},
+    publicHeaders: {},
+    secretHeaders: {}
+  };
+}, z.object({
+  provider: z.enum(["custom", "openai"]).optional(),
   id: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).max(80),
   baseUrl: httpUrl,
@@ -45,4 +61,4 @@ export const saveResponsesApiUpstreamSchema = z.object({
       message: "携带 API Key 或机密请求头的远程上游必须使用 HTTPS；HTTP 仅允许回环地址。"
     });
   }
-});
+}));

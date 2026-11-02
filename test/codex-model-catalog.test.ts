@@ -10,6 +10,61 @@ import { BUILTIN_SUBSCRIPTION_ID, createUpstreamService } from "../src/main/upst
 const codec = { encrypt: (value: string) => value, decrypt: (value: string) => value, isEncrypted: () => true };
 const bundled = JSON.stringify({ models: [{ slug: "gpt-built-in", display_name: "GPT Built In", support_shell_tool: true }] });
 
+test("official API shares built-in IDs, follows directory updates and restores pool routing when disabled", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-official-models-"));
+  const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    let current = bundled;
+    const catalog = createCodexModelCatalogService({ db: store.db, dataDir: directory, runBundledModels: () => current });
+    catalog.refresh();
+    const upstreams = createUpstreamService({ db: store.db, secretCodec: codec });
+    assert.throws(() => upstreams.save({ provider: "openai" }), /API Key/);
+    const saved = upstreams.save({ provider: "openai", apiKey: "official-key" });
+    assert.equal(saved.provider, "openai");
+    assert.equal(saved.baseUrl, "https://api.openai.com/v1");
+    assert.equal(saved.compactAdaptEnabled, false);
+    assert.equal(saved.supportsWebSocket, true);
+    assert.equal(saved.modelCount, 1);
+    assert.equal("apiKey" in saved, false);
+    assert.throws(() => upstreams.save({ provider: "openai", apiKey: "second-key" }), /官方渠道已存在/);
+    assert.equal(upstreams.findRuntimeByModel("gpt-built-in")?.id, saved.id);
+    const result = catalog.refresh();
+    assert.equal(result.totalCount, 1);
+    assert.equal(JSON.parse(fs.readFileSync(result.path, "utf8")).models[0].supports_websockets, true);
+    assert.equal(upstreams.listGatewayModels().length, 1);
+    assert.equal(upstreams.listGatewayModels()[0]?.owned_by, "OpenAI 官方");
+    const price = { inputPerMillion: 2, cachedInputPerMillion: 1, outputPerMillion: 4 };
+    upstreams.saveModelPricing(saved.id, { "gpt-built-in": price });
+    upstreams.save({ id: saved.id, provider: "openai", name: "官方 Key" });
+    assert.equal(upstreams.getRuntime(saved.id).apiKey, "official-key");
+    assert.deepEqual(upstreams.getModelPricing(saved.id, "gpt-built-in"), price);
+    current = JSON.stringify({ models: [
+      { slug: "gpt-built-in", context_window: 400000 }, { slug: "new-official-model" }
+    ] });
+    catalog.refreshBundled();
+    assert.equal(upstreams.findRuntimeByModel("new-official-model")?.id, saved.id);
+    assert.equal(upstreams.listModels(saved.id).find((model) => model.modelId === "gpt-built-in")?.metadata.context_window, 400000);
+    assert.deepEqual(upstreams.getModelPricing(saved.id, "gpt-built-in"), price);
+    current = JSON.stringify({ models: [{ slug: "gpt-built-in" }] });
+    catalog.refreshBundled();
+    assert.equal(upstreams.findRuntimeByModel("new-official-model"), null);
+    upstreams.save({ id: saved.id, provider: "openai", enabled: false });
+    catalog.refresh();
+    assert.equal(upstreams.findRuntimeByModel("gpt-built-in"), null);
+    assert.equal(upstreams.listGatewayModels().length, 1);
+    assert.equal(upstreams.listGatewayModels()[0]?.owned_by, upstreams.list().find((item) => item.id === BUILTIN_SUBSCRIPTION_ID)?.name);
+    upstreams.save({ id: saved.id, provider: "openai", enabled: true });
+    catalog.refresh();
+    assert.equal(upstreams.findRuntimeByModel("gpt-built-in")?.id, saved.id);
+    upstreams.delete(saved.id);
+    catalog.refresh();
+    assert.equal(upstreams.findRuntimeByModel("gpt-built-in"), null);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("remote catalog takes precedence, persists across restart, and preserves external models and display settings", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-models-"));
   const store = createStore({ secretCodec: codec, dataDir: directory, dbPath: path.join(directory, "test.sqlite") });

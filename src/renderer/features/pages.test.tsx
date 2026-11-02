@@ -291,6 +291,28 @@ describe("Ant Design pages", () => {
     expect(screen.queryByText("模型映射")).toBeNull();
   });
 
+  it("saves an official channel with only an API key and no URL or model JSON", async () => {
+    const user = userEvent.setup();
+    window.codexGateway.saveUpstream = vi.fn().mockResolvedValue(createUpstream("official", "OpenAI 官方", "responses_api"));
+    renderWithQueries(<UpstreamsPage />);
+    await user.click(screen.getByRole("button", { name: /新增渠道/ }));
+    await user.click(await screen.findByRole("combobox", { name: /渠道类型/ }));
+    await user.click(screen.getByText("OpenAI 官方"));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "API 地址" })).toBeNull());
+    expect(screen.queryByText("Codex 模型 JSON")).toBeNull();
+    expect(screen.queryByText("高级请求头")).toBeNull();
+    expect(screen.getByText(/同名模型请求优先使用官方 API/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /保\s*存/ }));
+    expect(await screen.findByText("请填写 OpenAI API Key")).toBeTruthy();
+    expect(window.codexGateway.saveUpstream).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText("API Key"), "official-key");
+    await user.click(screen.getByRole("button", { name: /保\s*存/ }));
+    await waitFor(() => expect(window.codexGateway.saveUpstream).toHaveBeenCalledOnce());
+    expect(window.codexGateway.saveUpstream).toHaveBeenCalledWith({
+      provider: "openai", name: "OpenAI 官方", apiKey: "official-key", enabled: true
+    });
+  });
+
   it("validates model and header JSON before saving an API upstream", async () => {
     const user = userEvent.setup();
     renderWithQueries(<UpstreamsPage />);

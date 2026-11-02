@@ -27,6 +27,14 @@ const screenshotArgument = process.argv.find((argument) => argument.startsWith("
 const screenshotPath = screenshotArgument ? path.resolve(projectRoot, screenshotArgument.slice("--screenshot=".length)) : null;
 
 if (process.platform !== "win32") throw new Error("The unpacked smoke test currently supports Windows only.");
+// 只给即将删除的测试副本添加沙箱读取权限，避免继承临时目录 ACL 后被 Electron 拒绝启动。
+const sandboxReadAccess = spawnSync("icacls.exe", [unpackedRoot, "/grant", "*S-1-15-2-1:(OI)(CI)(RX)"], {
+  windowsHide: true,
+  encoding: "utf8"
+});
+if (sandboxReadAccess.status !== 0) {
+  throw new Error(`Cannot grant sandbox read access to the isolated test copy: ${sandboxReadAccess.stderr || sandboxReadAccess.stdout}`);
+}
 const debuggingPort = await freePort();
 const child = spawn(executable, [
   "--no-sandbox",
@@ -57,10 +65,37 @@ try {
   }
   inspection.pageCount = await inspectLazyPages(target.webSocketDebuggerUrl, child);
   inspection.quotaNormalization = await inspectQuotaNormalization(target.webSocketDebuggerUrl);
+  inspection.officialPricing = await inspectOfficialPricing(target.webSocketDebuggerUrl);
   inspection.sessionWakeupCrud = await inspectSessionWakeupCrud(target.webSocketDebuggerUrl);
   inspection.scheduledTaskCrud = await inspectScheduledTaskCrud(target.webSocketDebuggerUrl);
 } finally {
   stopProcessTree(child.pid);
+}
+
+/** 检查官方渠道在真实打包 IPC 中继承费率，并保留用户明确设置的零费率。 */
+async function inspectOfficialPricing(webSocketDebuggerUrl) {
+  return evaluate(webSocketDebuggerUrl, `(async () => {
+    const api = window.codexGateway;
+    const poolId = 'builtin-chatgpt-subscription-pool';
+    const model = (await api.listUpstreamModels(poolId)).find(item => item.available);
+    if (!model) throw new Error('内置模型目录为空，无法验证官方费率');
+    const rates = { inputPerMillion: 2, cachedInputPerMillion: 0.1, outputPerMillion: 10 };
+    await api.saveUpstreamModelPricing(poolId, { [model.modelId]: rates });
+    let channel;
+    try {
+      channel = await api.saveUpstream({ provider: 'openai', apiKey: 'packaged-test-key' });
+      const inherited = (await api.listUpstreamModels(channel.id)).find(item => item.modelId === model.modelId);
+      if (!inherited?.pricingConfigured || JSON.stringify(inherited.pricing) !== JSON.stringify(rates)) throw new Error('官方渠道未继承费率');
+      await api.saveUpstreamModelPricing(channel.id, { [model.modelId]: { inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0 } });
+      await api.saveUpstream({ id: channel.id, provider: 'openai', name: '打包费率检查' });
+      const saved = (await api.listUpstreamModels(channel.id)).find(item => item.modelId === model.modelId);
+      if (!saved?.pricingConfigured || saved.pricing.inputPerMillion !== 0) throw new Error('官方渠道没有保留手动零费率');
+    } finally {
+      if (channel) await api.deleteUpstream(channel.id);
+      await api.saveUpstreamModelPricing(poolId, { [model.modelId]: model.pricing });
+    }
+    return true;
+  })()`);
 }
 
 /** 检查真实安装包中的额度配置、表单默认值及保存回读。 */
