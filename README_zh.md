@@ -42,7 +42,7 @@ Codexia 是一个 Windows 桌面应用，用于在 Codex 中集中使用 ChatGPT
 
 ### 接入模式与服务
 
-API 模式汇集订阅和第三方模型；账号模式使用单个订阅账号，可通过 API 代理记录调用分析。
+API 模式汇集订阅和第三方模型；账号模式使用单个订阅账号，可通过 API 代理记录调用分析。账号模式的模型列表沿用账号池的列表覆盖、名称和显示设置，不包含 API 渠道模型，也不受账号池渠道启停影响。升级后在账号模式点击“重新应用到 Codex”即可写入独立模型目录配置。
 
 “服务管理”用于启动、停止或重启 API 服务和可选的 [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway)。MCP 服务首次启动前需要配置程序路径和监听地址。设置 `CODEX_HOME` 后，Codexia 会使用该目录中的 Codex 配置；未设置时使用当前用户的 `.codex`。
 

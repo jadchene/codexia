@@ -113,7 +113,13 @@ export function applyAccountMode(account: AccountRecord | null | undefined, opti
     last_refresh: String(account.last_refresh || toIso(account.updated_at) || new Date().toISOString())
   });
   const currentConfig = readText(configPath(options));
-  const accountConfig = withoutGatewayProvider(currentConfig);
+  let accountConfig = withoutGatewayProvider(currentConfig);
+  if (options.modelCatalogPath) {
+    accountConfig = insertProviderBlockIntoConfig(
+      accountConfig.replace(/^\s*model_catalog_json\s*=.*\r?\n?/m, ""),
+      `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`
+    );
+  }
   const proxyBaseUrl = String(options.accountModeBaseUrl || "").trim();
   const nextConfig = proxyBaseUrl ? withOpenaiBaseUrl(accountConfig, proxyBaseUrl) : accountConfig;
   writeFilesTransaction([
@@ -125,6 +131,7 @@ export function applyAccountMode(account: AccountRecord | null | undefined, opti
     if (auth?.auth_mode !== "chatgpt"
       || auth?.tokens?.access_token !== account.access_token
       || hasCustomGatewayProvider(writtenConfig)
+      || (options.modelCatalogPath && !hasManagedModelCatalog(writtenConfig))
       || (proxyBaseUrl && readOpenaiBaseUrl(writtenConfig) !== proxyBaseUrl)) {
       throw new Error("写入后的 Codex 账号认证校验失败。");
     }

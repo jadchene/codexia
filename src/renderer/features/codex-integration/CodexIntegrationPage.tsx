@@ -40,14 +40,13 @@ export const CodexIntegrationPage = ({
     ? settings.codex_auth_mode === "gateway"
     : mode === "account" && settings.codex_auth_mode === "account" && settings.codex_selected_account_id === accountId;
   const gatewayConfigChanged = gatewayConfigMode !== gatewayConfigModeFromSettings(settings);
-  const apiProxyChanged = useApiProxy !== (settings.account_mode_use_api_proxy === "true");
   const previewSettings = {
     ...settings,
     codex_config_use_openai_base_url: gatewayConfigMode === "base_url" ? "true" : "false"
   };
   const applyButtonText = mode === "gateway"
     ? alreadyApplied && !gatewayConfigChanged ? "重新应用到 Codex" : "应用到 Codex"
-    : alreadyApplied && !apiProxyChanged ? "已应用" : alreadyApplied ? "重新应用到 Codex" : "应用到 Codex";
+    : alreadyApplied ? "重新应用到 Codex" : "应用到 Codex";
 
   useEffect(() => {
     setMode(normalizeAuthMode(settings.codex_auth_mode));
@@ -123,7 +122,7 @@ export const CodexIntegrationPage = ({
             showIcon
             type="warning"
             title="Codex 将直接使用所选账号"
-            description="关闭代理时直接访问官方服务；开启后通过本地 API 服务透明转发。"
+            description="关闭代理时直接访问官方服务；开启后通过本地 API 服务透明转发。模型列表沿用账号池的覆盖、名称和显示设置，不包含 API 渠道模型。"
           />
           <Select
             showSearch
@@ -152,7 +151,7 @@ export const CodexIntegrationPage = ({
         <Button
           type="primary"
           loading={busy}
-          disabled={!mode || (mode === "account" && ((alreadyApplied && !apiProxyChanged) || !accountId || !isUsableAccount(selectedAccount, settings)))}
+          disabled={!mode || (mode === "account" && (!accountId || !isUsableAccount(selectedAccount, settings)))}
           onClick={apply}
         >
           {applyButtonText}

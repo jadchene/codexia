@@ -188,10 +188,17 @@ test("关闭账号代理开关后恢复原 API 鉴权，应用账号模式按开
     assert.equal(unauthorized.status, 401);
 
     const account = { id: "account-a", access_token: "access-a", refresh_token: "refresh-a", account_id: "workspace-a" };
-    applyAccountMode(account, { codexDir, accountModeBaseUrl: "http://127.0.0.1:8436/v1" });
+    const modelCatalogPath = path.join(codexDir, "account-models.json");
+    fs.appendFileSync(configPath, 'model_catalog_json = "C:/data/models.json"\n[features]\nexample = true\n');
+    applyAccountMode(account, { codexDir, modelCatalogPath, accountModeBaseUrl: "http://127.0.0.1:8436/v1" });
     assert.equal(readOpenaiBaseUrl(fs.readFileSync(configPath, "utf8")), "http://127.0.0.1:8436/v1");
-    applyAccountMode(account, { codexDir });
+    applyAccountMode(account, { codexDir, modelCatalogPath });
     assert.equal(readOpenaiBaseUrl(fs.readFileSync(configPath, "utf8")), "");
+    const config = fs.readFileSync(configPath, "utf8");
+    assert.equal((config.match(/model_catalog_json/g) || []).length, 1);
+    assert.ok(config.includes(`model_catalog_json = ${JSON.stringify(modelCatalogPath.replaceAll("\\", "/"))}`));
+    assert.ok(config.indexOf("model_catalog_json") < config.indexOf("[features]"));
+    assert.doesNotMatch(config, /C:\/data\/models.json|model_provider/);
   } finally {
     fs.rmSync(codexDir, { recursive: true, force: true });
     await harness.close();

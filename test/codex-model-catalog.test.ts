@@ -238,6 +238,10 @@ test("model management overrides names, priorities, and visibility without remov
     let models = JSON.parse(fs.readFileSync(result.path, "utf8")).models;
     assert.deepEqual(models.map((model: { slug: string }) => model.slug), ["external", "built-in"]);
     assert.equal(models[0].display_name, "External Custom");
+    const accountModels = JSON.parse(fs.readFileSync(catalogs.accountPath, "utf8")).models;
+    assert.deepEqual(accountModels.map((model) => model.slug), ["built-in"]);
+    assert.equal(accountModels[0].display_name, "Built In Hidden");
+    assert.equal(accountModels[0].visibility, "hide");
     assert.equal(models[0].priority, 1);
     assert.deepEqual(models.map((model: { visibility: string }) => model.visibility), ["list", "hide"]);
     assert.deepEqual(catalogs.listModels().map((model) => [model.slug, model.visible]), [
@@ -288,6 +292,12 @@ test("enabled bundled override skips Codex and merges the manual catalog with ex
 
     assert.equal(debugCalls, 1);
     assert.equal(result.bundledSource, "override");
+    assert.deepEqual(JSON.parse(fs.readFileSync(catalogs.accountPath, "utf8")).models.map((model) => model.slug), ["gpt-override"]);
+    upstreams.setEnabled(BUILTIN_SUBSCRIPTION_ID, false);
+    catalogs.refresh();
+    assert.deepEqual(JSON.parse(fs.readFileSync(catalogs.accountPath, "utf8")).models.map((model) => model.slug), ["gpt-override"]);
+    upstreams.setEnabled(BUILTIN_SUBSCRIPTION_ID, true);
+    catalogs.refresh();
     assert.equal(result.bundledCount, 1);
     assert.equal(result.externalCount, 1);
     assert.deepEqual(

@@ -42,7 +42,7 @@ View pool quota on **Overview**. Optional Plus-baseline normalization is off by 
 
 ### Integration and Services
 
-API mode combines subscription and third-party models. Account mode uses one subscription account, with an optional API proxy for request analytics.
+API mode combines subscription and third-party models. Account mode uses one subscription account, with an optional API proxy for request analytics. Its model list follows the subscription pool's catalog override, names, and visibility settings, excludes API channel models, and remains available when the pool channel is disabled. After upgrading, click **重新应用到 Codex** (Reapply to Codex) in account mode to configure its separate model catalog.
 
 **Services** starts, stops, and restarts the API service and the optional [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the executable path and listening address before starting MCP for the first time. When `CODEX_HOME` is set, Codexia uses the Codex configuration in that directory; otherwise it uses the current user's `.codex` directory.
 

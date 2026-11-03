@@ -26,6 +26,7 @@ interface CatalogServiceOptions {
 
 export function createCodexModelCatalogService(options: CatalogServiceOptions) {
   const catalogPath = path.join(options.dataDir, "models.json");
+  const accountCatalogPath = path.join(options.dataDir, "account-models.json");
   const bundledCachePath = path.join(options.dataDir, "codex-bundled-models.json");
   const remoteCachePath = path.join(options.dataDir, "codex-remote-models.json");
   let sourceCatalog: Catalog | null = null;
@@ -76,10 +77,16 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
     } : poolEnabled ? bundled : { ...bundled, models: [] };
     const nextSource = mergeCatalogs(effectiveBundled, external);
     const merged = applyModelManagement(nextSource, options.getModelManagement?.() || []);
-    const files = [{ file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` }];
+    // 账号模式直接使用订阅模型，独立于 API 渠道开关及第三方模型。
+    const accountCatalog = applyModelManagement(bundled, options.getModelManagement?.() || []);
+    const files = [
+      { file: catalogPath, content: `${JSON.stringify(merged, null, 2)}\n` },
+      { file: accountCatalogPath, content: `${JSON.stringify(accountCatalog, null, 2)}\n` }
+    ];
     if (remote && !override.enabled) files.push({ file: remoteCachePath, content: `${JSON.stringify(remote, null, 2)}\n` });
     writeFilesTransaction(files, () => {
       parseCatalog(fs.readFileSync(catalogPath, "utf8"), "生成的模型目录");
+      parseCatalog(fs.readFileSync(accountCatalogPath, "utf8"), "账号模式模型目录");
       syncBundledModels(options.db, bundled.models, bundledSource);
     });
     sourceCatalog = nextSource;
@@ -114,6 +121,8 @@ export function createCodexModelCatalogService(options: CatalogServiceOptions) {
   };
   return {
     path: catalogPath,
+    /** 仅包含订阅账号模型，应用账号模式时使用。 */
+    accountPath: accountCatalogPath,
     refresh: () => rebuild(false, false),
     refreshBundled: (allowCachedFallback = false) => rebuild(true, allowCachedFallback),
     refreshSubscription,

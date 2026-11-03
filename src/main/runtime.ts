@@ -598,8 +598,10 @@ function registerIpc() {
     if (!account) throw new Error("账号不存在。");
     const settings = store.getSettings();
     if (useApiProxy) await startGateway("account-proxy");
+    modelCatalogService.refresh();
     const result = applyAccountMode(account as Parameters<typeof applyAccountMode>[0], {
       ...codexAccessOptions(runtimeProfile),
+      modelCatalogPath: modelCatalogService.accountPath,
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {})
     });
     store.saveSettings({
