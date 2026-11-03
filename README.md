@@ -2,73 +2,39 @@
 
 [中文文档](README_zh.md)
 
-Codexia is a Windows desktop app for using ChatGPT subscription accounts and third-party model channels from Codex in one place.
+Codexia is a Windows desktop app for using ChatGPT subscription accounts, the official OpenAI API, and third-party model channels from Codex.
 
 ![Codexia overview](docs/screenshots/overview.png)
 
 ## Features
 
-- Pool multiple ChatGPT subscription accounts behind one local API service.
-- Add third-party Responses API channels and select all models from Codex.
-- View account quota, reset credits, request analytics, and estimated costs.
-- Request details show the requested tier, billing tier, and multiplier used for that call. Under **Logs & billing**, configure Standard / Fast / Ultrafast multipliers (defaults: 1 / 2 / 6); `priority` is treated as Fast. Estimates use only the requested tier; a missing or empty tier means Standard. The response tier does not affect estimates. Multipliers apply to input, cached input, and output costs and are saved per call. These are local estimates, not subscription quota consumption or guaranteed API billing rates.
-- Wake unattended long-running sessions after account quota becomes available.
-- Send scheduled messages to existing sessions or start new Codex sessions.
-- Session Wakeups and Scheduled Tasks menus are hidden by default. Enable them individually under **Settings → General → Optional menus**. Hiding a menu does not stop existing tasks; manage their enabled state on the corresponding page.
-- Manage Codex integration and an optional MCP service in one desktop app.
+- Manage subscription pools and model channels through a local Responses API service.
+- View account quota, request analytics, and estimated costs.
+- Wake sessions automatically and schedule Codex tasks.
+- Manage Codex integration and an optional [MCP service](https://github.com/jadchene/mcp-gateway).
 
 ## Quick Start
 
 1. Install Codex CLI and confirm that the `codex` command is available.
-2. Extract the Windows unpacked build into a writable directory and open `Codexia.exe`. For source builds, see [Development](#development).
-3. Add a ChatGPT subscription account, a model channel, or both.
-4. Open **Integration Mode** and apply API mode.
-5. Start the API service from **Services**.
-6. Restart Codex to load the applied configuration and select a model.
+2. Extract the Windows portable build into a writable directory and open `Codexia.exe`.
+3. Add an account or model channel. Accounts support browser login and Codex import. Official OpenAI channels need only an API key; third-party channels need an API address, API key, and model catalog.
+4. Choose a mode under **Integration Mode** and apply it to Codex. For API mode, start the API service under **Services**.
+5. Restart Codex to load the configuration and select a model.
 
-## Usage
+## Usage Notes
 
-### Subscription Accounts and Model Channels
+- **API mode** combines the account pool and model channels. Shared model IDs prefer the enabled pool; disable the pool to use the official API.
+- **Account mode** uses the selected subscription account and supports the pool's model catalog override, excluding third-party channel models.
+- Third-party model IDs must be unique across channels and the built-in catalog. Configure model rates per channel; estimates do not represent actual bills.
+- Enable Session Wakeups and Scheduled Tasks under **Settings → General → Optional menus**, and keep Codexia and relevant sessions running. Hiding menus does not stop existing tasks.
+- Other Responses API clients can use `http://localhost:8436/v1` with the local access key from Settings.
+- Codex configuration defaults to the current user's `.codex` directory. Set `CODEX_HOME` to use another location.
 
-Sign in to a subscription account through the browser or import it from Codex. Codexia supports quota refresh, account enablement, reset-credit use, and account-pool routing.
+## Data and Upgrades
 
-Select **OpenAI 官方** (Official OpenAI) when adding an official OpenAI channel and enter only your API key. No API address or model JSON is needed. It automatically uses the built-in model catalog. Enable or disable each channel directly in the list. In API mode, shared model IDs prefer the enabled subscription pool; disable the pool to use the enabled official API channel. Account mode continues to use the selected account. Model access depends on your API key. Cost estimates inherit rates from the subscription pool's matching models by default. Override them in the official channel's model pricing dialog if needed. Models without configured rates show no estimated amount.
+Data lives in `data/` beside the executable. Preserve this directory during upgrades and close the app before backup. Credentials use Windows encryption; moving to another user or machine may require signing in again.
 
-Configure each third-party channel with an API address, API key, and model catalog, then preview and test it. Third-party model IDs must be unique across channels and the built-in catalog. Keep **Remote compaction adaptation** enabled unless the channel natively supports Codex compaction.
-
-The account-pool catalog updates at startup and on manual refresh, with cached and local Codex catalogs as fallbacks. Use the Codex Bundled override for a custom catalog.
-
-View pool quota on **Overview**. Optional Plus-baseline normalization is off by default and supports plan multipliers. Total remaining quota can exceed 100%; the overview ring and client show the percentage of total capacity.
-
-### Integration and Services
-
-API mode combines subscription and third-party models. Account mode uses one subscription account, with an optional API proxy for request analytics. Its model list follows the subscription pool's catalog override, names, and visibility settings, excludes API channel models, and remains available when the pool channel is disabled. After upgrading, click **重新应用到 Codex** (Reapply to Codex) in account mode to configure its separate model catalog.
-
-**Services** starts, stops, and restarts the API service and the optional [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the executable path and listening address before starting MCP for the first time. When `CODEX_HOME` is set, Codexia uses the Codex configuration in that directory; otherwise it uses the current user's `.codex` directory.
-
-API or MCP setting changes may require restarting the corresponding service.
-
-Single-instance mode is enabled by default. To run separate copies, turn off **Settings → General → App behavior → Single-instance mode**, save, and restart the app. Use separate program directories, service ports, and API keys for independent account pools. Only apply integration settings from the copy used by your local Codex, or use a separate `CODEX_HOME` for each copy.
-
-For other Responses API clients, use the service address with `/v1` as the base URL (default `http://localhost:8436/v1`) and the local access key from Settings. Model discovery uses `GET /v1/models`; requests use `POST /v1/responses`. Availability depends on the configured subscription accounts and channels.
-
-### Session Wakeup
-
-Register a session UUID, active window, and attempt limit. When pool quota is exhausted, Codexia waits for a reset, refreshes quota, and sends a continuation message after recovery. **Resume Goal** reactivates an unfinished Goal. Disabling, deleting, expiry, or reaching the limit stops pending wakeups.
-
-### Scheduled Tasks
-
-Send messages to an existing session or start a new session in a chosen directory on each run. Use the visual builder or a five-field Cron expression; `0 22 * * *` runs daily at 22:00 local time. A task never overlaps itself, and missed runs after restart or sleep are not replayed. Slash commands sent to existing sessions remain plain text.
-
-Both features require Codexia to stay running and `codex` to be available. Existing sessions must stay running and use the same `CODEX_HOME`.
-
-### Data and Debugging
-
-Packaged data lives in `data/` beside the executable; development uses the project's `data/`. Preserve it during upgrades and close the app before backup. Credentials use Windows encryption and may not work under another user or on another machine.
-
-Database upgrade backups live in `data/backups/`; backups older than 24 hours are removed at startup or during cleanup.
-
-API debugging is off by default. When enabled, request and response bodies are saved temporarily in `data/logs/` for up to 10 minutes and deleted when debugging stops, expires, or the app exits. Bodies may contain sensitive data; enable debugging only for troubleshooting.
+API debugging temporarily records request and response bodies, which may contain sensitive data. Enable it only for troubleshooting.
 
 ## Development
 
@@ -78,15 +44,10 @@ Node.js 24 or newer is required.
 npm install
 npm run dev
 npm run verify
-```
-
-Create the Windows unpacked build with:
-
-```bash
 npm run pack:unpacked
 ```
 
-The output is `release/win-unpacked/Codexia.exe`. It is not code-signed and does not include an installer.
+The package output is `release/win-unpacked/Codexia.exe`. It is not code-signed.
 
 ## License
 
