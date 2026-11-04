@@ -16,9 +16,9 @@ describe("settings appearance and display units", () => {
     const defaults = settingsToForm({});
     expect(defaults.gpt_quota_normalization_enabled).toBe(false);
     expect(defaults.gpt_quota_multiplier_plus).toBe(1);
-    expect(defaults.gpt_quota_multiplier_prolite).toBe(5);
-    expect(defaults.gpt_quota_multiplier_pro).toBe(10);
-    expect(defaults.gpt_quota_multiplier_promax).toBe(25);
+    expect(defaults.gpt_quota_multiplier_prolite).toBe(10);
+    expect(defaults.gpt_quota_multiplier_pro).toBe(20);
+    expect(defaults.gpt_quota_multiplier_promax).toBe(50);
     expect(defaults.gpt_quota_multiplier_free).toBe(0);
     expect(defaults.gpt_quota_multiplier_go).toBe(0);
     const saved = formToSettings({}, { ...defaults, gpt_quota_normalization_enabled: true, gpt_quota_multiplier_pro: 12.5 });
@@ -261,9 +261,9 @@ describe("settings appearance and display units", () => {
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
     expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
     expect(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }).getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByRole("spinbutton", { name: "Pro Lite 倍率" }).getAttribute("value")).toBe("5");
-    expect(screen.getByRole("spinbutton", { name: "Pro 倍率" }).getAttribute("value")).toBe("10");
-    expect(screen.getByRole("spinbutton", { name: "Pro Max 倍率" }).getAttribute("value")).toBe("25");
+    expect(screen.getByRole("spinbutton", { name: "Pro 100 倍率" }).getAttribute("value")).toBe("10");
+    expect(screen.getByRole("spinbutton", { name: "Pro 200 倍率" }).getAttribute("value")).toBe("20");
+    expect(screen.getByRole("spinbutton", { name: "Pro 500 倍率" }).getAttribute("value")).toBe("50");
     expect(screen.getByText("账号调度")).toBeTruthy();
     expect(screen.getByText("会话亲和有效期")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));

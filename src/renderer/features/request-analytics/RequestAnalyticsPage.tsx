@@ -295,6 +295,8 @@ export const RequestAnalyticsPage = ({
           </TokenUsageTooltip>
           <div className="v1-analytics-metric"><Statistic title="缓存命中" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} suffix="%" /></div>
           <div className="v1-analytics-metric"><Statistic title="平均耗时" value={summary.total.average_duration_ms || 0} precision={0} suffix="ms" /></div>
+          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度</Tooltip>}
+            value={summary.total.output_tokens_per_second ?? "-"} precision={1} /></div>
           <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
           <div className="v1-analytics-metric"><Statistic title={`估算成本（${currencyLabel}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>
         </div>

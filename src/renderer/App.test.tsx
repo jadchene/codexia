@@ -16,7 +16,7 @@ it.each(["sessionWakeups", "scheduledTasks"])("hides optional menus by default a
   const user = userEvent.setup();
   let settings: Record<string, string> = {};
   const bootstrap = vi.fn(async () => ({
-    app: { version: "1.9.7" }, settings, accounts: [],
+    app: { version: "1.9.8" }, settings, accounts: [],
     tokenLogs: { items: [], total: 0, page: 1, pageSize: 10 }, tokenSummary: { total: {}, byAccount: [] },
     quotaSummary: { primary: {}, secondary: {} }, appLogs: { items: [], total: 0, page: 1, pageSize: 10 },
     gateway: { running: false }, mcpGateway: { running: false }, paths: { dataDir: "", dbPath: "" }
@@ -105,7 +105,7 @@ it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model 
   await screen.findByText("忽略 5 小时限制");
   expect(screen.queryByText("重启服务后生效")).toBeNull();
   if (field === "multiplier") {
-    const input = screen.getByRole("spinbutton", { name: "Pro 倍率" });
+    const input = screen.getByRole("spinbutton", { name: "Pro 200 倍率" });
     await user.clear(input);
     await user.type(input, "12.5");
   } else {

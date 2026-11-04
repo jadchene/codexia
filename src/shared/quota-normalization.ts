@@ -12,7 +12,7 @@ export interface QuotaNormalizationOptions {
 
 /** 套餐标识与默认容量倍率；其他或未知套餐默认按一个 Plus 计算。 */
 export const DEFAULT_QUOTA_PLAN_MULTIPLIERS = {
-  plus: 1, prolite: 5, pro: 10, promax: 25, free: 0, go: 0, other: 1
+  plus: 1, prolite: 10, pro: 20, promax: 50, free: 0, go: 0, other: 1
 } as const;
 
 /** 新旧数据库均使用相同的额度配置默认值。 */

@@ -89,6 +89,8 @@ export interface TokenTotals {
   errors?: number;
   fallback_count?: number;
   average_duration_ms?: number;
+  /** 有效记录的总输出 Token 除以总耗时（秒），无有效记录时为空。 */
+  output_tokens_per_second?: number | null;
   estimated_cost?: number;
   input_tokens?: number;
   cached_input_tokens?: number;

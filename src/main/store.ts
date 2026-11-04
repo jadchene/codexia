@@ -971,6 +971,8 @@ function tokenSummary(db: Db, query: Partial<LogQuery> = {}): TokenSummary {
       COALESCE(SUM(CASE WHEN CAST(request_logs.status AS INTEGER) >= 400 THEN 1 ELSE 0 END), 0) AS errors,
       COALESCE(SUM(CASE WHEN request_logs.fallback_reason IS NOT NULL AND request_logs.fallback_reason <> '' THEN 1 ELSE 0 END), 0) AS fallback_count,
       COALESCE(AVG(request_logs.duration_ms), 0) AS average_duration_ms,
+      1000.0 * SUM(CASE WHEN duration_ms > 0 AND output_tokens >= 0 THEN output_tokens ELSE 0 END)
+        / NULLIF(SUM(CASE WHEN duration_ms > 0 AND output_tokens >= 0 THEN duration_ms ELSE 0 END), 0) AS output_tokens_per_second,
       COALESCE(SUM(request_logs.estimated_cost), 0) AS estimated_cost,
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
       COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,

@@ -331,9 +331,9 @@ test("quota normalization defaults backfill old databases and preserve saved val
     const settings = store.getSettings();
     assert.equal(settings.gpt_quota_normalization_enabled, "false");
     assert.equal(settings.gpt_quota_multiplier_plus, "1");
-    assert.equal(settings.gpt_quota_multiplier_prolite, "5");
-    assert.equal(settings.gpt_quota_multiplier_pro, "10");
-    assert.equal(settings.gpt_quota_multiplier_promax, "25");
+    assert.equal(settings.gpt_quota_multiplier_prolite, "10");
+    assert.equal(settings.gpt_quota_multiplier_pro, "20");
+    assert.equal(settings.gpt_quota_multiplier_promax, "50");
     assert.equal(settings.gpt_quota_multiplier_free, "0");
     assert.equal(settings.gpt_quota_multiplier_go, "0");
     store.saveSettings({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5", gpt_quota_multiplier_go: "0.2" });

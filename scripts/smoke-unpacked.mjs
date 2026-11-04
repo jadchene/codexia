@@ -131,7 +131,7 @@ async function inspectOverviewModelCount(webSocketDebuggerUrl, processHandle) {
 async function inspectQuotaNormalization(webSocketDebuggerUrl) {
   return evaluate(webSocketDebuggerUrl, `(async () => {
     const api = window.codexGateway;
-    const defaults = { plus: '1', prolite: '5', pro: '10', promax: '25', free: '0', go: '0', other: '1' };
+    const defaults = { plus: '1', prolite: '10', pro: '20', promax: '50', free: '0', go: '0', other: '1' };
     const original = (await api.bootstrap()).settings;
     if (original.gpt_quota_normalization_enabled !== 'false') throw new Error('套餐额度折算没有默认关闭');
     for (const [plan, value] of Object.entries(defaults)) {
@@ -158,7 +158,7 @@ async function inspectQuotaNormalization(webSocketDebuggerUrl) {
       await api.saveSettings({ gpt_quota_normalization_enabled: original.gpt_quota_normalization_enabled, gpt_quota_multiplier_pro: original.gpt_quota_multiplier_pro });
     }
     const restored = (await api.bootstrap()).settings;
-    if (restored.gpt_quota_normalization_enabled !== 'false' || restored.gpt_quota_multiplier_pro !== '10') throw new Error('额度配置恢复失败');
+    if (restored.gpt_quota_normalization_enabled !== original.gpt_quota_normalization_enabled || restored.gpt_quota_multiplier_pro !== original.gpt_quota_multiplier_pro) throw new Error('额度配置恢复失败');
     return true;
   })()`);
 }

@@ -176,6 +176,24 @@ test("app log queries filter level, scope, status, and keyword without renderer-
   }
 });
 
+test("output speed aggregates durations within the filter and excludes invalid durations", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-output-speed-"));
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    assert.equal(store.tokenSummary().total.output_tokens_per_second, null);
+    for (const duration of [1000, 3000, 0]) {
+      store.addTokenLog({ upstream_id: "channel-a", status: 200, output_tokens: 100, duration_ms: duration });
+    }
+    store.addTokenLog({ upstream_id: "channel-b", status: 200, output_tokens: 400, duration_ms: 1000 });
+    assert.equal(store.tokenSummary({ upstreamId: "channel-a" }).total.output_tokens_per_second, 50);
+    assert.equal(store.tokenSummary({ upstreamId: "channel-b" }).total.output_tokens_per_second, 400);
+    assert.equal(store.tokenSummary().total.output_tokens_per_second, 120);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("request log filters expose the actual channel and model", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-request-filter-"));
   const database = path.join(directory, "test.sqlite");

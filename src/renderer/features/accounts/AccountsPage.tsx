@@ -34,6 +34,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ConsumeResetCreditResult, PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
 import { quotaNormalizationFromSettings, quotaPlanMultiplier } from "../../../shared/quota-normalization";
+import { subscriptionPlanLabel } from "../../../shared/subscription-plan";
 import { formatTime, parseResetCredits, resetCreditStatusLabel } from "../../lib/formatters";
 
 interface AccountsPageProps {
@@ -168,17 +169,10 @@ export const AccountsPage = ({
       : [quotaColumn("5 小时额度", "quota_5h_used_percent", "quota_5h_reset_at")]),
     quotaColumn("7 天额度", "quota_7d_used_percent", "quota_7d_reset_at"),
     {
-      title: "令牌续期",
-      dataIndex: "last_refresh",
-      width: 180,
-      className: "v1-nowrap",
-      render: (value) => value ? new Date(value).toLocaleString() : "暂无"
-    },
-    {
       title: "套餐",
       dataIndex: "subscription_plan",
       width: 110,
-      render: (value: string | undefined) => value || "未知"
+      render: (value: string | undefined) => subscriptionPlanLabel(value)
     },
     {
       title: "重置次数",
@@ -299,7 +293,7 @@ export const AccountsPage = ({
         {subscriptionMessage && subscriptionMessage.id === detailAccount?.id && <Alert type={subscriptionMessage.type} showIcon title={subscriptionMessage.text} style={{ marginBottom: 12 }} />}
         {detailAccount && <Descriptions bordered column={1} size="small" items={[
           { key: "identity", label: "账号", children: detailAccount.email || detailAccount.id },
-          { key: "plan", label: "套餐", children: detailAccount.subscription_plan || "未知" },
+          { key: "plan", label: "套餐", children: subscriptionPlanLabel(detailAccount.subscription_plan) },
           { key: "subscriptionExpiry", label: "订阅到期", children: formatTime(detailAccount.subscription_expires_at, "未知") },
           { key: "state", label: "状态", children: detailAccount.enabled ? "启用" : "停用" },
           { key: "refresh", label: "令牌续期", children: detailAccount.last_refresh ? new Date(detailAccount.last_refresh).toLocaleString() : "暂无" },

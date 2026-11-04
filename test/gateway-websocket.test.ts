@@ -101,12 +101,12 @@ test("WebSocket handshake and rate limit events use Plus-weighted pool percentag
     Object.assign(harness.accounts[0], { subscription_plan: "plus", quota_5h_used_percent: 20, quota_7d_used_percent: 20 });
     Object.assign(harness.accounts[1], { subscription_plan: "pro", quota_5h_used_percent: 60, quota_7d_used_percent: 60 });
     const { websocket, response } = await connectGateway(harness, "/v1/realtime?call_id=weighted", { "session-id": "weighted" });
-    assert.equal(response.headers["x-codex-primary-used-percent"], "56.4");
+    assert.equal(response.headers["x-codex-primary-used-percent"], "58.1");
     const pending = nextMessage(websocket);
     websocket.send(JSON.stringify({ type: "response.create" }));
     const event = JSON.parse((await pending).toString());
-    assert.equal(event.rate_limits.primary.used_percent, 56.4);
-    assert.equal(event.rate_limits.secondary.used_percent, 56.4);
+    assert.equal(event.rate_limits.primary.used_percent, 58.1);
+    assert.equal(event.rate_limits.secondary.used_percent, 58.1);
     harness.store.saveSettings({ gpt_quota_multiplier_pro: "5" });
     const updated = nextMessage(websocket);
     websocket.send(JSON.stringify({ type: "response.create" }));

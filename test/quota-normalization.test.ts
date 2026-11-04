@@ -21,12 +21,12 @@ describe("Plus 基准额度", () => {
   it("混合套餐叠加超过 100%，响应头与圆环共用加权总容量占比", () => {
     const accounts = [account("plus", 20), account("prolite", 60), account("pro", 90), account("promax", 40), account("free", 0), account("go", 0)];
     const summary = buildAccountPoolQuotaSummary(accounts, 500, options);
-    expect(summary.capacity_percent).toBe(4100);
-    expect(summary.primary.remaining_percent).toBe(1880);
+    expect(summary.capacity_percent).toBe(8100);
+    expect(summary.primary.remaining_percent).toBe(3680);
     const headers = buildCodexQuotaHeaders(accounts, 500, options);
-    expect(headers["x-codex-primary-used-percent"]).toBe("54.1");
-    expect(headers["x-codex-secondary-used-percent"]).toBe("54.1");
-    expect(buildCodexQuotaSnapshot(accounts, 500, options).primary.used_percent).toBe(54.1);
+    expect(headers["x-codex-primary-used-percent"]).toBe("54.6");
+    expect(headers["x-codex-secondary-used-percent"]).toBe("54.6");
+    expect(buildCodexQuotaSnapshot(accounts, 500, options).primary.used_percent).toBe(54.6);
   });
 
   it("默认关闭与显式关闭都保持等权叠加和原响应头规则", () => {
@@ -81,11 +81,11 @@ describe("Plus 基准额度", () => {
     const accounts = [account("plus", 80, { quota_7d_used_percent: 20 }), account("pro", 0, { quota_7d_used_percent: 90 })];
     const ignored = { ...options, ignoreFiveHourLimit: true };
     const summary = buildAccountPoolQuotaSummary(accounts, 500, ignored);
-    expect(summary.primary.remaining_percent).toBe(180);
+    expect(summary.primary.remaining_percent).toBe(280);
     expect(summary.primary).toEqual(summary.secondary);
     const snapshot = buildCodexQuotaSnapshot(accounts, 500, ignored);
     expect(snapshot.primary.window_minutes).toBe(10080);
-    expect(snapshot.primary.used_percent).toBe(83.6);
+    expect(snapshot.primary.used_percent).toBe(86.7);
     expect(snapshot.primary.reset_at).toBe(2000);
   });
 
@@ -93,7 +93,7 @@ describe("Plus 基准额度", () => {
     expect(editableSettingsPatch({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5" })).toEqual({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5" });
     for (const value of ["", "-1", "NaN", "Infinity", "1001", "abc"]) {
       expect(() => editableSettingsPatch({ gpt_quota_multiplier_pro: value })).toThrow(/倍率/);
-      expect(quotaPlanMultiplier("pro", quotaNormalizationFromSettings({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: value }))).toBe(10);
+      expect(quotaPlanMultiplier("pro", quotaNormalizationFromSettings({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: value }))).toBe(20);
     }
     expect(() => editableSettingsPatch({ gpt_quota_normalization_enabled: "yes" })).toThrow();
   });

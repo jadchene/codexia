@@ -1,13 +1,15 @@
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  CheckCircleOutlined,
   ControlOutlined,
   DeleteOutlined,
   EditOutlined,
   MoreOutlined,
+  PauseCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SettingOutlined
+  FileTextOutlined
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -171,7 +173,8 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
   });
   const healthMutation = useMutation({
     mutationFn: (id: string) => window.codexGateway.testUpstreamConnection(id),
-    onSuccess: async (result) => { await invalidate(); message.success(result.message); }
+    onSuccess: async (result) => { await invalidate(); message[result.status === "healthy" ? "success" : "warning"](`${result.message} · ${result.latencyMs} ms`); },
+    onError: (error) => message.error(readableError(error))
   });
   const pricingMutation = useMutation({
     mutationFn: ({ id, pricing }: { id: string; pricing: Record<string, ModelPricing> }) => window.codexGateway.saveUpstreamModelPricing(id, pricing),
@@ -179,7 +182,8 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
   });
   const invocationMutation = useMutation({
     mutationFn: ({ id, model }: { id: string; model: string }) => window.codexGateway.testUpstreamInvocation(id, model),
-    onSuccess: (result) => message[result.ok ? "success" : "warning"](result.message)
+    onSuccess: async (result) => { await invalidate(); message[result.ok ? "success" : "warning"](`${result.message} · ${result.latencyMs} ms`); },
+    onError: async (error) => { await invalidate(); message.error(readableError(error)); }
   });
 
   const openCreate = () => {
@@ -308,13 +312,13 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
   };
 
   const moreItems = (): NonNullable<MenuProps["items"]> => [
-    { key: "health", label: "连接检查" },
-    { key: "invoke", label: "调用测试" }
+    { key: "health", label: "连接检查", disabled: healthMutation.isPending },
+    { key: "invoke", label: "调用测试", disabled: invocationMutation.isPending }
   ];
 
   const onMore = (upstream: UpstreamSummary, key: string) => {
     if (key === "health") healthMutation.mutate(upstream.id);
-    if (key === "invoke") { setInvocationUpstream(upstream); setInvocationModel(""); }
+    if (key === "invoke") { invocationMutation.reset(); setInvocationUpstream(upstream); setInvocationModel(""); }
   };
 
   const columns: TableColumnsType<UpstreamSummary> = [
@@ -330,7 +334,7 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
       render: (count, upstream) => <Button type="link" onClick={() => setModelUpstream(upstream)}>{count} 个</Button>
     },
     {
-      title: "传输", key: "transport", width: 120,
+      title: "协议", key: "transport", width: 120,
       render: (_, upstream) => <Space size={4}><Tag>HTTP</Tag>{upstream.supportsWebSocket && <Tag className="v1-ws-tag">WS</Tag>}</Space>
     },
     {
@@ -340,22 +344,28 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
     {
       title: "状态", key: "status", width: 175,
       render: (_, upstream) => <Space orientation="vertical" size={2}>
-        <Switch aria-label={`${upstream.name}启用状态`} checked={upstream.enabled}
-          checkedChildren="启用" unCheckedChildren="停用" disabled={enabledMutation.isPending}
-          loading={enabledMutation.isPending && enabledMutation.variables?.id === upstream.id}
-          onChange={(enabled) => enabledMutation.mutate({ id: upstream.id, enabled })} />
-        {upstream.kind === "responses_api" && <Typography.Text type="secondary">{healthText(upstream)}</Typography.Text>}
+        <Tag color={upstream.enabled ? "success" : "default"}>{upstream.enabled ? "启用" : "停用"}</Tag>
+        <Typography.Text type="secondary">{healthText(upstream)}</Typography.Text>
       </Space>
     },
     {
-      title: "操作", key: "actions", fixed: "right", width: 176,
+      title: "操作", key: "actions", fixed: "right", width: 212,
       render: (_, upstream) => <Space size={4}>
+        <Tooltip title={upstream.enabled ? "停用渠道" : "启用渠道"}>
+          <Button
+            aria-label={upstream.enabled ? "停用渠道" : "启用渠道"}
+            icon={upstream.enabled ? <PauseCircleOutlined /> : <CheckCircleOutlined />}
+            disabled={enabledMutation.isPending}
+            loading={enabledMutation.isPending && enabledMutation.variables?.id === upstream.id}
+            onClick={() => enabledMutation.mutate({ id: upstream.id, enabled: !upstream.enabled })}
+          />
+        </Tooltip>
         <Tooltip title={upstream.kind === "chatgpt_subscription_pool" ? "编辑模型费率" : "编辑上游"}>
           <Button aria-label="编辑" icon={<EditOutlined />} onClick={() => void (upstream.kind === "chatgpt_subscription_pool" ? openPricing(upstream) : openEdit(upstream))} />
         </Tooltip>
         {upstream.kind === "chatgpt_subscription_pool" && (
           <Tooltip title="配置 Bundled 覆盖">
-            <Button aria-label="配置 Bundled 覆盖" icon={<SettingOutlined />} onClick={() => void openBundledOverride()} />
+            <Button aria-label="配置 Bundled 覆盖" icon={<FileTextOutlined />} onClick={() => void openBundledOverride()} />
           </Tooltip>
         )}
         {upstream.kind === "chatgpt_subscription_pool" && (
@@ -373,11 +383,9 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
             <Button danger icon={<DeleteOutlined />} aria-label="删除" />
           </Popconfirm>
         )}
-        {upstream.kind === "responses_api" && (
           <Dropdown menu={{ items: moreItems(), onClick: ({ key }) => onMore(upstream, key) }} trigger={["click"]}>
             <Button icon={<MoreOutlined />} aria-label="更多操作" />
           </Dropdown>
-        )}
       </Space>
     }
   ];
@@ -592,11 +600,16 @@ export const UpstreamsPage = ({ normalizeQuotaToPlus = false }: { normalizeQuota
     <Modal
       title={`${invocationUpstream?.name || ""} · 调用测试`} open={Boolean(invocationUpstream)}
       okText="开始测试" confirmLoading={invocationMutation.isPending}
-      okButtonProps={{ disabled: !invocationModel }} onCancel={() => setInvocationUpstream(null)}
+      okButtonProps={{ disabled: !invocationModel }} onCancel={() => { if (!invocationMutation.isPending) setInvocationUpstream(null); }}
       onOk={() => invocationUpstream && invocationMutation.mutate({ id: invocationUpstream.id, model: invocationModel })}
     >
-      <Select style={{ width: "100%" }} placeholder="选择模型" value={invocationModel || null} onChange={setInvocationModel}
+      <Typography.Paragraph type="secondary">实际发送一次简短请求，耗时包含完整响应，会消耗调用额度。</Typography.Paragraph>
+      <Select disabled={invocationMutation.isPending} style={{ width: "100%" }} placeholder="选择模型" value={invocationModel || null} onChange={(value) => { invocationMutation.reset(); setInvocationModel(value); }}
         options={(invocationModelsQuery.data ?? []).filter((model) => model.available).map((model) => ({ value: model.modelId, label: model.displayName }))} />
+      {invocationMutation.data && <Alert style={{ marginTop: 12 }} showIcon type={invocationMutation.data.ok ? "success" : "error"}
+        title={`${invocationMutation.data.message} · ${invocationMutation.data.latencyMs} ms`}
+        description={invocationMutation.data.outputPreview || undefined} />}
+      {invocationMutation.isError && <Alert style={{ marginTop: 12 }} type="error" showIcon title={readableError(invocationMutation.error)} />}
     </Modal>
 
     <Modal
@@ -725,4 +738,4 @@ const reasoningLevels = (metadata: Record<string, unknown>) => Array.isArray(met
   : [];
 const healthText = (upstream: UpstreamSummary) => upstream.healthStatus === "healthy"
   ? `健康 · ${upstream.healthLatencyMs ?? 0} ms`
-  : upstream.healthStatus === "unhealthy" ? "连接异常" : "未检查";
+  : upstream.healthStatus === "unhealthy" ? `连接异常 · ${upstream.healthLatencyMs ?? 0} ms` : "未检查";

@@ -285,12 +285,12 @@ describe("Ant Design pages", () => {
     expect(screen.getByText(new Date(subscriptionExpiresAt * 1000).toLocaleString())).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "刷新订阅信息" }));
     expect(onRefreshSubscription).toHaveBeenCalledWith(expect.objectContaining({ id: "account-1" }));
-    expect(await screen.findByText("pro")).toBeTruthy();
+    expect(await screen.findByText("Pro 200")).toBeTruthy();
     expect(screen.getByText(new Date((subscriptionExpiresAt + 86400) * 1000).toLocaleString())).toBeTruthy();
     onRefreshSubscription.mockRejectedValueOnce(new Error("network failed"));
     await user.click(screen.getByRole("button", { name: "刷新订阅信息" }));
     expect(await screen.findByText("订阅信息刷新失败，请检查网络或重新登录后重试。")).toBeTruthy();
-    expect(screen.getByText("pro")).toBeTruthy();
+    expect(screen.getByText("Pro 200")).toBeTruthy();
   });
 
   it("requires Codex model JSON when adding an API upstream", async () => {
@@ -321,12 +321,13 @@ describe("Ant Design pages", () => {
       return { ...upstream };
     });
     renderWithQueries(<UpstreamsPage />);
-    const toggle = await screen.findByRole("switch", { name: "测试渠道启用状态" });
+    const toggle = await screen.findByRole("button", { name: "停用渠道" });
+    expect(screen.queryByRole("switch")).toBeNull();
     await userEvent.click(toggle);
-    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    await screen.findByRole("button", { name: "启用渠道" });
     expect(window.codexGateway.setUpstreamEnabled).toHaveBeenCalledWith("toggle-channel", false);
     await userEvent.click(toggle);
-    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    await screen.findByRole("button", { name: "停用渠道" });
     expect(window.codexGateway.setUpstreamEnabled).toHaveBeenLastCalledWith("toggle-channel", true);
   });
 
@@ -383,7 +384,12 @@ describe("Ant Design pages", () => {
     expect(screen.getByRole("button", { name: "配置 Bundled 覆盖" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新账号池模型" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新余额" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "更多操作" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "更多操作" })).toHaveLength(2);
+    window.codexGateway.testUpstreamConnection = vi.fn().mockResolvedValue({ status: "healthy", latencyMs: 123, message: "连接成功" });
+    await userEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]!);
+    await userEvent.click(await screen.findByText("连接检查"));
+    await waitFor(() => expect(window.codexGateway.testUpstreamConnection).toHaveBeenCalledWith("builtin"));
+    expect(await screen.findByText("连接成功 · 123 ms")).toBeTruthy();
   });
 
   it("model directory matches the current count and excludes retired local models", async () => {

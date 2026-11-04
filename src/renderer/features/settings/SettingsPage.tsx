@@ -22,6 +22,7 @@ import type { ReactNode } from "react";
 import { applyAppearancePreferences, appearanceFromSettings } from "../../app/appearance";
 import { CURRENCY_OPTIONS } from "../../lib/currency";
 import { DEFAULT_QUOTA_PLAN_MULTIPLIERS, QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../../../shared/quota-normalization";
+import { subscriptionPlanLabel } from "../../../shared/subscription-plan";
 import { SERVICE_TIER_DEFAULT_SETTINGS, serviceTierMultiplier } from "../../../shared/service-tier";
 
 type SettingsRecord = Record<string, string>;
@@ -79,7 +80,8 @@ const MIB_FIELDS: Record<string, string> = {
 
 /** 设置页的套餐倍率名称。 */
 const QUOTA_PLAN_LABELS: Record<string, string> = {
-  plus: "Plus", prolite: "Pro Lite", pro: "Pro", promax: "Pro Max", free: "Free", go: "Go", other: "其他 / 未知套餐"
+  ...Object.fromEntries(Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS).map((plan) => [plan, subscriptionPlanLabel(plan)])),
+  other: "其他 / 未知套餐"
 };
 
 export const SettingsPage = ({

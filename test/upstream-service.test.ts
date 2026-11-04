@@ -14,6 +14,30 @@ const codec = {
   isEncrypted: (value: string) => value.startsWith("enc:")
 };
 
+test("subscription diagnostics persist latency and reject models outside the pool", async () => {
+  const fixture = createFixture();
+  try {
+    createCodexModelCatalogService({ db: fixture.store.db, dataDir: fixture.store.paths.dataDir,
+      runBundledModels: () => JSON.stringify({ models: [{ slug: "pool-model" }] }) }).refresh();
+    let invocations = 0;
+    const service = createUpstreamService({ db: fixture.store.db, secretCodec: codec, subscriptionTests: {
+      connection: async () => ({ upstreamId: BUILTIN_SUBSCRIPTION_ID, status: "healthy", checkedAt: Date.now(), latencyMs: 42, message: "连接成功" }),
+      invocation: async (modelId) => {
+        invocations += 1;
+        return { upstreamId: BUILTIN_SUBSCRIPTION_ID, endpoint: "https://chatgpt.com/backend-api/codex/responses", modelId,
+          ok: true, status: 200, latencyMs: 123, responseId: "test", outputPreview: "OK", inputTokens: 1, outputTokens: 1, totalTokens: 2, message: "调用测试成功" };
+      }
+    } });
+    await service.testConnection(BUILTIN_SUBSCRIPTION_ID);
+    assert.equal(service.list()[0].healthLatencyMs, 42);
+    await assert.rejects(service.testInvocation(BUILTIN_SUBSCRIPTION_ID, "third-party"), /可用模型/);
+    assert.equal(invocations, 0);
+    await service.testInvocation(BUILTIN_SUBSCRIPTION_ID, "pool-model");
+    assert.equal(service.list()[0].healthLatencyMs, 123);
+    assert.equal(service.list()[0].healthStatus, "healthy");
+  } finally { fixture.close(); }
+});
+
 test("official rates inherit existing model prices and repair legacy zero estimates with recorded tiers", () => {
   const fixture = createFixture();
   try {
@@ -197,9 +221,9 @@ test("subscription pool weights stored plans and applies setting changes immedia
     assert.equal(fixture.store.getSettings().gpt_quota_normalization_enabled, "false");
     assert.equal(pool().quotaCapacityPercent, 300);
     fixture.store.saveSettings({ gpt_quota_normalization_enabled: "true" });
-    assert.equal(pool().quotaCapacityPercent, 1100);
-    assert.equal(pool().fiveHourRemainingPercent, 480);
-    assert.equal(pool().sevenDayRemainingPercent, 480);
+    assert.equal(pool().quotaCapacityPercent, 2100);
+    assert.equal(pool().fiveHourRemainingPercent, 880);
+    assert.equal(pool().sevenDayRemainingPercent, 880);
     fixture.store.saveSettings({ gpt_quota_multiplier_pro: "5" });
     assert.equal(pool().quotaCapacityPercent, 600);
     assert.equal(pool().sevenDayRemainingPercent, 280);

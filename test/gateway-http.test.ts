@@ -240,8 +240,8 @@ test("HTTP quota headers normalize mixed plans and use newly saved multipliers",
     Object.assign(harness.accounts[0], { subscription_plan: "plus", quota_5h_used_percent: 20, quota_7d_used_percent: 20 });
     Object.assign(harness.accounts[1], { subscription_plan: "pro", quota_5h_used_percent: 60, quota_7d_used_percent: 60 });
     const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("weighted-1", "weighted-1") });
-    assert.equal(response.headers.get("x-codex-primary-used-percent"), "56.4");
-    assert.equal(response.headers.get("x-codex-secondary-used-percent"), "56.4");
+    assert.equal(response.headers.get("x-codex-primary-used-percent"), "58.1");
+    assert.equal(response.headers.get("x-codex-secondary-used-percent"), "58.1");
     await response.text();
     harness.store.saveSettings({ gpt_quota_multiplier_pro: "5" });
     const customized = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("weighted-2", "weighted-2") });

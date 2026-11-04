@@ -25,6 +25,8 @@ import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts
 import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
+import { createSubscriptionTests } from "./upstreams/subscription-tests.ts";
+import type { GatewayAccount } from "./selection.ts";
 import { createCodexModelCatalogService, parseBundledOverrideCatalog } from "./codex-model-catalog.ts";
 import { createSubscriptionModelFetcher, type ModelAccount } from "./subscription-models.ts";
 import { createAuthService, accountFromTokens, subscriptionFromTokens } from "./auth.ts";
@@ -178,7 +180,11 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }
   store.runMaintenance();
   scheduleMaintenance();
-  upstreamService = createUpstreamService({ db: store.db, secretCodec });
+  upstreamService = createUpstreamService({ db: store.db, secretCodec, subscriptionTests: createSubscriptionTests({
+    listAccounts: () => store.listAccounts() as unknown as GatewayAccount[],
+    ignoreFiveHourLimit: () => store.getSettings().ignore_five_hour_limit === "true",
+    refreshAccount: async (id) => await refreshGatewayAccountToken(id) as unknown as GatewayAccount
+  }) });
   usageRefreshCoordinator = createUsageRefreshCoordinator({
     listAccounts: () => store.listAccounts() as Parameters<typeof createUsageRefreshCoordinator>[0]["listAccounts"] extends () => infer Accounts ? Accounts : never,
     refreshAccount: refreshUsage,

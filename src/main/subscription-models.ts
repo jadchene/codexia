@@ -91,7 +91,7 @@ export function createSubscriptionModelFetcher(options: SubscriptionModelsOption
 }
 
 /** 获取客户端真实版本，用于官方模型目录的版本协商。 */
-async function readCodexVersion(): Promise<string> {
+export async function readCodexVersion(): Promise<string> {
   const run = promisify(execFile);
   const { stdout } = process.platform === "win32"
     ? await run(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "codex --version"], { windowsHide: true, timeout: 10000 })

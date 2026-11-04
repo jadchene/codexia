@@ -280,7 +280,7 @@ textarea,
 
 .v1-analytics-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   margin-bottom: 20px;
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary);
@@ -743,7 +743,7 @@ textarea,
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .v1-analytics-metric:nth-child(4) {
+  .v1-analytics-metric:nth-child(3n + 1) {
     border-inline-start: 0;
   }
 

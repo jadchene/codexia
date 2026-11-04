@@ -49,6 +49,11 @@ export function createUpstreamService(options: {
   db: DatabaseSync;
   secretCodec: SecretCodec;
   fetch?: typeof fetch;
+  /** 使用订阅账号直接进行连接检查和调用测试。 */
+  subscriptionTests?: {
+    connection: () => Promise<UpstreamHealthResult>;
+    invocation: (modelId: string) => Promise<UpstreamInvocationTestResult>;
+  };
 }) {
   const { db, secretCodec } = options;
   const fetchImpl = options.fetch || globalThis.fetch;
@@ -71,8 +76,29 @@ export function createUpstreamService(options: {
     },
     delete: (upstreamId: string) => deleteUpstream(db, upstreamId),
     refreshBalance: (upstreamId: string) => refreshBalance(db, secretCodec, fetchImpl, upstreamId),
-    testConnection: (upstreamId: string) => testConnection(db, secretCodec, fetchImpl, upstreamId),
-    testInvocation: (upstreamId: string, modelId: string) => testInvocation(db, secretCodec, fetchImpl, upstreamId, modelId),
+    testConnection: async (upstreamId: string) => {
+      if (upstreamId !== BUILTIN_SUBSCRIPTION_ID || !options.subscriptionTests) return testConnection(db, secretCodec, fetchImpl, upstreamId);
+      const result = await options.subscriptionTests.connection();
+      saveHealthResult(db, requireUpstream(db, upstreamId), result);
+      return result;
+    },
+    testInvocation: async (upstreamId: string, modelId: string) => {
+      if (upstreamId !== BUILTIN_SUBSCRIPTION_ID || !options.subscriptionTests) return testInvocation(db, secretCodec, fetchImpl, upstreamId, modelId);
+      if (!listModels(db, upstreamId).some((model) => model.available && model.modelId === modelId)) {
+        throw upstreamError("INVOCATION_MODEL_UNAVAILABLE", "请选择账号池中的可用模型。");
+      }
+      const started = Date.now();
+      try {
+        const result = await options.subscriptionTests.invocation(modelId);
+        saveHealthResult(db, requireUpstream(db, upstreamId), { upstreamId, status: result.ok ? "healthy" : "unhealthy",
+          checkedAt: now(), latencyMs: result.latencyMs, message: result.message });
+        return result;
+      } catch (error) {
+        saveHealthResult(db, requireUpstream(db, upstreamId), { upstreamId, status: "unhealthy",
+          checkedAt: now(), latencyMs: Date.now() - started, message: "账号池调用测试失败" });
+        throw error;
+      }
+    },
     recordRequestOutcome: (upstreamId: string, outcome: { status?: number; latencyMs: number; message?: string }) => recordRequestOutcome(db, upstreamId, outcome)
   };
 }
