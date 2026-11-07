@@ -77,7 +77,7 @@ Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要�
 ```
 
 - 直连切换不会启动桌面应用；命令结束仅退出命令行进程，已经运行的 Codexia 保持运行。
-- 网关模式或启用代理时，自动启动未运行的 Codexia（托盘方式），并等待网关就绪后应用配置；已运行时复用现有进程。端口冲突或启动失败会返回错误，不报告应用成功。
+- 网关模式或启用代理时，自动启动未运行的 Codexia（托盘方式），并等待网关就绪后应用配置；只复用命令行入口同级目录的 Codexia，不关联其他安装目录；自动启动也仅使用同目录的 `Codexia.exe`。端口冲突或启动失败会返回错误，不报告应用成功。
 - 四种模式分别保存自动重启偏好。重启失败会明确提示配置已应用；未选择重启时，已有 Codex 进程可能仍使用旧配置。
 - 开发环境先运行 `npm run build:main`，再使用 `npm run cli -- --version`、`npm run cli -- mode` 或 `npm run cli -- mode switch`。需要隔离测试时，增加 `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex`。
 - CLI 复用桌面应用的数据目录和系统安全存储；它不是无界面服务器版 Electron。Windows 是打包支持平台，其他系统仍需 Electron 可用的运行环境及系统安全存储。

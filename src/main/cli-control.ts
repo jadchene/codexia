@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
+import { canonicalInstanceDirectory } from "./single-instance.ts";
 import { ACCESS_MODES, type AccessMode, type AccessSelection, type CliBackend } from "./cli.ts";
 
 interface Snapshot {
@@ -16,6 +17,7 @@ export const isCliUnavailable = (error: unknown): boolean => (error as { code?: 
 
 /** Local authenticated control channel; no account tokens or API keys cross this channel. */
 export async function startCliControl(dataDir: string, backend: CliBackend) {
+  const instanceDirectory = canonicalInstanceDirectory(dataDir);
   const token = randomBytes(32).toString("hex");
   const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\codexia-cli-${token.slice(0, 24)}` : path.join(os.tmpdir(), `codexia-cli-${token.slice(0, 24)}.sock`);
   let queue = Promise.resolve();
@@ -36,7 +38,7 @@ export async function startCliControl(dataDir: string, backend: CliBackend) {
       queue = queue.then(async () => {
         try {
           const request = JSON.parse(input.slice(0, newline));
-          if (request.token !== token) throw new Error("命令认证失败。");
+          if (request.token !== token || request.instanceDirectory !== instanceDirectory) throw new Error("命令认证失败。");
           if (request.action === "snapshot") {
             const modes = Object.keys(ACCESS_MODES) as AccessMode[];
             socket.end(`${JSON.stringify({ ok: true, result: { show: backend.show(),
@@ -56,7 +58,7 @@ export async function startCliControl(dataDir: string, backend: CliBackend) {
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(endpoint, resolve); });
   try {
     if (process.platform !== "win32") fs.chmodSync(endpoint, 0o600);
-    fs.writeFileSync(controlFile(dataDir), JSON.stringify({ endpoint, token, pid: process.pid }), { mode: 0o600 });
+    fs.writeFileSync(controlFile(dataDir), JSON.stringify({ endpoint, token, pid: process.pid, instanceDirectory }), { mode: 0o600 });
     fs.chmodSync(controlFile(dataDir), 0o600);
   } catch (error) { server.close(); throw error; }
   return async () => {
@@ -70,8 +72,10 @@ export async function startCliControl(dataDir: string, backend: CliBackend) {
 }
 
 async function request(dataDir: string, action: string, selection?: AccessSelection): Promise<Snapshot | undefined> {
-  let connection: { endpoint: string; token: string };
+  let connection: { endpoint: string; token: string; instanceDirectory: string };
   try { connection = JSON.parse(fs.readFileSync(controlFile(dataDir), "utf8")); } catch { throw unavailable(); }
+  const instanceDirectory = canonicalInstanceDirectory(dataDir);
+  if (connection.instanceDirectory !== instanceDirectory) throw unavailable();
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(connection.endpoint);
     let connected = false; let input = ""; let complete = false; let bytes = 0;
@@ -80,7 +84,7 @@ async function request(dataDir: string, action: string, selection?: AccessSelect
       if (error) reject(error); else resolve(value);
     };
     socket.setTimeout(action === "snapshot" ? 3000 : 90_000, () => finish(new Error("Codexia 命令超时；请先查看当前模式，勿盲目重复应用。")));
-    socket.once("connect", () => { connected = true; socket.write(`${JSON.stringify({ token: connection.token, action, selection })}\n`); });
+    socket.once("connect", () => { connected = true; socket.write(`${JSON.stringify({ token: connection.token, instanceDirectory, action, selection })}\n`); });
     socket.once("error", () => finish(connected ? new Error("命令连接中断，请检查配置是否已应用。") : unavailable()));
     socket.once("end", () => { if (!complete) finish(new Error("命令连接提前结束，请检查配置是否已应用。")); });
     socket.setEncoding("utf8");

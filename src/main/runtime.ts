@@ -12,7 +12,7 @@ import fs from "node:fs";
 import type { Server } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { browserDataDir, dbPath } from "./paths.ts";
+import { browserDataDir, dataDir, dbPath } from "./paths.ts";
 import { codexAccessOptions, createRuntimeProfile } from "./runtime-profile.ts";
 import { acquireSingleInstanceChannel, closeSingleInstanceChannel, readSingleInstanceSetting } from "./single-instance.ts";
 import { createStore } from "./store.ts";
@@ -108,7 +108,7 @@ app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
 });
 
 const singleInstanceChannel = useSingleInstance && hasSingleInstanceLock
-  ? acquireSingleInstanceChannel({ onSecondInstance: handleSecondInstance })
+  ? acquireSingleInstanceChannel({ instanceDirectory: runtimeProfile.paths?.dataDir || dataDir(), onSecondInstance: handleSecondInstance })
   : Promise.resolve({ primary: true, endpoint: null, server: null });
 
 async function createWindow() {
