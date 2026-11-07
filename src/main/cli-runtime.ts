@@ -1,6 +1,7 @@
 import { app, safeStorage } from "electron";
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { readSingleInstanceSetting } from "./single-instance.ts";
 import { connectCliControl } from "./cli-control.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +27,16 @@ export async function startCli(args: string[]): Promise<void> {
     const backend = async () => {
       const profile = createRuntimeProfile({ argv: process.argv, isPackaged: app.isPackaged, projectRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..") });
       const activeDataDir = profile.paths?.dataDir || dataDir();
-      const remote = await connectCliControl(activeDataDir);
+      const discovery = {
+        singleInstance: profile.useSingleInstance && readSingleInstanceSetting(path.join(activeDataDir, "codex-gateway.sqlite")),
+        globalFile: profile.isolated ? path.join(profile.paths!.runtimeRoot, "cli-single-instance.json")
+          : path.join(app.getPath("appData"), "Codexia", "cli-single-instance.json")
+      };
+      const remote = await connectCliControl(activeDataDir, discovery);
       if (remote) return remote;
       const waitForDesktop = async () => {
         for (let attempt = 0; attempt < 150; attempt++) {
-          const service = await connectCliControl(activeDataDir);
+          const service = await connectCliControl(activeDataDir, discovery);
           if (service) return service;
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
@@ -62,7 +68,7 @@ export async function startCli(args: string[]): Promise<void> {
         if (selection.mode !== "gateway" && !selection.proxy) { await local.apply(selection); return; }
         // Release the database and native single-instance lock before starting the desktop owner.
         release();
-        const running = await connectCliControl(activeDataDir);
+        const running = await connectCliControl(activeDataDir, discovery);
         if (running) { await running.apply(selection); return; }
         const launchArgs = [
           ...(!app.isPackaged ? [app.getAppPath()] : []),

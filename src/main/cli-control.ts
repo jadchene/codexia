@@ -11,13 +11,25 @@ interface Snapshot {
   choices: Record<AccessMode, ReturnType<CliBackend["choices"]>>;
   defaults: Record<AccessMode, ReturnType<CliBackend["defaults"]>>;
 }
+interface ControlMetadata {
+  endpoint: string;
+  token: string;
+  instanceDirectory: string;
+  singleInstance: boolean;
+}
+export interface CliDiscoveryOptions {
+  singleInstance?: boolean;
+  globalFile?: string;
+}
 const controlFile = (dataDir: string) => path.join(dataDir, "cli-control.json");
 const unavailable = () => Object.assign(new Error("Codexia 命令服务尚未就绪。"), { code: "CLI_UNAVAILABLE" });
 export const isCliUnavailable = (error: unknown): boolean => (error as { code?: string })?.code === "CLI_UNAVAILABLE";
 
 /** Local authenticated control channel; no account tokens or API keys cross this channel. */
-export async function startCliControl(dataDir: string, backend: CliBackend) {
+export async function startCliControl(dataDir: string, backend: CliBackend, options: CliDiscoveryOptions = {}) {
   const instanceDirectory = canonicalInstanceDirectory(dataDir);
+  const singleInstance = options.singleInstance === true;
+  const registryFiles = [controlFile(dataDir), ...(singleInstance && options.globalFile ? [options.globalFile] : [])];
   const token = randomBytes(32).toString("hex");
   const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\codexia-cli-${token.slice(0, 24)}` : path.join(os.tmpdir(), `codexia-cli-${token.slice(0, 24)}.sock`);
   let queue = Promise.resolve();
@@ -38,7 +50,7 @@ export async function startCliControl(dataDir: string, backend: CliBackend) {
       queue = queue.then(async () => {
         try {
           const request = JSON.parse(input.slice(0, newline));
-          if (request.token !== token || request.instanceDirectory !== instanceDirectory) throw new Error("命令认证失败。");
+          if (request.token !== token || request.instanceDirectory !== instanceDirectory || (request.scope === "global" && !singleInstance)) throw new Error("命令认证失败。");
           if (request.action === "snapshot") {
             const modes = Object.keys(ACCESS_MODES) as AccessMode[];
             socket.end(`${JSON.stringify({ ok: true, result: { show: backend.show(),
@@ -58,24 +70,34 @@ export async function startCliControl(dataDir: string, backend: CliBackend) {
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(endpoint, resolve); });
   try {
     if (process.platform !== "win32") fs.chmodSync(endpoint, 0o600);
-    fs.writeFileSync(controlFile(dataDir), JSON.stringify({ endpoint, token, pid: process.pid, instanceDirectory }), { mode: 0o600 });
-    fs.chmodSync(controlFile(dataDir), 0o600);
+    for (const file of registryFiles) {
+      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(file, JSON.stringify({ endpoint, token, pid: process.pid, instanceDirectory, singleInstance }), { mode: 0o600 });
+      fs.chmodSync(file, 0o600);
+    }
   } catch (error) { server.close(); throw error; }
   return async () => {
     stopping = true;
     const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-    try { if (JSON.parse(fs.readFileSync(controlFile(dataDir), "utf8")).token === token) fs.unlinkSync(controlFile(dataDir)); } catch { /* Already removed. */ }
+    for (const file of registryFiles) {
+      try { if (JSON.parse(fs.readFileSync(file, "utf8")).token === token) fs.unlinkSync(file); } catch { /* Already removed. */ }
+    }
     await queue;
     for (const socket of sockets) socket.destroy();
     await closed;
   };
 }
 
-async function request(dataDir: string, action: string, selection?: AccessSelection): Promise<Snapshot | undefined> {
-  let connection: { endpoint: string; token: string; instanceDirectory: string };
-  try { connection = JSON.parse(fs.readFileSync(controlFile(dataDir), "utf8")); } catch { throw unavailable(); }
-  const instanceDirectory = canonicalInstanceDirectory(dataDir);
-  if (connection.instanceDirectory !== instanceDirectory) throw unavailable();
+function readConnection(file: string): ControlMetadata | null {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    return typeof value.endpoint === "string" && typeof value.token === "string" && typeof value.instanceDirectory === "string"
+      && typeof value.singleInstance === "boolean" ? value : null;
+  } catch { return null; }
+}
+
+async function request(connection: ControlMetadata, scope: "global" | "local", action: string, selection?: AccessSelection): Promise<Snapshot | undefined> {
+  const instanceDirectory = connection.instanceDirectory;
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(connection.endpoint);
     let connected = false; let input = ""; let complete = false; let bytes = 0;
@@ -84,7 +106,7 @@ async function request(dataDir: string, action: string, selection?: AccessSelect
       if (error) reject(error); else resolve(value);
     };
     socket.setTimeout(action === "snapshot" ? 3000 : 90_000, () => finish(new Error("Codexia 命令超时；请先查看当前模式，勿盲目重复应用。")));
-    socket.once("connect", () => { connected = true; socket.write(`${JSON.stringify({ token: connection.token, instanceDirectory, action, selection })}\n`); });
+    socket.once("connect", () => { connected = true; socket.write(`${JSON.stringify({ token: connection.token, instanceDirectory, scope, action, selection })}\n`); });
     socket.once("error", () => finish(connected ? new Error("命令连接中断，请检查配置是否已应用。") : unavailable()));
     socket.once("end", () => { if (!complete) finish(new Error("命令连接提前结束，请检查配置是否已应用。")); });
     socket.setEncoding("utf8");
@@ -97,11 +119,22 @@ async function request(dataDir: string, action: string, selection?: AccessSelect
   });
 }
 
-export async function connectCliControl(dataDir: string): Promise<CliBackend | null> {
-  let snapshot: Snapshot | undefined;
-  try { snapshot = await request(dataDir, "snapshot"); }
-  catch (error) { if (isCliUnavailable(error)) return null; throw error; }
-  if (!snapshot) throw new Error("Codexia 未返回接入配置。");
-  return { show: () => snapshot!.show, choices: (mode) => snapshot!.choices[mode], defaults: (mode) => snapshot!.defaults[mode],
-    apply: async (selection) => { await request(dataDir, "apply", selection); } };
+export async function connectCliControl(dataDir: string, options: CliDiscoveryOptions = {}): Promise<CliBackend | null> {
+  const candidates: Array<{ connection: ControlMetadata; scope: "global" | "local" }> = [];
+  if (options.singleInstance && options.globalFile) {
+    const global = readConnection(options.globalFile);
+    if (global?.singleInstance) candidates.push({ connection: global, scope: "global" });
+  }
+  const local = readConnection(controlFile(dataDir));
+  if (local?.instanceDirectory === canonicalInstanceDirectory(dataDir)) candidates.push({ connection: local, scope: "local" });
+  for (const { connection, scope } of candidates) {
+    let snapshot: Snapshot | undefined;
+    try { snapshot = await request(connection, scope, "snapshot"); }
+    catch (error) { if (isCliUnavailable(error)) continue; throw error; }
+    if (!snapshot) throw new Error("Codexia 未返回接入配置。");
+    // Pin the selected instance for the whole command; a restart must not silently redirect an apply.
+    return { show: () => snapshot!.show, choices: (mode) => snapshot!.choices[mode], defaults: (mode) => snapshot!.defaults[mode],
+      apply: async (selection) => { await request(connection, scope, "apply", selection); } };
+  }
+  return null;
 }

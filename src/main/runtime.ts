@@ -12,7 +12,7 @@ import fs from "node:fs";
 import type { Server } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { browserDataDir, dataDir, dbPath } from "./paths.ts";
+import { browserDataDir, dbPath } from "./paths.ts";
 import { codexAccessOptions, createRuntimeProfile } from "./runtime-profile.ts";
 import { acquireSingleInstanceChannel, closeSingleInstanceChannel, readSingleInstanceSetting } from "./single-instance.ts";
 import { createStore } from "./store.ts";
@@ -108,7 +108,7 @@ app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
 });
 
 const singleInstanceChannel = useSingleInstance && hasSingleInstanceLock
-  ? acquireSingleInstanceChannel({ instanceDirectory: runtimeProfile.paths?.dataDir || dataDir(), onSecondInstance: handleSecondInstance })
+  ? acquireSingleInstanceChannel({ ...(runtimeProfile.isolated ? { instanceDirectory: runtimeProfile.paths!.dataDir } : {}), onSecondInstance: handleSecondInstance })
   : Promise.resolve({ primary: true, endpoint: null, server: null });
 
 async function createWindow() {
@@ -262,7 +262,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     },
     onApplied: () => { notifyDataChanged(["settings", "accounts", "upstreams", "upstreamModels"]); updateTrayMenu(); },
     restart: async (options) => { await restartCodexDaemon(options); }
-  }));
+  }), {
+    singleInstance: useSingleInstance,
+    globalFile: runtimeProfile.isolated
+      ? path.join(runtimeProfile.paths!.runtimeRoot, "cli-single-instance.json")
+      : path.join(app.getPath("appData"), "Codexia", "cli-single-instance.json")
+  });
   scheduleUsageRefresh("startup");
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {

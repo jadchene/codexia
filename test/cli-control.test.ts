@@ -70,3 +70,41 @@ it("separate installation directories never reuse control metadata or single-ins
     await closeSecond?.(); await closeFirst(); fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+it("single-instance discovery is global, multi-instance discovery stays local, and applies stay pinned", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-discovery-"));
+  const first = path.join(root, "first", "data"); const second = path.join(root, "second", "data");
+  const absent = path.join(root, "absent", "data"); const globalFile = path.join(root, "user", "cli-single-instance.json");
+  for (const dir of [first, second, absent]) fs.mkdirSync(dir, { recursive: true });
+  const aApply = vi.fn(async () => {}); const bApply = vi.fn(async () => {});
+  const backend = (name: string, apply: CliBackend["apply"]): CliBackend => ({ show: () => name,
+    choices: () => [{ id: name, label: name }], defaults: () => ({ targetId: name, proxy: false, restart: false }), apply });
+  const closeA = await startCliControl(first, backend("A", aApply), { singleInstance: true, globalFile });
+  const closeB = await startCliControl(second, backend("B", bApply), { singleInstance: false, globalFile });
+  let aClosed = false;
+  try {
+    const global = (await connectCliControl(second, { singleInstance: true, globalFile }))!;
+    expect(global.show()).toBe("A"); expect(global.choices("openai")[0]?.id).toBe("A");
+    expect((await connectCliControl(absent, { singleInstance: true, globalFile }))!.show()).toBe("A");
+    const local = (await connectCliControl(second, { singleInstance: false, globalFile }))!;
+    expect(local.show()).toBe("B");
+    expect(await connectCliControl(absent, { singleInstance: false, globalFile })).toBeNull();
+    // B must neither overwrite nor advertise itself as the global singleton.
+    const registry = JSON.parse(fs.readFileSync(globalFile, "utf8"));
+    expect(registry.instanceDirectory).toBe(fs.realpathSync(first));
+    const selection = { mode: "gateway" as const, targetId: "", proxy: false, restart: false };
+    await global.apply(selection); expect(aApply).toHaveBeenCalledOnce(); expect(bApply).not.toHaveBeenCalled();
+    await local.apply(selection); expect(bApply).toHaveBeenCalledOnce();
+    await closeA(); aClosed = true;
+    expect(fs.existsSync(globalFile)).toBe(false);
+    // A stale record must not prevent using the local desktop, but a previously selected A cannot redirect to B.
+    fs.writeFileSync(globalFile, JSON.stringify(registry));
+    expect((await connectCliControl(second, { singleInstance: true, globalFile }))!.show()).toBe("B");
+    await expect(global.apply(selection)).rejects.toThrow();
+    expect(bApply).toHaveBeenCalledOnce();
+    expect(await connectCliControl(absent, { singleInstance: true, globalFile })).toBeNull();
+  } finally {
+    if (!aClosed) await closeA();
+    await closeB(); fs.rmSync(root, { recursive: true, force: true });
+  }
+});
