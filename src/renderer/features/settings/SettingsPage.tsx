@@ -94,6 +94,7 @@ export const SettingsPage = ({
   onClearAppLogs
 }: SettingsPageProps) => {
   const [form] = Form.useForm<SettingsFormValues>();
+  const quotaNormalizationEnabled = Form.useWatch("gpt_quota_normalization_enabled", form);
   const [activeSection, setActiveSection] = useState("general");
   const [dirty, setDirty] = useState(false);
   const [autoReviewModelOptions, setAutoReviewModelOptions] = useState<Array<{ value: string; label: string }>>([]);
@@ -348,7 +349,7 @@ export const SettingsPage = ({
           </div>
           <Form.Item name="gpt_quota_normalization_enabled" valuePropName="checked" noStyle><Switch aria-label="按 Plus 基准折算额度" /></Form.Item>
         </Flex>
-        <div className="v1-settings-grid v1-settings-grid-2">
+        <div className="v1-settings-grid v1-settings-grid-2" style={{ display: quotaNormalizationEnabled === true ? undefined : "none" }}>
           {Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS).map((plan) => (
             <Form.Item key={plan} name={`gpt_quota_multiplier_${plan}`} label={`${QUOTA_PLAN_LABELS[plan]} 倍率`} rules={[{ required: true, message: "请输入套餐倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
               <InputNumber min={0} max={1000} suffix="× Plus" style={{ width: "100%" }} />
@@ -400,13 +401,13 @@ export const SettingsPage = ({
           估算费用 = 模型 Token 费用 × 请求优先级倍率。未指定优先级时按标准计算，响应优先级不影响估算；修改仅影响后续调用。
         </Typography.Paragraph>
         <div className="v1-settings-grid v1-settings-grid-3">
-          {(["standard", "fast", "ultrafast"] as const).map((tier, index) => (
-            <Form.Item key={tier} name={`billing_service_tier_${tier}_multiplier`} label={`${["标准", "快速", "超快速"][index]}倍率`} rules={[{ required: true, message: "请输入优先级倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
+          {(["pool_standard", "pool_fast", "pool_ultrafast", "standard", "fast", "ultrafast"] as const).map((tier, index) => (
+            <Form.Item key={tier} name={`billing_service_tier_${tier}_multiplier`} label={`${index < 3 ? "账号池" : "API"} ${["标准", "快速", "超快速"][index % 3]}倍率`} rules={[{ required: true, message: "请输入优先级倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
               <InputNumber min={0} max={1000} step={0.1} style={{ width: "100%" }} />
             </Form.Item>
           ))}
         </div>
-        <Typography.Text type="secondary">默认倍率为 1 / 2 / 6，用于本地费用估算。订阅内含额度消耗和 API 实际账单以渠道规则为准。</Typography.Text>
+        <Typography.Text type="secondary">账号池默认倍率为 1 / 2.5 / 8，API 为 1 / 2 / 6，用于本地费用估算。订阅内含额度消耗和 API 实际账单以渠道规则为准。</Typography.Text>
       </SettingsSection>
     </Space>
   );
@@ -596,7 +597,7 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
   values.single_instance = settings.single_instance !== "false";
   values.show_scheduled_tasks_menu = settings.show_scheduled_tasks_menu === "true";
   for (const key of Object.keys(SERVICE_TIER_DEFAULT_SETTINGS)) {
-    values[key] = serviceTierMultiplier(key.replace("billing_service_tier_", "").replace("_multiplier", ""), settings);
+    values[key] = serviceTierMultiplier(key.replace("billing_service_tier_", "").replace("pool_", "").replace("_multiplier", ""), settings, key.includes("_pool_") ? "chatgpt_subscription_pool" : null);
   }
   values.gpt_quota_normalization_enabled = settings.gpt_quota_normalization_enabled === "true";
   for (const plan of Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS)) {

@@ -50,8 +50,8 @@ test.each(["hello", "x".repeat(1024 * 1024 + 1)])("账号代理完整记录优�
       output_tokens: 3,
       requested_service_tier: "ultrafast",
       service_tier: "ultrafast",
-      service_tier_multiplier: 6,
-      estimated_cost: 0.000009 * 6,
+      service_tier_multiplier: 8,
+      estimated_cost: 0.000009 * 8,
       cost_unit: "USD"
     }));
 

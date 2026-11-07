@@ -593,9 +593,11 @@ describe("Ant Design pages", () => {
     expect(requestRow).toBeTruthy();
     await user.click(within(requestRow!).getByText("ChatGPT 订阅账号池"));
     expect(await screen.findByText("账号 A · a@example.com")).toBeTruthy();
-    expect(screen.getByText("超快速（ultrafast）")).toBeTruthy();
-    expect(screen.getByText("快速（fast）")).toBeTruthy();
-    expect(screen.getByText("历史响应值")).toBeTruthy();
+    for (const label of ["渠道类型", "请求优先级", "计费优先级", "计费依据", "优先级倍率"]) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
+    expect(screen.getByText("计费倍率")).toBeTruthy();
+    expect(screen.getByText("错误信息")).toBeTruthy();
     expect(screen.getByText("2 倍")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /查询/ }));
     expect(onQuery).toHaveBeenCalledOnce();
@@ -604,7 +606,7 @@ describe("Ant Design pages", () => {
     expect(onQuery.mock.calls[1]?.[0]).not.toHaveProperty("accountId");
   });
 
-  it("shows an unspecified request tier as standard in request details", async () => {
+  it("shows billing multiplier without priority metadata in request details", async () => {
     const user = userEvent.setup();
     const pageData = { ...emptyRequestPage, total: 1, items: [{
       id: 2, created_at: 1, client_model: "standard-request-test", requested_service_tier: null,
@@ -612,9 +614,9 @@ describe("Ant Design pages", () => {
     }] };
     renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={emptySummary} accounts={[]} settings={{}} onMessage={vi.fn()} onQuery={vi.fn()} />);
     await user.click(screen.getByText("standard-request-test"));
-    expect(await screen.findByText("标准（未指定）")).toBeTruthy();
-    expect(screen.getByText("标准（default）")).toBeTruthy();
-    expect(screen.getByText("未指定，按标准")).toBeTruthy();
+    expect(await screen.findByText("计费倍率")).toBeTruthy();
+    expect(screen.queryByText("计费优先级")).toBeNull();
+    expect(screen.queryByText("计费依据")).toBeNull();
     expect(screen.getByText("1 倍")).toBeTruthy();
     expect(screen.queryByText("响应确认")).toBeNull();
   });

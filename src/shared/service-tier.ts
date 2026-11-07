@@ -4,7 +4,10 @@ import type { Settings } from "./contracts/settings";
 export const SERVICE_TIER_DEFAULT_SETTINGS: Settings = {
   billing_service_tier_standard_multiplier: "1",
   billing_service_tier_fast_multiplier: "2",
-  billing_service_tier_ultrafast_multiplier: "6"
+  billing_service_tier_ultrafast_multiplier: "6",
+  billing_service_tier_pool_standard_multiplier: "1",
+  billing_service_tier_pool_fast_multiplier: "2.5",
+  billing_service_tier_pool_ultrafast_multiplier: "8"
 };
 
 /** 保留协议取值，拒绝无效或过长的日志字段。 */
@@ -33,13 +36,13 @@ export const serviceTierLabel = (value: unknown): string => {
 };
 
 /** 按请求优先级读取倍率，自动或未知优先级按基础价格估算。 */
-export const serviceTierMultiplier = (value: unknown, settings: Settings = {}): number => {
+export const serviceTierMultiplier = (value: unknown, settings: Settings = {}, upstreamKind?: string | null): number => {
   const tier = normalizeServiceTier(value);
   const category = tier === "priority" || tier === "fast" ? "fast"
     : tier === "ultrafast" ? "ultrafast"
       : tier === "default" || tier === "standard" || !tier ? "standard" : null;
   if (!category) return 1;
-  const key = `billing_service_tier_${category}_multiplier`;
+  const key = `billing_service_tier_${upstreamKind === "chatgpt_subscription_pool" ? "pool_" : ""}${category}_multiplier`;
   const raw = settings[key];
   const multiplier = raw?.trim() ? Number(raw) : NaN;
   return Number.isFinite(multiplier) && multiplier >= 0 && multiplier <= 1000
@@ -47,13 +50,13 @@ export const serviceTierMultiplier = (value: unknown, settings: Settings = {}): 
 };
 
 /** 仅按请求优先级保存计费快照，未指定时按标准处理。 */
-export const serviceTierLogFields = (requested: unknown, settings: Settings) => {
+export const serviceTierLogFields = (requested: unknown, settings: Settings, upstreamKind?: string | null) => {
   const requestedTier = normalizeServiceTier(requested);
   const tier = requestedTier ?? "default";
   return {
     requested_service_tier: requestedTier,
     service_tier: tier,
     service_tier_source: requestedTier ? "request" : "default",
-    service_tier_multiplier: serviceTierMultiplier(tier, settings)
+    service_tier_multiplier: serviceTierMultiplier(tier, settings, upstreamKind)
   };
 };

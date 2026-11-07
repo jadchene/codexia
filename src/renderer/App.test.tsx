@@ -105,9 +105,11 @@ it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model 
   await screen.findByText("忽略 5 小时限制");
   expect(screen.queryByText("重启服务后生效")).toBeNull();
   if (field === "multiplier") {
+    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
     const input = screen.getByRole("spinbutton", { name: "Pro 200 倍率" });
     await user.clear(input);
     await user.type(input, "12.5");
+    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
   } else {
     await user.click(screen.getByRole("switch", { name: field === "fiveHour" ? "忽略 5 小时限制" : "按 Plus 基准折算额度" }));
   }

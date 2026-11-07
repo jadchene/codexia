@@ -126,6 +126,8 @@ test("v8 migration preserves historical costs, rolls back failures and stores ti
     assert.equal(upgraded.getSettings().billing_service_tier_standard_multiplier, "1");
     assert.equal(upgraded.getSettings().billing_service_tier_fast_multiplier, "2");
     assert.equal(upgraded.getSettings().billing_service_tier_ultrafast_multiplier, "6");
+    assert.equal(upgraded.getSettings().billing_service_tier_pool_fast_multiplier, "2.5");
+    assert.equal(upgraded.getSettings().billing_service_tier_pool_ultrafast_multiplier, "8");
     upgraded.addTokenLog({ method: "POST", requested_service_tier: "priority", service_tier: "fast", service_tier_source: "response", service_tier_multiplier: 2, estimated_cost: 5 });
     upgraded.saveSettings({ billing_service_tier_fast_multiplier: "3" });
     upgraded.db.close();

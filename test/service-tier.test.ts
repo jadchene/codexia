@@ -21,6 +21,22 @@ describe("优先级估算与协议兼容", () => {
     expect(log.estimated_cost).toBe(2.625 * multiplier);
   });
 
+  it.each([['fast', 2.5, 2], ['priority', 2.5, 2], ['ultrafast', 8, 6]] as const)("HTTP %s 按实际渠道使用独立设置", (tier, pool, api) => {
+    for (const kind of ['chatgpt_subscription_pool', 'openai_compatible']) {
+      const log = buildResponsesRequestLog({
+        method: 'POST', requestPath: '/v1/responses', upstreamPath: '/responses', headers: {}, status: 200,
+        durationMs: 1, usage, settings: {}, requestedServiceTier: tier, modelPricing,
+        account: { id: 'a' }, target: { kind }
+      });
+      const multiplier = kind === 'chatgpt_subscription_pool' ? pool : api;
+      expect(log.service_tier_multiplier).toBe(multiplier);
+      expect(log.estimated_cost).toBe(2.625 * multiplier);
+    }
+    const settings = editableSettingsPatch({ billing_service_tier_pool_fast_multiplier: '4', billing_service_tier_fast_multiplier: '3' });
+    expect(serviceTierMultiplier('fast', settings, 'chatgpt_subscription_pool')).toBe(4);
+    expect(serviceTierMultiplier('fast', settings, 'openai_compatible')).toBe(3);
+  });
+
   it("按请求保存计费档位，未指定时使用标准倍率设置", () => {
     expect(serviceTierLogFields("ultrafast", {})).toEqual({
       requested_service_tier: "ultrafast", service_tier: "ultrafast", service_tier_source: "request", service_tier_multiplier: 6
@@ -69,19 +85,19 @@ describe.each(["gateway", "account"])("%s WebSocket 的逐次优先级", (mode) 
         send("onUpstreamMessage", { type: "response.created", response: { service_tier: tier === "priority" ? "default" : undefined } });
         send("onUpstreamMessage", { type: "response.completed", response: { service_tier: "default", usage } });
       }
-      expect(logs.map((log) => log.service_tier_multiplier)).toEqual([2, 6, 1]);
-      expect(logs.map((log) => log.estimated_cost)).toEqual([5.25, 15.75, 2.625]);
+      expect(logs.map((log) => log.service_tier_multiplier)).toEqual([2.5, 8, 1]);
+      expect(logs.map((log) => log.estimated_cost)).toEqual([6.5625, 21, 2.625]);
       expect(logs[0]).toMatchObject({ requested_service_tier: "priority", service_tier: "priority", service_tier_source: "request" });
       expect(logs[2]).toMatchObject({ requested_service_tier: null, service_tier: "default", service_tier_source: "default" });
       send("onDownstreamMessage", { type: "response.create", model: "gpt-test", service_tier: "fast" });
       send("onUpstreamMessage", { type: "response.failed", response: { service_tier: "fast" } });
-      expect(logs[3]).toMatchObject({ status: 500, requested_service_tier: "fast", service_tier: "fast", service_tier_multiplier: 2 });
+      expect(logs[3]).toMatchObject({ status: 500, requested_service_tier: "fast", service_tier: "fast", service_tier_multiplier: 2.5 });
       expect(logs[3]?.estimated_cost).toBe(0);
-      billingSettings.billing_service_tier_fast_multiplier = "3";
+      billingSettings.billing_service_tier_pool_fast_multiplier = "3";
       send("onDownstreamMessage", { type: "response.create", model: "gpt-test", service_tier: "fast" });
       send("onUpstreamMessage", { type: "response.completed", response: { usage } });
       expect(logs[4]).toMatchObject({ service_tier_multiplier: 3, estimated_cost: 7.875 });
-      expect(logs[3]?.service_tier_multiplier).toBe(2);
+      expect(logs[3]?.service_tier_multiplier).toBe(2.5);
     } finally { observer.dispose(); }
   });
 });

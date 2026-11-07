@@ -560,7 +560,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         status,
         duration_ms: Date.now() - started,
         ...emptyUsage(),
-        ...serviceTierLogFields(requestedServiceTier, settings),
+        ...serviceTierLogFields(requestedServiceTier, settings, targetForLog?.kind || (accountForLog ? "chatgpt_subscription_pool" : null)),
         ...routeLogFields(routeResultForLog || { account: accountForLog, target: targetForLog }),
         message: gatewayErrorMessage(error, message)
       });
@@ -860,7 +860,7 @@ function routeLogFields(result: Dynamic = {}) {
 }
 
 function costLogFields(result: Dynamic, usage: Dynamic, settings: Dynamic, requestedServiceTier: string | null) {
-  const tierFields = serviceTierLogFields(requestedServiceTier, settings);
+  const tierFields = serviceTierLogFields(requestedServiceTier, settings, result?.target?.kind || (result?.account ? "chatgpt_subscription_pool" : null));
   const estimated = estimateUpstreamCost(usage, result?.target?.modelPricing, settings?.billing_currency, tierFields.service_tier_multiplier);
   return { ...tierFields, ...(estimated ? { estimated_cost: estimated.amount, cost_unit: estimated.unit } : {}) };
 }

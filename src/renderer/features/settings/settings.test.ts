@@ -219,9 +219,11 @@ describe("settings appearance and display units", () => {
     }));
 
     await user.click(screen.getByRole("menuitem", { name: "日志与计费" }));
-    expect(Number((screen.getByRole("spinbutton", { name: "标准倍率" }) as HTMLInputElement).value)).toBe(1);
-    expect(Number((screen.getByRole("spinbutton", { name: "快速倍率" }) as HTMLInputElement).value)).toBe(2);
-    expect(Number((screen.getByRole("spinbutton", { name: "超快速倍率" }) as HTMLInputElement).value)).toBe(6);
+    expect(Number((screen.getByRole("spinbutton", { name: "API 标准倍率" }) as HTMLInputElement).value)).toBe(1);
+    expect(Number((screen.getByRole("spinbutton", { name: "API 快速倍率" }) as HTMLInputElement).value)).toBe(2);
+    expect(Number((screen.getByRole("spinbutton", { name: "API 超快速倍率" }) as HTMLInputElement).value)).toBe(6);
+    expect(Number((screen.getByRole("spinbutton", { name: "账号池 快速倍率" }) as HTMLInputElement).value)).toBe(2.5);
+    expect(Number((screen.getByRole("spinbutton", { name: "账号池 超快速倍率" }) as HTMLInputElement).value)).toBe(8);
     const retentionInput = screen.getByRole("spinbutton", { name: "调用记录保留" });
     await user.clear(retentionInput);
     await user.type(retentionInput, "0");
@@ -261,9 +263,18 @@ describe("settings appearance and display units", () => {
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
     expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
     expect(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByRole("spinbutton", { name: "Pro 100 倍率" })).toBeNull();
+    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
     expect(screen.getByRole("spinbutton", { name: "Pro 100 倍率" }).getAttribute("value")).toBe("10");
     expect(screen.getByRole("spinbutton", { name: "Pro 200 倍率" }).getAttribute("value")).toBe("20");
     expect(screen.getByRole("spinbutton", { name: "Pro 500 倍率" }).getAttribute("value")).toBe("50");
+    const proInput = screen.getByRole("spinbutton", { name: "Pro 100 倍率" });
+    await user.clear(proInput);
+    await user.type(proInput, "12");
+    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
+    expect(screen.queryByRole("spinbutton", { name: "Pro 100 倍率" })).toBeNull();
+    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
+    expect((screen.getByRole("spinbutton", { name: "Pro 100 倍率" }) as HTMLInputElement).value).toBe("12");
     expect(screen.getByText("账号调度")).toBeTruthy();
     expect(screen.getByText("会话亲和有效期")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));

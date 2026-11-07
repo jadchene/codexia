@@ -44,7 +44,7 @@ interface ResponsesRequestLogInput {
  * 生成 HTTP 与 WebSocket 共用的 Responses 调用日志字段。
  */
 export const buildResponsesRequestLog = (input: ResponsesRequestLogInput): Record<string, unknown> => {
-  const tierFields = serviceTierLogFields(input.requestedServiceTier, input.settings);
+  const tierFields = serviceTierLogFields(input.requestedServiceTier, input.settings, input.target?.kind || (input.account ? "chatgpt_subscription_pool" : null));
   const estimated = estimateUpstreamCost(
     input.usage,
     input.target?.modelPricing || input.modelPricing,

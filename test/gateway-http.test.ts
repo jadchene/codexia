@@ -1572,11 +1572,11 @@ test.each([
   { requested: null, actual: "default", multiplier: 1, stream: true },
   { requested: "", actual: "default", multiplier: 1, stream: false },
   { requested: "  ", actual: "default", multiplier: 1, stream: true },
-  { requested: "priority", actual: "default", multiplier: 2, stream: true },
-  { requested: "priority", actual: "fast", multiplier: 2, stream: true },
-  { requested: "ultrafast", actual: "ultrafast", multiplier: 6, stream: true },
-  { requested: "ultrafast", actual: "default", multiplier: 6, stream: true },
-  { requested: "fast", actual: undefined, multiplier: 2, stream: false },
+  { requested: "priority", actual: "default", multiplier: 2.5, stream: true },
+  { requested: "priority", actual: "fast", multiplier: 2.5, stream: true },
+  { requested: "ultrafast", actual: "ultrafast", multiplier: 8, stream: true },
+  { requested: "ultrafast", actual: "default", multiplier: 8, stream: true },
+  { requested: "fast", actual: undefined, multiplier: 2.5, stream: false },
   { requested: "auto", actual: "ultrafast", multiplier: 1, stream: false }
 ])("HTTP gateway estimates priority cost: $requested -> $actual (stream=$stream)", async ({ requested, actual, multiplier, stream }) => {
   const hooks = {

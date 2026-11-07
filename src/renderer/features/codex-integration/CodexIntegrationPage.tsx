@@ -1,5 +1,5 @@
 import { CheckCircleOutlined, KeyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Radio, Segmented, Select, Space, Switch, Tag, Typography } from "antd";
+import { Alert, Button, Card, Flex, Segmented, Select, Space, Switch, Tag, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
@@ -76,14 +76,16 @@ export const CodexIntegrationPage = ({
         {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{settings.codex_auth_mode === "gateway" ? "API 模式" : "账号模式"}</Tag>}
       </Flex>
 
-      <Radio.Group value={mode} onChange={(event) => setMode(event.target.value as AuthMode)} className="v1-auth-mode-group">
-        <Radio.Button value="gateway">
-          <Space><SafetyCertificateOutlined /><span>API 模式</span></Space>
-        </Radio.Button>
-        <Radio.Button value="account">
-          <Space><KeyOutlined /><span>账号模式</span></Space>
-        </Radio.Button>
-      </Radio.Group>
+      <Segmented
+        block
+        value={mode}
+        onChange={(value) => setMode(value as AuthMode)}
+        className="v1-auth-mode-group"
+        options={[
+          { label: "API 模式", value: "gateway", icon: <SafetyCertificateOutlined /> },
+          { label: "账号模式", value: "account", icon: <KeyOutlined /> }
+        ]}
+      />
 
       {!mode && <Alert showIcon type="info" title="请选择 Codex 的接入方式。" />}
 
@@ -140,7 +142,7 @@ export const CodexIntegrationPage = ({
           <Space orientation="vertical" size={2}>
             <Flex align="center" gap={10}>
               <Typography.Text strong>通过 API 服务代理</Typography.Text>
-              <Switch size="small" aria-label="通过 API 服务代理" checked={useApiProxy} onChange={setUseApiProxy} />
+              <Switch aria-label="通过 API 服务代理" checked={useApiProxy} onChange={setUseApiProxy} />
             </Flex>
             <Typography.Text type="secondary">通过现有 API 服务透明转发，仅记录请求日志</Typography.Text>
           </Space>

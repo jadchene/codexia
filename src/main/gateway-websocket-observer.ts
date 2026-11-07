@@ -137,7 +137,7 @@ export function createWebSocketObserver(options: ObserverOptions) {
       target?.upstreamModel || currentRequest.upstreamModel || currentRequest.clientModel
     ) ?? target?.modelPricing;
     const billingSettings = store.getSettings?.() ?? settings;
-    const tierFields = serviceTierLogFields(currentRequest.requestedServiceTier, billingSettings);
+    const tierFields = serviceTierLogFields(currentRequest.requestedServiceTier, billingSettings, target?.kind || (account ? "chatgpt_subscription_pool" : null));
     const estimated = estimateUpstreamCost(currentRequest.usage, pricing, billingSettings.billing_currency, tierFields.service_tier_multiplier);
     store.addTokenLog?.({
       account_id: account?.id || null,
