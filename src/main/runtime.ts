@@ -2,7 +2,7 @@ import { startCliControl } from "./cli-control.ts";
 import { createCliAccess } from "./cli-access.ts";
 import { createMonitorLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
-import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
+import { applyApiMode, readCodexAccountTokens } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 
 type Dynamic = any;
@@ -104,7 +104,7 @@ function handleSecondInstance() {
 }
 
 app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
-  if (!(additionalData as { cli?: boolean })?.cli && !_argv.includes("--cli-service-start")) handleSecondInstance();
+  if (!(additionalData as { cli?: boolean })?.cli) handleSecondInstance();
 });
 
 const singleInstanceChannel = useSingleInstance && hasSingleInstanceLock
@@ -590,13 +590,13 @@ function registerIpc() {
     const models = upstreamService.listModels(upstreamId).filter((model) => model.available);
     if (!models.length) throw new Error("渠道没有可用模型，请先配置模型目录。");
     const catalogPath = path.join(store.paths.dataDir, "api-models.json");
-    writeFilesTransaction([{ file: catalogPath, content: JSON.stringify({ models: models.map((model) => ({
+    const modelCatalogContent = JSON.stringify({ models: models.map((model) => ({
       ...model.metadata, slug: model.modelId, display_name: model.displayName,
       prefer_websockets: channel.supportsWebSocket, supports_websockets: channel.supportsWebSocket
-    })) }, null, 2) }]);
+    })) }, null, 2);
     if (useApiProxy) await startGateway("api-proxy");
     syncLeavingCodexAccount();
-    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath,
+    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath, modelCatalogContent,
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {}) });
     store.saveSettings({ codex_auth_mode: mode, codex_selected_account_id: "", codex_selected_upstream_id: upstreamId,
       [`${mode}_selected_upstream_id`]: upstreamId, [`${mode}_use_api_proxy`]: String(useApiProxy) });

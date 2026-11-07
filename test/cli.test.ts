@@ -137,3 +137,23 @@ it("restart failures preserve applied settings and propagate the failure", async
   expect(f.config()).toContain("https://third.example/v1");
   expect(f.store.getSettings().third_party_auto_restart_app_server).toBe("true");
 });
+
+it("failed API channel switching rolls back the model catalog together with auth and config", async () => {
+  const f = fixture();
+  await f.access.apply({ mode: "openai", targetId: f.official.id, proxy: false, restart: false });
+  const catalog = path.join(f.root, "api-models.json");
+  const originalCatalog = fs.readFileSync(catalog, "utf8");
+  const originalConfig = f.config(); const originalAuth = f.auth();
+  const rename = fs.renameSync;
+  const fault = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+    if (String(from).includes("config.toml.tmp-")) throw Object.assign(new Error("config busy"), { code: "EBUSY" });
+    rename(from, to);
+  });
+  try {
+    await expect(f.access.apply({ mode: "third_party", targetId: f.third.id, proxy: false, restart: true })).rejects.toThrow("config busy");
+    expect(f.config()).toBe(originalConfig); expect(f.auth()).toEqual(originalAuth);
+    expect(fs.readFileSync(catalog, "utf8")).toBe(originalCatalog);
+    expect(f.store.getSettings().codex_auth_mode).toBe("openai");
+    expect(f.restart).not.toHaveBeenCalled();
+  } finally { fault.mockRestore(); }
+});

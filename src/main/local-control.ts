@@ -19,12 +19,19 @@ export const controlFile = (dataDir: string) => path.join(dataDir, "cli-control.
 export class ControlError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
-export function readControlMetadata(file: string): ControlMetadata | null {
+export function readControlMetadata(file: string, strict = false): ControlMetadata | null {
   try {
     const v = JSON.parse(fs.readFileSync(file, "utf8"));
-    return typeof v.endpoint === "string" && typeof v.token === "string" && typeof v.instanceDirectory === "string"
-      && typeof v.appVersion === "string" && Number.isSafeInteger(v.pid) ? v : null;
-  } catch { return null; }
+    if (typeof v.endpoint === "string" && v.endpoint && typeof v.token === "string" && v.token && typeof v.instanceDirectory === "string"
+      && typeof v.appVersion === "string" && Number.isSafeInteger(v.pid) && v.pid > 0) return v;
+    if (strict) throw new Error("Invalid metadata");
+    return null;
+  } catch (error) {
+    if (strict && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new ControlError("DISCOVERY_FAILED", "无法读取有效的同目录实例登记，请检查运行日志或重启 Codexia；不会回退到本地写入。");
+    }
+    return null;
+  }
 }
 
 /** A method registry keeps new operations separate from the transport. */
@@ -85,7 +92,11 @@ export async function startLocalControl(dataDir: string, handlers: ControlHandle
     const metadata: ControlMetadata = { endpoint, token, instanceDirectory, appVersion: options.appVersion, pid: process.pid };
     for (const file of files) {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(file, JSON.stringify(metadata), { mode: 0o600 }); fs.chmodSync(file, 0o600);
+      const temporary = `${file}.${token.slice(0, 16)}.tmp`;
+      try {
+        fs.writeFileSync(temporary, JSON.stringify(metadata), { mode: 0o600 });
+        fs.renameSync(temporary, file);
+      } finally { fs.rmSync(temporary, { force: true }); }
     }
   } catch (error) { unregister(); server.close(); throw error; }
   return async () => {
@@ -112,7 +123,12 @@ export async function requestLocalControl<T>(connection: ControlMetadata, appVer
       connected = true;
       socket.write(JSON.stringify({ version: CONTROL_PROTOCOL_VERSION, appVersion, id, method, params, token: connection.token, instanceDirectory: connection.instanceDirectory }) + "\n");
     });
-    socket.once("error", () => finish(connected ? new Error("命令连接中断，请检查配置是否已应用。") : new ControlError("UNAVAILABLE", "Codexia 命令服务未运行。")));
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      if (connected) { finish(new Error("命令连接中断，请检查配置是否已应用。")); return; }
+      finish(["ENOENT", "ECONNREFUSED"].includes(error.code || "")
+        ? new ControlError("UNAVAILABLE", "Codexia 命令服务未运行。")
+        : new ControlError("CONNECTION_FAILED", `无法连接同目录 Codexia（${error.code || "未知错误"}），不会回退到本地写入。`));
+    });
     socket.once("end", () => finish(new Error("命令连接提前结束，请检查配置是否已应用。")));
     socket.on("data", (chunk) => {
       bytes += Buffer.byteLength(chunk); if (bytes > 1024 * 1024) { finish(new Error("命令响应过大。")); return; }

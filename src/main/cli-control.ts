@@ -47,7 +47,7 @@ export async function connectCliControl(dataDir: string, options: ControlOptions
       } };
   };
   const directory = canonicalInstanceDirectory(dataDir);
-  const local = readControlMetadata(controlFile(dataDir));
+  const local = readControlMetadata(controlFile(dataDir), true);
   if (local?.instanceDirectory === directory) {
     const service = await connect(local);
     if (service) return service;

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { applyAccountMode, applyApiMode, applyGatewayMode, detectCodexAuthMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
+import { applyAccountMode, applyApiMode, applyGatewayMode, detectCodexAuthMode, readCodexAccountTokens } from "./codex-cli-auth.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 import type { createStore } from "./store.ts";
@@ -83,11 +83,11 @@ export function createCliAccess(options: {
         const models = upstreams.listModels(targetId).filter((model) => model.available);
         if (!models.length) throw new Error("渠道没有可用模型，请先在桌面应用中配置模型目录。");
         const catalogPath = path.join(store.paths.dataDir, "api-models.json");
-        writeFilesTransaction([{ file: catalogPath, content: JSON.stringify({ models: models.map((model) => ({
+        const modelCatalogContent = JSON.stringify({ models: models.map((model) => ({
           ...model.metadata, slug: model.modelId, display_name: model.displayName,
           prefer_websockets: channel.supportsWebSocket, supports_websockets: channel.supportsWebSocket
-        })) }, null, 2) }]);
-        applyApiMode(channel, { ...codexOptions, modelCatalogPath: catalogPath,
+        })) }, null, 2);
+        applyApiMode(channel, { ...codexOptions, modelCatalogPath: catalogPath, modelCatalogContent,
           ...(proxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {}) });
       }
       store.saveSettings({ codex_auth_mode: mode, codex_selected_account_id: mode === "account" ? targetId : "",

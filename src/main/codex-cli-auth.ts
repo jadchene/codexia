@@ -164,7 +164,7 @@ export function readCodexAccountTokens(account: AccountRecord, options: CodexPat
 export function applyApiMode(channel: {
   id: string; baseUrl: string; apiKey: string; supportsWebSocket: boolean;
   requestHeaders: Record<string, string>;
-}, options: CodexPathOptions = {}) {
+}, options: CodexPathOptions & { modelCatalogContent?: string } = {}) {
   if (!channel.apiKey) throw new Error("所选渠道未配置 API Key。");
   const url = new URL(channel.baseUrl);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
@@ -186,6 +186,7 @@ export function applyApiMode(channel: {
   ].join("\n");
   const next = insertProviderBlockIntoConfig(clean, block);
   writeFilesTransaction([
+    ...(options.modelCatalogContent === undefined ? [] : [{ file: managedModelCatalogPath(options), content: options.modelCatalogContent }]),
     { file: authPath(options), content: jsonText({ OPENAI_API_KEY: channel.apiKey }) },
     { file: configPath(options), content: next }
   ]);

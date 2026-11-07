@@ -110,3 +110,23 @@ it("a selected process is pinned and a stopped or restarted owner cannot silentl
     await (await connectCliControl(dir, options))!.apply(selection); expect(apply).toHaveBeenCalledOnce();
   } finally { await closeNew(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+it("IPC permission failures must not be treated as an absent desktop", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-ipc-permission-"));
+  const close = await startCliControl(dir, backend("one"), options);
+  const connection = vi.spyOn(net, "createConnection").mockImplementation(() => {
+    const socket = new net.Socket();
+    queueMicrotask(() => socket.emit("error", Object.assign(new Error("denied"), { code: "EACCES" })));
+    return socket;
+  });
+  try { await expect(connectCliControl(dir, options)).rejects.toThrow(/无法连接/); }
+  finally { connection.mockRestore(); await close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("corrupt instance metadata stops the CLI instead of enabling local writes", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-ipc-corrupt-"));
+  try {
+    fs.writeFileSync(controlFile(dir), "{incomplete");
+    await expect(connectCliControl(dir, options)).rejects.toMatchObject({ code: "DISCOVERY_FAILED" });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
