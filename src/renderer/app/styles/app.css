@@ -280,7 +280,7 @@ textarea,
 
 .v1-analytics-summary {
   display: grid;
-  grid-template-columns: .75fr 1.7fr 1.15fr 1.15fr 1.15fr .75fr 1.7fr;
+  grid-template-columns: minmax(110px, .8fr) minmax(210px, 1.6fr) repeat(3, minmax(135px, 1fr)) minmax(110px, .8fr) minmax(200px, 1.5fr);
   margin-bottom: 20px;
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary);
@@ -302,10 +302,9 @@ textarea,
 
 
 .v1-analytics-metric .ant-statistic-content {
-  overflow: hidden;
-  font-size: clamp(21px, 1.65vw, 30px);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: clamp(21px, 1.65vw, 28px);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .v1-analytics-metric.error .ant-statistic-content {
@@ -486,13 +485,28 @@ textarea,
   gap: 12px;
   font-size: 16px;
   font-weight: 600;
-  white-space: nowrap;
+  flex-wrap: wrap;
 }
 
 .v1-usage-data > span:first-child {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.v1-usage-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
+}
+
+.v1-analytics-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.v1-analytics-page .ant-table-cell {
+  overflow-wrap: anywhere;
 }
 
 .v1-usage-percent {
@@ -767,18 +781,18 @@ textarea,
 }
 .v1-overview-statistics {
   display: grid;
-  grid-template-columns: .75fr 1.7fr 1.15fr 1.15fr 1.15fr .75fr 1.7fr;
+  grid-template-columns: minmax(110px, .8fr) minmax(210px, 1.6fr) repeat(3, minmax(135px, 1fr)) minmax(110px, .8fr) minmax(200px, 1.5fr);
   gap: 24px;
 }
 .v1-statistic-item {
   min-width: 0;
 }
 .v1-statistic-item .ant-statistic-content {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: clamp(21px, 1.65vw, 28px);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
-@container (max-width: 900px) {
+@container (max-width: 1350px) {
   .v1-overview-statistics,
   .v1-analytics-summary {
     grid-template-columns: repeat(12, minmax(0, 1fr));

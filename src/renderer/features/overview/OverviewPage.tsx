@@ -8,7 +8,7 @@ import { Alert, Card, Col, Flex, List, Row, Space, Statistic, Tooltip, Typograph
 import { quotaRemainingPercent } from "../../../shared/quota-normalization";
 import type { ReactNode } from "react";
 import type { AppLog, TokenSummary } from "../../../shared/contracts/logs";
-import { currencyName } from "../../lib/currency";
+import { currencySymbol } from "../../lib/currency";
 import { cacheHitRate, formatTokenNumber } from "../../lib/formatters";
 
 type SettingsRecord = Record<string, string>;
@@ -97,11 +97,11 @@ export const OverviewPage = ({
         <div className="v1-overview-statistics">
           <StatisticColumn title="调用" value={total.calls || 0} />
           <StatisticColumn title="总 Token" value={total.total_tokens || 0} tooltip={<TokenUsageDetails usage={total} />} />
-          <StatisticColumn title="缓存命中" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} suffix="%" />
-          <StatisticColumn title="输出速度" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
-          <StatisticColumn title="平均耗时" value={Math.round(Number(total.average_duration_ms || 0) / 100) / 10} precision={1} suffix="s" />
+          <StatisticColumn title="缓存命中率（%）" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} />
+          <StatisticColumn title="平均耗时（s）" value={Math.round(Number(total.average_duration_ms || 0) / 100) / 10} precision={1} />
+          <StatisticColumn title="输出速度（tps）" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
           <StatisticColumn title="错误" value={Number(total.errors || 0)} />
-          <StatisticColumn title={`估算成本（${currencyName(settings.billing_currency || "USD")}）`} value={Number(total.estimated_cost || 0)} precision={4} />
+          <StatisticColumn title={`估算成本（${currencySymbol(settings.billing_currency || "USD")}）`} value={Number(total.estimated_cost || 0)} precision={4} />
         </div>
       </Card>
 
@@ -172,10 +172,10 @@ const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDe
   const remaining = quotaRemainingPercent(Number(detail?.remaining_percent || 0), Number(capacity ?? 100));
   return (
     <Card className="v1-overview-card v1-overview-status-card v1-overview-quota-card">
-      <Typography.Text type="secondary">{title}</Typography.Text>
+      <Typography.Text type="secondary">{title}（%）</Typography.Text>
       <div className="v1-overview-quota-body">
         <div>
-          <Typography.Title level={3}>{remaining.toFixed(1)}%</Typography.Title>
+          <Typography.Title level={3}>{remaining.toFixed(1)}</Typography.Title>
           <Typography.Text type="secondary">重置：{formatTime(detail?.reset_at)}</Typography.Text>
         </div>
       </div>
@@ -187,22 +187,20 @@ const StatisticColumn = ({
   title,
   value,
   precision,
-  suffix,
   tooltip
 }: {
   title: string;
   value: number | string;
   precision?: number;
-  suffix?: string;
   tooltip?: ReactNode;
 }) => (
   <div className="v1-statistic-item">
     {tooltip ? (
       <Tooltip title={tooltip}>
-        <div><Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} /></div>
+        <div><Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} /></div>
       </Tooltip>
     ) : (
-      <Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} />
+      <Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} />
     )}
   </div>
 );
@@ -212,7 +210,7 @@ const TokenUsageDetails = ({ usage }: { usage: TokenSummary["total"] }) => (
     <div>输入：{formatTokenNumber(usage.input_tokens)}</div>
     <div>缓存输入：{formatTokenNumber(usage.cached_input_tokens)}</div>
     <div>输出：{formatTokenNumber(usage.output_tokens)}</div>
-    <div>缓存命中率：{cacheHitRate(usage.input_tokens, usage.cached_input_tokens).toFixed(1)}%</div>
+    <div>缓存命中率（%）：{cacheHitRate(usage.input_tokens, usage.cached_input_tokens).toFixed(1)}</div>
   </div>
 );
 

@@ -25,7 +25,7 @@ import { useEffect, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { RequestLog, RequestLogPage, TokenAccountSummary, TokenSummary, TokenTotals } from "../../../shared/contracts/logs";
 import type { Settings } from "../../../shared/contracts/settings";
-import { currencyName } from "../../lib/currency";
+import { currencySymbol } from "../../lib/currency";
 import {
   cacheHitRate,
   formatDurationSeconds,
@@ -50,8 +50,8 @@ const ANALYTICS_COLUMN_OPTIONS = [
   { label: "模型", value: "model" },
   { label: "路径", value: "path" },
   { label: "状态", value: "status" },
-  { label: "耗时", value: "duration" },
-  { label: "输出速度", value: "outputSpeed" },
+  { label: "耗时（s）", value: "duration" },
+  { label: "输出速度（tps）", value: "outputSpeed" },
   { label: "Token", value: "tokens" },
   { label: "估算", value: "cost" }
 ] as const;
@@ -119,7 +119,7 @@ export const RequestAnalyticsPage = ({
   };
 
   const currency = settings.billing_currency || "USD";
-  const currencyLabel = currencyName(currency);
+  const currencyLabel = currencySymbol(currency);
   const accountUsage = summary.byAccount.filter((item) => Boolean(item.account_id));
   const upstreamUsage = summary.byAccount.filter((item) => !item.account_id);
   const accountPoolUsage = sumTokenUsage(accountUsage);
@@ -128,30 +128,30 @@ export const RequestAnalyticsPage = ({
     || "ChatGPT 订阅账号池";
   const breakdownTotal = upstreamUsage.reduce((total, item) => total + Number(item.total_tokens || 0), Number(accountPoolUsage.total_tokens || 0));
   const allColumns: TableColumnsType<RequestLog> = [
-    { key: "time", title: "时间", dataIndex: "created_at", width: 180, className: "v1-nowrap", render: (value) => formatTime(value) },
+    { key: "time", title: "时间", dataIndex: "created_at", width: 200, className: "v1-nowrap", render: (value) => formatTime(value) },
     {
       title: "渠道",
       key: "target",
-      width: 200,
+      width: 240,
       render: (_, log) => {
         const targetName = log.account_id
           ? accountPoolName
           : log.upstream_name || log.account_name || log.upstream_id || "未识别渠道";
-        return <Typography.Text strong ellipsis={{ tooltip: targetName }}>{targetName}</Typography.Text>;
+        return <Typography.Text strong className="v1-analytics-wrap">{targetName}</Typography.Text>;
       }
     },
     {
       title: "模型",
       key: "model",
-      width: 170,
+      width: 280,
       render: (_, log) => {
         const route = log.upstream_model && log.upstream_model !== log.client_model
           ? `${log.client_model || "-"} → ${log.upstream_model}`
           : log.client_model || log.upstream_model || "-";
-        return <Typography.Text ellipsis className="v1-mono v1-nowrap">{route}</Typography.Text>;
+        return <Typography.Text className="v1-mono v1-analytics-wrap">{route}</Typography.Text>;
       }
     },
-    { key: "path", title: "路径", dataIndex: "request_path", width: 140, ellipsis: true, render: (value) => value || "-" },
+    { key: "path", title: "路径", dataIndex: "request_path", width: 240, className: "v1-analytics-wrap", render: (value) => value || "-" },
     {
       title: "状态",
       key: "status",
@@ -159,10 +159,10 @@ export const RequestAnalyticsPage = ({
       width: 76,
       render: (value) => <Tag color={Number(value) >= 200 && Number(value) < 300 ? "success" : "error"}>{Number(value) >= 200 && Number(value) < 300 ? "成功" : "失败"}</Tag>
     },
-    { key: "duration", title: "耗时", dataIndex: "duration_ms", width: 110, render: formatDurationSeconds },
+    { key: "duration", title: "耗时（s）", dataIndex: "duration_ms", width: 130, render: formatDurationSeconds },
     {
       key: "outputSpeed",
-      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度</Tooltip>,
+      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度（tps）</Tooltip>,
       width: 150,
       align: "center",
       className: "v1-nowrap",
@@ -171,7 +171,7 @@ export const RequestAnalyticsPage = ({
     {
       title: "Token（输入 / 缓存输入 / 输出）",
       key: "tokens",
-      width: 260,
+      width: 360,
       render: (_, log) => (
         <TokenUsageTooltip usage={{
           input_tokens: Number(log.input_tokens || 0),
@@ -179,7 +179,7 @@ export const RequestAnalyticsPage = ({
           output_tokens: Number(log.output_tokens || 0),
           total_tokens: Number(log.total_tokens || 0)
         }}>
-          <Typography.Text className="v1-nowrap">
+          <Typography.Text className="v1-analytics-wrap">
             {formatTokenNumber(log.input_tokens)} / {formatTokenNumber(log.cached_input_tokens)} / {formatTokenNumber(log.output_tokens)}
           </Typography.Text>
         </TokenUsageTooltip>
@@ -188,7 +188,7 @@ export const RequestAnalyticsPage = ({
     {
       title: `估算成本（${currencyLabel}）`,
       key: "cost",
-      width: 145,
+      width: 170,
       render: (_, log) => log.estimated_cost !== null && log.estimated_cost !== undefined
         ? Number(log.estimated_cost).toFixed(4)
         : "-"
@@ -293,9 +293,9 @@ export const RequestAnalyticsPage = ({
           <TokenUsageTooltip usage={summary.total}>
             <div className="v1-analytics-metric"><Statistic title="总 Token" value={summary.total.total_tokens || 0} /></div>
           </TokenUsageTooltip>
-          <div className="v1-analytics-metric"><Statistic title="缓存命中" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} suffix="%" /></div>
-          <div className="v1-analytics-metric"><Statistic title="平均耗时" value={Math.round(Number(summary.total.average_duration_ms || 0) / 100) / 10} precision={1} suffix="s" /></div>
-          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度</Tooltip>}
+          <div className="v1-analytics-metric"><Statistic title="缓存命中率（%）" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} /></div>
+          <div className="v1-analytics-metric"><Statistic title="平均耗时（s）" value={Math.round(Number(summary.total.average_duration_ms || 0) / 100) / 10} precision={1} /></div>
+          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度（tps）</Tooltip>}
             value={summary.total.output_tokens_per_second ?? "-"} precision={1} /></div>
           <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
           <div className="v1-analytics-metric"><Statistic title={`估算成本（${currencyLabel}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>
@@ -362,7 +362,7 @@ export const RequestAnalyticsPage = ({
           columns={columns}
           dataSource={pageData.items}
           pagination={false}
-          scroll={{ x: "max-content" }}
+          scroll={{ x: columns.reduce((total, column) => total + Number(column.width || 160), 0) }}
           tableLayout="fixed"
           sticky
           onRow={(log) => ({ onClick: () => setSelectedLog(log) })}
@@ -406,7 +406,7 @@ const TokenUsageTooltip = ({
         <div>输入：{formatTokenNumber(usage.input_tokens)}</div>
         <div>缓存输入：{formatTokenNumber(usage.cached_input_tokens)}</div>
         <div>输出：{formatTokenNumber(usage.output_tokens)}</div>
-        <div>缓存命中率：{cacheHitRate(usage.input_tokens, usage.cached_input_tokens).toFixed(1)}%</div>
+        <div>缓存命中率（%）：{cacheHitRate(usage.input_tokens, usage.cached_input_tokens).toFixed(1)}</div>
       </div>
     )}
   >
@@ -426,8 +426,8 @@ const UsageSegmentContent = ({
   <>
     <span className="v1-usage-name">{name}</span>
     <span className="v1-usage-data">
-      <span>{formatTokenNumber(tokens)} Token</span>
-      <span className="v1-usage-percent">{percent.toFixed(1)}%</span>
+      <span><span className="v1-usage-label">Token</span>{formatTokenNumber(tokens)}</span>
+      <span className="v1-usage-percent"><span className="v1-usage-label">占比（%）</span>{percent.toFixed(1)}</span>
     </span>
   </>
 );
@@ -468,13 +468,13 @@ const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
     ...(log.account_id ? { 订阅账号: account } : {}),
     客户端模型: log.client_model || "-",
     渠道模型: log.upstream_model || "-",
-    计费倍率: log.service_tier_multiplier == null ? "未记录" : `${log.service_tier_multiplier} 倍`,
-    估算费用: log.estimated_cost == null ? "-" : `${log.estimated_cost} ${log.cost_unit || ""}`.trim(),
+    "计费倍率（倍）": log.service_tier_multiplier == null ? "未记录" : log.service_tier_multiplier,
+    [`估算费用${log.cost_unit ? `（${currencySymbol(log.cost_unit)}）` : ""}`]: log.estimated_cost == null ? "-" : Number(log.estimated_cost).toFixed(4),
     会话: log.session_id || "-",
     客户端路径: log.request_path || "-",
     渠道路径: log.upstream_path || "-",
     HTTP状态码: log.status || "-",
-    耗时: formatDurationSeconds(log.duration_ms),
+    "耗时（s）": formatDurationSeconds(log.duration_ms),
     输入Token: log.input_tokens || 0,
     缓存输入: log.cached_input_tokens || 0,
     输出Token: log.output_tokens || 0,

@@ -66,20 +66,20 @@ describe("Ant Design pages", () => {
     expect(screen.getByText("MCP 服务")).toBeTruthy();
     await waitFor(() => expect(window.codexGateway.listUpstreams).toHaveBeenCalled());
     expect(await screen.findByText("可选模型")).toBeTruthy();
-    expect(screen.getByText("缓存命中")).toBeTruthy();
-    expect(screen.getByText("平均耗时")).toBeTruthy();
-    expect(screen.getByText("输出速度")).toBeTruthy();
-    expect(screen.getByText("平均耗时").closest(".ant-statistic")?.textContent).toContain("0.3s");
-    expect(screen.getByText("s")).toBeTruthy();
-    expect(screen.getByText("估算成本（美元）")).toBeTruthy();
+    expect(screen.getByText("缓存命中率（%）")).toBeTruthy();
+    expect(screen.getByText("平均耗时（s）")).toBeTruthy();
+    expect(screen.getByText("输出速度（tps）")).toBeTruthy();
+    expect(screen.getByText("平均耗时（s）").closest(".ant-statistic")?.querySelector(".ant-statistic-content")?.textContent).toBe("0.3");
+    expect(screen.queryByText("s")).toBeNull();
+    expect(screen.getByText("估算成本（$）")).toBeTruthy();
     expect(screen.queryByText("今日调用统计")).toBeNull();
     expect(screen.queryByText("115.0%")).toBeNull();
     expect(screen.getByText("http://localhost:8436/v1")).toBeTruthy();
-    expect(screen.getByText("57.5%")).toBeTruthy();
-    expect(screen.getByText("75.0%")).toBeTruthy();
+    expect(screen.getByText("57.5")).toBeTruthy();
+    expect(screen.getByText("75.0")).toBeTruthy();
     await user.hover(screen.getByText("1,000"));
     expect(await screen.findByText("输入：800")).toBeTruthy();
-    expect(screen.getByText("缓存命中率：50.0%")).toBeTruthy();
+    expect(screen.getByText("缓存命中率（%）：50.0")).toBeTruthy();
   });
 
   it.each([true, false])("counts the merged visible models once with the official channel enabled: %s", async (officialEnabled) => {
@@ -107,8 +107,8 @@ describe("Ant Design pages", () => {
     renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
       quotaSummary={{ capacity_percent: 1100, primary: { remaining_percent: 480 }, secondary: { remaining_percent: 1100 } }} settings={{ gpt_quota_normalization_enabled: "true" }} />);
     expect(screen.queryByText("480.0% plus")).toBeNull();
-    expect(screen.getByText("43.6%")).toBeTruthy();
-    expect(screen.getByText("100.0%")).toBeTruthy();
+    expect(screen.getByText("43.6")).toBeTruthy();
+    expect(screen.getByText("100.0")).toBeTruthy();
     expect(screen.queryAllByRole("progressbar")).toHaveLength(0);
   });
 
@@ -126,7 +126,7 @@ describe("Ant Design pages", () => {
   it.each([[0, 0, 0], [0.1, 0.05, 50]])("overview handles capacity %s without distorting its ratio", (capacity, remaining, expected) => {
     renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
       quotaSummary={{ capacity_percent: capacity, primary: { remaining_percent: remaining }, secondary: { remaining_percent: remaining } }} settings={{}} />);
-    expect(screen.getAllByText(`${expected.toFixed(1)}%`)).toHaveLength(2);
+    expect(screen.getAllByText(expected.toFixed(1))).toHaveLength(2);
   });
 
   it("opens account browser login", async () => {
@@ -200,7 +200,7 @@ describe("Ant Design pages", () => {
     };
     const view = render(<AccountsPage {...props} settings={{ ignore_five_hour_limit: "false" }} />);
 
-    expect(screen.getByText("5 小时总剩余额度").closest(".ant-card")?.textContent).toContain("75.0%");
+    expect(screen.getByText("5 小时总剩余额度").closest(".ant-card")?.textContent).toContain("75.0");
     expect(screen.getByText("7 天总剩余额度").closest(".ant-card")?.textContent).toContain("60.0%");
     expect(document.querySelector(".v1-summary-cards")?.textContent).not.toContain("令牌续期");
     expect(document.querySelectorAll(".v1-summary-cards > .ant-col-md-6")).toHaveLength(3);
@@ -530,17 +530,18 @@ describe("Ant Design pages", () => {
       ]
     };
     renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={summary} accounts={[]} settings={{ billing_currency: "CNY" }} onMessage={vi.fn()} onQuery={onQuery} />);
-    expect(screen.getAllByText("估算成本（人民币）").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("估算成本（¥）").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Token（输入 / 缓存输入 / 输出）").length).toBeGreaterThanOrEqual(1);
     const rowToken = screen.getByText("1,234 / 234 / 56");
-    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "输出速度（tps）" })).toBeTruthy();
     expect(screen.getByText("28.0")).toBeTruthy();
-    expect(screen.getByText("2 s")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "耗时（s）" })).toBeTruthy();
+    expect(screen.getByText("2")).toBeTruthy();
     expect(screen.getByText("成功")).toBeTruthy();
     expect(screen.queryByText("200")).toBeNull();
     expect(rowToken.getAttribute("title")).toBeNull();
     await user.hover(rowToken);
-    expect(await screen.findByText("缓存命中率：19.0%")).toBeTruthy();
+    expect(await screen.findByText("缓存命中率（%）：19.0")).toBeTruthy();
     expect(screen.getByText("gpt-client → gpt-upstream").getAttribute("title")).toBeNull();
     expect(screen.queryByText("session-only-in-detail")).toBeNull();
     expect(screen.getByText("DeepSeek API")).toBeTruthy();
@@ -559,7 +560,7 @@ describe("Ant Design pages", () => {
     await user.click(screen.getByRole("button", { name: "返回 ChatGPT 订阅账号池：账号 A" }));
     expect(screen.getAllByText("ChatGPT 订阅账号池")).toHaveLength(2);
     await user.hover(screen.getByText("1,524"));
-    expect(await screen.findByText("缓存命中率：40.0%")).toBeTruthy();
+    expect(await screen.findByText("缓存命中率（%）：40.0")).toBeTruthy();
     const requestRow = screen.getByText("gpt-client → gpt-upstream").closest("tr");
     expect(requestRow).toBeTruthy();
     await user.click(within(requestRow!).getByText("ChatGPT 订阅账号池"));
@@ -569,9 +570,9 @@ describe("Ant Design pages", () => {
     }
     expect(screen.getByText("HTTP状态码")).toBeTruthy();
     expect(screen.getByText("200")).toBeTruthy();
-    expect(screen.getByText("计费倍率")).toBeTruthy();
+    expect(screen.getByText("计费倍率（倍）")).toBeTruthy();
     expect(screen.getByText("错误信息")).toBeTruthy();
-    expect(screen.getByText("2 倍")).toBeTruthy();
+    expect(screen.getAllByText("2").length).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByRole("button", { name: /查询/ }));
     expect(onQuery).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: /重置/ }));
@@ -587,10 +588,10 @@ describe("Ant Design pages", () => {
     }] };
     renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={emptySummary} accounts={[]} settings={{}} onMessage={vi.fn()} onQuery={vi.fn()} />);
     await user.click(screen.getByText("standard-request-test"));
-    expect(await screen.findByText("计费倍率")).toBeTruthy();
+    expect(await screen.findByText("计费倍率（倍）")).toBeTruthy();
     expect(screen.queryByText("计费优先级")).toBeNull();
     expect(screen.queryByText("计费依据")).toBeNull();
-    expect(screen.getByText("1 倍")).toBeTruthy();
+    expect(screen.queryByText("1 倍")).toBeNull();
     expect(screen.queryByText("响应确认")).toBeNull();
   });
 
@@ -627,18 +628,18 @@ describe("Ant Design pages", () => {
       onQuery: vi.fn().mockResolvedValue(undefined)
     };
     const view = renderWithQueries(<RequestAnalyticsPage {...props} />);
-    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "输出速度（tps）" })).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "模型" })).toBeNull();
     await user.click(screen.getByRole("button", { name: /列设置/ }));
     await user.click(screen.getByRole("checkbox", { name: "路径" }));
-    await user.click(screen.getByRole("checkbox", { name: "输出速度" }));
+    await user.click(screen.getByRole("checkbox", { name: "输出速度（tps）" }));
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
     await waitFor(() => expect(localStorage.getItem("codexia:request-analytics:visible-columns:v2")).toContain("path"));
 
     view.unmount();
     renderWithQueries(<RequestAnalyticsPage {...props} />);
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
-    expect(screen.queryByRole("columnheader", { name: "输出速度" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "输出速度（tps）" })).toBeNull();
   });
 
   it("pauses runtime logs", async () => {

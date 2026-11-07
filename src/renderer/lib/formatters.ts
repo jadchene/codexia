@@ -55,5 +55,5 @@ export const resetCreditStatusLabel = (status: unknown): string => {
 
 export const formatDurationSeconds = (value: unknown): string => {
   if (value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0) return "-";
-  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format(Number(value) / 1000)} s`;
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format(Number(value) / 1000);
 };
