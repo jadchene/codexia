@@ -1,15 +1,19 @@
-// Electron's Node mode supplies console I/O on Windows without a separate Node installation.
+#!/usr/bin/env node
+// Also runs with Electron's Node mode when launched by the optional Windows shim.
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const root = path.resolve(__dirname, '..');
+// Resolve the entry file itself, including --preserve-symlinks-main invocations.
+const launcher = fs.realpathSync(__filename);
+const packaged = path.basename(launcher) === 'codexia-cli.cjs';
+const installation = path.dirname(launcher);
+const root = packaged ? path.join(installation, 'resources', 'app') : path.resolve(installation, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const args = process.argv.slice(2);
 if (args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) {
   console.log(`Codexia ${manifest.version}`);
 } else {
-  const packaged = path.basename(path.dirname(root)) === 'resources';
-  const executable = packaged ? process.execPath : require(path.join(root, 'node_modules', 'electron'));
+  const executable = packaged ? path.join(installation, 'Codexia.exe') : require(path.join(root, 'node_modules', 'electron'));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   const child = spawn(executable, [...(packaged ? [] : [root]), '--cli', ...(process.stdin.isTTY ? ['--cli-interactive'] : []), ...args], {
@@ -22,9 +26,9 @@ if (args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) {
   process.on('SIGINT', () => child.kill('SIGINT'));
   process.on('SIGTERM', () => child.kill('SIGTERM'));
   child.on('error', (error) => { console.error(error.message); process.exitCode = 1; process.stdin.destroy(); });
-  child.on('exit', (code, signal) => {
+  child.on('close', (code, signal) => {
     process.stdin.unpipe(child.stdin);
     process.stdin.destroy();
-    process.exitCode = code ?? (signal === 'SIGINT' ? 130 : 1);
+    process.exitCode = code !== null && code >= 0 ? code : (signal === 'SIGINT' ? 130 : 1);
   });
 }

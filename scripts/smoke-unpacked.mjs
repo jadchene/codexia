@@ -35,7 +35,7 @@ const sandboxReadAccess = spawnSync("icacls.exe", [unpackedRoot, "/grant", "*S-1
 if (sandboxReadAccess.status !== 0) {
   throw new Error(`Cannot grant sandbox read access to the isolated test copy: ${sandboxReadAccess.stderr || sandboxReadAccess.stdout}`);
 }
-const cliLauncher = path.join(unpackedRoot, "resources", "app", "scripts", "cli-launcher.cjs");
+const cliLauncher = path.join(unpackedRoot, "codexia-cli.cjs");
 if (!fs.existsSync(path.join(unpackedRoot, "codexia-cli.cmd")) || !fs.existsSync(cliLauncher)) {
   throw new Error("Packaged CLI launcher is missing.");
 }
@@ -45,6 +45,13 @@ const cliVersion = spawnSync(executable, [cliLauncher, "--version"], {
 const packagedVersion = JSON.parse(fs.readFileSync(path.join(unpackedRoot, "resources", "app", "package.json"), "utf8")).version;
 if (cliVersion.status !== 0 || cliVersion.stdout.trim() !== `Codexia ${packagedVersion}`) {
   throw new Error(`Packaged CLI version failed: ${cliVersion.stderr || cliVersion.stdout}`);
+}
+
+const nodeCliHelp = spawnSync(process.execPath, [cliLauncher, "--help"], {
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: "" }, encoding: "utf8", windowsHide: true, timeout: 15_000
+});
+if (nodeCliHelp.status !== 0 || !nodeCliHelp.stdout.includes("mode")) {
+  throw new Error(`Node CLI help failed: ${nodeCliHelp.stderr || nodeCliHelp.stdout}`);
 }
 
 const debuggingPort = await freePort();

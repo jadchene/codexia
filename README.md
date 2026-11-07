@@ -59,7 +59,9 @@ Each mode has its own automatic app-server restart switch. After applying config
 
 ### CLI: version and access modes
 
-The Windows unpacked build includes a separate `codexia-cli.cmd` launcher. It does not require a separate Node.js installation or a running desktop app. Use this explicit filename to avoid resolving `Codexia.exe` instead.
+The Windows unpacked build includes a Node.js entry point, `codexia-cli.cjs`: run `node codexia-cli.cjs --version`, `node codexia-cli.cjs mode`, or `node codexia-cli.cjs mode switch`. No running desktop is required. The entry resolves its real file path, so symlinks still target the original installation, including with `--preserve-symlinks-main`.
+
+The optional `codexia-cli.cmd` shortcut uses Electron’s Node mode and requires no separate Node.js installation. For symlinks, link the `.cjs` file and run it with Node; do not link the `.cmd` shortcut.
 
 ```powershell
 .\codexia-cli.cmd --version

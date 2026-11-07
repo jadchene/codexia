@@ -57,7 +57,9 @@ MIT. See [LICENSE](LICENSE).
 
 ### 命令行：版本与接入模式
 
-Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要先打开桌面应用，也不需要另外安装 Node.js。请显式使用这个入口，避免同目录的 `Codexia.exe` 被终端优先匹配。
+Windows 解压包提供 Node.js 入口 `codexia-cli.cjs`，可直接执行 `node codexia-cli.cjs --version`、`node codexia-cli.cjs mode` 或 `node codexia-cli.cjs mode switch`，无需先打开桌面应用。入口解析自身真实路径，因此软链接到其他目录后仍操作原安装目录的实例；即使使用 `--preserve-symlinks-main` 也一样。
+
+同时保留 `codexia-cli.cmd` 作为 Windows 快捷入口，借用 Electron 的 Node 模式，不需要额外安装 Node.js。需要软链接时请链接 `.cjs` 文件并用 Node 执行，不要链接 `.cmd`。
 
 ```powershell
 .\codexia-cli.cmd --version

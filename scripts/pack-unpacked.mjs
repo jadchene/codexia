@@ -66,11 +66,10 @@ fs.writeFileSync(path.join(appDir, "package.json"), `${JSON.stringify({
   dependencies: { ws: manifest.dependencies.ws }
 }, null, 2)}\n`, "utf8");
 
-fs.mkdirSync(path.join(appDir, "scripts"), { recursive: true });
-fs.copyFileSync(path.join(projectRoot, "scripts", "cli-launcher.cjs"), path.join(appDir, "scripts", "cli-launcher.cjs"));
+fs.copyFileSync(path.join(projectRoot, "scripts", "cli-launcher.cjs"), path.join(outputDir, "codexia-cli.cjs"));
 fs.writeFileSync(path.join(outputDir, "codexia-cli.cmd"), [
   "@echo off", "setlocal", "set ELECTRON_RUN_AS_NODE=1",
-  '"%~dp0Codexia.exe" "%~dp0resources\\app\\scripts\\cli-launcher.cjs" %*',
+  '"%~dp0Codexia.exe" "%~dp0codexia-cli.cjs" %*',
   "exit /b %errorlevel%", ""
 ].join("\r\n"), "utf8");
 
