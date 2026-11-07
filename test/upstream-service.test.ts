@@ -218,8 +218,8 @@ test("subscription pool weights stored plans and applies setting changes immedia
     }
     const service = createUpstreamService({ db: fixture.store.db, secretCodec: codec });
     const pool = () => service.list().find((upstream) => upstream.kind === "chatgpt_subscription_pool")!.balance.subscriptionPool!;
-    assert.equal(fixture.store.getSettings().gpt_quota_normalization_enabled, "false");
-    assert.equal(pool().quotaCapacityPercent, 300);
+    assert.equal(fixture.store.getSettings().gpt_quota_normalization_enabled, undefined);
+    assert.equal(pool().quotaCapacityPercent, 2100);
     fixture.store.saveSettings({ gpt_quota_normalization_enabled: "true" });
     assert.equal(pool().quotaCapacityPercent, 2100);
     assert.equal(pool().fiveHourRemainingPercent, 880);
@@ -230,8 +230,8 @@ test("subscription pool weights stored plans and applies setting changes immedia
     fixture.store.saveSettings({ ignore_five_hour_limit: "true" });
     assert.equal(pool().fiveHourRemainingPercent, null);
     fixture.store.saveSettings({ gpt_quota_normalization_enabled: "false" });
-    assert.equal(pool().quotaCapacityPercent, 300);
-    assert.equal(pool().sevenDayRemainingPercent, 220);
+    assert.equal(pool().quotaCapacityPercent, 600);
+    assert.equal(pool().sevenDayRemainingPercent, 280);
   } finally { fixture.close(); }
 });
 

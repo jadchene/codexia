@@ -280,7 +280,7 @@ textarea,
 
 .v1-analytics-summary {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: .75fr 1.7fr 1.15fr 1.15fr 1.15fr .75fr 1.7fr;
   margin-bottom: 20px;
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary);
@@ -295,12 +295,11 @@ textarea,
 .v1-analytics-metric {
   position: relative;
   min-width: 0;
+  max-width: 100%;
+  box-shadow: 1px 1px 0 var(--ant-color-border-secondary);
   padding: 18px 16px;
 }
 
-.v1-analytics-metric + .v1-analytics-metric {
-  border-inline-start: 1px solid var(--ant-color-border-secondary);
-}
 
 .v1-analytics-metric .ant-statistic-content {
   overflow: hidden;
@@ -739,17 +738,6 @@ textarea,
     grid-template-columns: 1fr;
   }
 
-  .v1-analytics-summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .v1-analytics-metric:nth-child(3n + 1) {
-    border-inline-start: 0;
-  }
-
-  .v1-analytics-metric:nth-child(n + 4) {
-    border-top: 1px solid var(--ant-color-border-secondary);
-  }
 }
 
 @media (max-width: 900px) {
@@ -769,19 +757,58 @@ textarea,
     grid-template-columns: 1fr;
   }
 
+}
+
+
+/* 统计区按自身可用宽度换行，Token 和成本保留更大空间。 */
+.v1-analytics-page,
+.v1-statistics-card .ant-card-body {
+  container-type: inline-size;
+}
+.v1-overview-statistics {
+  display: grid;
+  grid-template-columns: .75fr 1.7fr 1.15fr 1.15fr 1.15fr .75fr 1.7fr;
+  gap: 24px;
+}
+.v1-statistic-item {
+  min-width: 0;
+}
+.v1-statistic-item .ant-statistic-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container (max-width: 900px) {
+  .v1-overview-statistics,
   .v1-analytics-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
   }
-
-  .v1-analytics-metric:nth-child(odd) {
-    border-inline-start: 0;
+  .v1-overview-statistics > :nth-child(1),
+  .v1-analytics-summary > :nth-child(1) { grid-column: span 2; }
+  .v1-overview-statistics > :nth-child(2),
+  .v1-analytics-summary > :nth-child(2) { grid-column: span 4; }
+  .v1-overview-statistics > :nth-child(3),
+  .v1-analytics-summary > :nth-child(3),
+  .v1-overview-statistics > :nth-child(4),
+  .v1-analytics-summary > :nth-child(4) { grid-column: span 3; }
+  .v1-overview-statistics > :nth-child(5),
+  .v1-analytics-summary > :nth-child(5) { grid-column: span 4; }
+  .v1-overview-statistics > :nth-child(6),
+  .v1-analytics-summary > :nth-child(6) { grid-column: span 2; }
+  .v1-overview-statistics > :nth-child(7),
+  .v1-analytics-summary > :nth-child(7) { grid-column: span 6; }
+}
+@container (max-width: 540px) {
+  .v1-overview-statistics,
+  .v1-analytics-summary {
+    grid-template-columns: .85fr 1.35fr;
   }
-
-  .v1-analytics-metric:nth-child(even) {
-    border-inline-start: 1px solid var(--ant-color-border-secondary);
-  }
-
-  .v1-analytics-metric:nth-child(n + 3) {
-    border-top: 1px solid var(--ant-color-border-secondary);
-  }
+  .v1-overview-statistics > :nth-child(n),
+  .v1-analytics-summary > :nth-child(n) { grid-column: span 1; }
+  .v1-overview-statistics > :last-child,
+  .v1-analytics-summary > :last-child { grid-column: 1 / -1; }
+}
+@container (max-width: 320px) {
+  .v1-overview-statistics,
+  .v1-analytics-summary { grid-template-columns: minmax(0, 1fr); }
 }

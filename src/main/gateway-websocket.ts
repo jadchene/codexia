@@ -1,6 +1,5 @@
 type Dynamic = any;
 
-import { notifySessionQuotaExhausted } from "./gateway/session-wakeup.ts";
 
 import { randomUUID } from "node:crypto";
 import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts";
@@ -460,8 +459,7 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
             closeWebSocketForReconnect(downstream, "subscription account quota exhausted");
             return false;
           }
-          notifySessionQuotaExhausted(request.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
-            hooks.onSessionQuotaExhausted, true, [selected.account.id]);
+
         }
         if (selected.account) return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
         if (!externalQuotaSent) {
@@ -496,10 +494,6 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     const closeDetail = await downstreamClose;
     logTargetClose(store, parsedUrl, selected, connectionId, closeDetail, started);
   } catch (error: Dynamic) {
-    if (error?.code === "SUBSCRIPTION_ACCOUNT_UNAVAILABLE" || error?.poolQuotaExhausted) {
-      notifySessionQuotaExhausted(request.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
-        hooks.onSessionQuotaExhausted, Boolean(error.poolQuotaExhausted), error.unavailableAccountIds || []);
-    }
     pending?.dispose();
     upstream?.terminate();
     if (downstream && downstream.readyState === WebSocket.OPEN) {
@@ -1059,9 +1053,11 @@ function responseHeadersForClient(headers: Dynamic, settings: Dynamic, store: Dy
 
 function rewriteUpstreamMessage(data: Dynamic, isBinary: Dynamic, settings: Dynamic, store: Dynamic, helpers: Dynamic) {
   settings = store.getSettings?.() ?? settings;
-  if (isBinary || settings.codex_quota_headers_mode !== "rewrite") return data;
+  if (isBinary) return data;
   const event = parseJson(data);
   if (event?.type !== "codex.rate_limits") return data;
+  // 隐藏额度时丢弃额度事件；上游观察器已先同步本地账号额度。
+  if (settings.codex_quota_headers_mode !== "rewrite") return false;
   return Buffer.from(JSON.stringify({
     ...event,
     rate_limits: helpers.buildCodexQuotaSnapshot(store.listAccounts(), undefined, { ...quotaNormalizationFromSettings(settings), ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" })

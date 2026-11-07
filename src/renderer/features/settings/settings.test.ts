@@ -12,9 +12,9 @@ import {
 import { formToSettings, SettingsPage, settingsToForm } from "./SettingsPage";
 
 describe("settings appearance and display units", () => {
-  it("round-trips quota normalization switches and custom multipliers", () => {
+  it("always normalizes quota and round-trips custom multipliers", () => {
     const defaults = settingsToForm({});
-    expect(defaults.gpt_quota_normalization_enabled).toBe(false);
+    expect(defaults.gpt_quota_normalization_enabled).toBeUndefined();
     expect(defaults.gpt_quota_multiplier_plus).toBe(1);
     expect(defaults.gpt_quota_multiplier_prolite).toBe(10);
     expect(defaults.gpt_quota_multiplier_pro).toBe(20);
@@ -22,10 +22,10 @@ describe("settings appearance and display units", () => {
     expect(defaults.gpt_quota_multiplier_free).toBe(0);
     expect(defaults.gpt_quota_multiplier_go).toBe(0);
     const saved = formToSettings({}, { ...defaults, gpt_quota_normalization_enabled: true, gpt_quota_multiplier_pro: 12.5 });
-    expect(saved.gpt_quota_normalization_enabled).toBe("true");
+    expect(saved.gpt_quota_normalization_enabled).toBeUndefined();
     expect(saved.gpt_quota_multiplier_pro).toBe("12.5");
-    expect(settingsToForm(saved).gpt_quota_normalization_enabled).toBe(true);
-    expect(formToSettings(saved, { gpt_quota_normalization_enabled: false }).gpt_quota_normalization_enabled).toBe("false");
+    expect(settingsToForm(saved).gpt_quota_normalization_enabled).toBeUndefined();
+    expect(formToSettings(saved, { gpt_quota_normalization_enabled: false }).gpt_quota_normalization_enabled).toBeUndefined();
   });
   beforeEach(() => localStorage.clear());
   afterEach(() => cleanup());
@@ -262,18 +262,13 @@ describe("settings appearance and display units", () => {
     expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
     expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
-    expect(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }).getAttribute("aria-checked")).toBe("false");
-    expect(screen.queryByRole("spinbutton", { name: "Pro 100 倍率" })).toBeNull();
-    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
+    expect(screen.queryByRole("switch", { name: "按 Plus 基准折算额度" })).toBeNull();
     expect(screen.getByRole("spinbutton", { name: "Pro 100 倍率" }).getAttribute("value")).toBe("10");
     expect(screen.getByRole("spinbutton", { name: "Pro 200 倍率" }).getAttribute("value")).toBe("20");
     expect(screen.getByRole("spinbutton", { name: "Pro 500 倍率" }).getAttribute("value")).toBe("50");
     const proInput = screen.getByRole("spinbutton", { name: "Pro 100 倍率" });
     await user.clear(proInput);
     await user.type(proInput, "12");
-    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
-    expect(screen.queryByRole("spinbutton", { name: "Pro 100 倍率" })).toBeNull();
-    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
     expect((screen.getByRole("spinbutton", { name: "Pro 100 倍率" }) as HTMLInputElement).value).toBe("12");
     expect(screen.getByText("账号调度")).toBeTruthy();
     expect(screen.getByText("会话亲和有效期")).toBeTruthy();

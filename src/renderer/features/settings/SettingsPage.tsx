@@ -94,7 +94,6 @@ export const SettingsPage = ({
   onClearAppLogs
 }: SettingsPageProps) => {
   const [form] = Form.useForm<SettingsFormValues>();
-  const quotaNormalizationEnabled = Form.useWatch("gpt_quota_normalization_enabled", form);
   const [activeSection, setActiveSection] = useState("general");
   const [dirty, setDirty] = useState(false);
   const [autoReviewModelOptions, setAutoReviewModelOptions] = useState<Array<{ value: string; label: string }>>([]);
@@ -232,20 +231,6 @@ export const SettingsPage = ({
     </Space>
   );
 
-  const optionalMenus = (
-    <SettingsSection title="可选菜单" description="默认隐藏，开启并保存后显示对应菜单。已有任务的启停仍在对应页面管理。">
-      {[
-        { key: "show_session_wakeups_menu", label: "会话唤醒" },
-        { key: "show_scheduled_tasks_menu", label: "定时任务" }
-      ].map(({ key, label }) => (
-        <Flex key={key} align="center" justify="space-between" className="v1-setting-switch-row">
-          <Typography.Text strong>{label}</Typography.Text>
-          <Form.Item name={key} valuePropName="checked" noStyle><Switch aria-label={`显示${label}菜单`} /></Form.Item>
-        </Flex>
-      ))}
-    </SettingsSection>
-  );
-
   const gatewayTab = (
     <SettingsSection title="服务监听" description="设置 API 服务的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
@@ -342,21 +327,15 @@ export const SettingsPage = ({
         </Flex>
       </SettingsSection>
       <SettingsSection title="额度展示" description="设置运行概览、账号池和 Codex 客户端看到的订阅额度。">
-        <Flex align="center" justify="space-between" className="v1-setting-switch-row">
-          <div>
-            <Typography.Text strong>按 Plus 基准折算额度</Typography.Text>
-            <Typography.Text type="secondary" className="v1-block">默认关闭。启用后，总剩余额度按套餐倍率叠加，可超过 100%；概览圆环和客户端额度按折算总容量计算，最高 100%。</Typography.Text>
-          </div>
-          <Form.Item name="gpt_quota_normalization_enabled" valuePropName="checked" noStyle><Switch aria-label="按 Plus 基准折算额度" /></Form.Item>
-        </Flex>
-        <div className="v1-settings-grid v1-settings-grid-2" style={{ display: quotaNormalizationEnabled === true ? undefined : "none" }}>
+        <Typography.Paragraph type="secondary">额度固定按套餐容量加权，以 Plus 为基准设置倍率。剩余额度统一显示占总容量的 0–100%，客户端汇总额度使用相同口径。</Typography.Paragraph>
+        <div className="v1-settings-grid v1-settings-grid-2">
           {Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS).map((plan) => (
             <Form.Item key={plan} name={`gpt_quota_multiplier_${plan}`} label={`${QUOTA_PLAN_LABELS[plan]} 倍率`} rules={[{ required: true, message: "请输入套餐倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
               <InputNumber min={0} max={1000} suffix="× Plus" style={{ width: "100%" }} />
             </Form.Item>
           ))}
         </div>
-        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响订阅账号；第三方渠道始终显示可用。">
+        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响 API 模式下的订阅账号池：隐藏额度响应头和 WebSocket 额度事件，或改写为账号池汇总额度。第三方渠道始终显示可用；账号模式直连或通过代理均保留官方额度。">
           <Segmented options={[
             { label: "隐藏账号额度", value: "block" },
             { label: "显示账号池汇总", value: "rewrite" }
@@ -522,7 +501,7 @@ export const SettingsPage = ({
           />
           <div className="v1-settings-panel">
             {{
-              general: <Space orientation="vertical" size={16} style={{ width: "100%" }}>{generalTab}{optionalMenus}</Space>,
+              general: generalTab,
               gateway: gatewayTab,
               quota: quotaTab,
               logs: logsBillingTab,
@@ -593,13 +572,11 @@ const NumberField = ({
 
 export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => {
   const values = { ...settings } as SettingsFormValues;
-  values.show_session_wakeups_menu = settings.show_session_wakeups_menu === "true";
   values.single_instance = settings.single_instance !== "false";
-  values.show_scheduled_tasks_menu = settings.show_scheduled_tasks_menu === "true";
   for (const key of Object.keys(SERVICE_TIER_DEFAULT_SETTINGS)) {
     values[key] = serviceTierMultiplier(key.replace("billing_service_tier_", "").replace("pool_", "").replace("_multiplier", ""), settings, key.includes("_pool_") ? "chatgpt_subscription_pool" : null);
   }
-  values.gpt_quota_normalization_enabled = settings.gpt_quota_normalization_enabled === "true";
+  delete values.gpt_quota_normalization_enabled;
   for (const plan of Object.keys(DEFAULT_QUOTA_PLAN_MULTIPLIERS)) {
     const key = `gpt_quota_multiplier_${plan}`;
     values[key] = Number(settings[key] ?? QUOTA_NORMALIZATION_DEFAULT_SETTINGS[key]);
@@ -623,11 +600,9 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
 
 export const formToSettings = (current: SettingsRecord, values: Partial<SettingsFormValues>): SettingsRecord => {
   const next: SettingsRecord = { ...current };
+  delete next.gpt_quota_normalization_enabled;
   for (const [key, value] of Object.entries(values)) {
-    if (key === "gpt_quota_normalization_enabled") {
-      next[key] = value ? "true" : "false";
-      continue;
-    }
+    if (key === "gpt_quota_normalization_enabled") continue;
     if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled")) continue;
     if (key === "gateway_api_key" && !String(value || "").trim()) continue;
     next[key] = String(value ?? "").trim();

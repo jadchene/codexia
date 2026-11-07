@@ -79,6 +79,7 @@ export interface RequestLogPage extends PageResult<RequestLog> {
 }
 
 export interface AppLogPage extends PageResult<AppLog> {
+  filterOptions?: { levels: string[]; scopes: string[]; statuses: string[] };
   startAt?: number;
   endAt?: number;
   query?: LogQuery;

@@ -1,3 +1,5 @@
+import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
+
 type Dynamic = any;
 
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, shell } from "electron";
@@ -13,12 +15,6 @@ import { createSecretCodec } from "./secret-codec.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "./renderer-boundary.ts";
 import { listSystemFontFamilies } from "./system-fonts.ts";
 import { createUsageRefreshCoordinator } from "./usage-refresh-coordinator.ts";
-import { createSessionWakeupStore } from "./session-wakeup-store.ts";
-import { createSessionWakeupService } from "./session-wakeup-service.ts";
-import { wakeCodexSession } from "./codex-session-control.ts";
-import { createScheduledTaskStore } from "./scheduled-task-store.ts";
-import { createScheduledTaskService } from "./scheduled-task-service.ts";
-import { createCodexTaskRunner } from "./codex-task-runner.ts";
 import { startStartupUsageRefresh } from "./startup-usage-refresh.ts";
 import { MAX_USAGE_RESET_REFRESH_ATTEMPTS, usageResetRefreshDelay } from "./usage-reset-refresh.ts";
 import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts";
@@ -83,9 +79,6 @@ let tray: Tray | null = null;
 let creatingTray = false;
 let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
-let sessionWakeups: ReturnType<typeof createSessionWakeupService> | null = null;
-let scheduledTasks: ReturnType<typeof createScheduledTaskService> | null = null;
-let codexTaskRunner: ReturnType<typeof createCodexTaskRunner> | null = null;
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 let singleInstanceServer: Server | null = null;
 const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
@@ -227,29 +220,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }).catch((error: Dynamic) => {
     store.addAppLog({ level: "warn", scope: "models", action: "remote-refresh", status: "failed", message: error.message });
   });
-  sessionWakeups = createSessionWakeupService({
-    repository: createSessionWakeupStore(store.db),
-    listAccounts: () => store.listAccounts() as Parameters<typeof createSessionWakeupService>[0]["listAccounts"] extends () => infer Accounts ? Accounts : never,
-    ignoreFiveHourLimit: () => store.getSettings().ignore_five_hour_limit === "true",
-    refreshUsage: () => refreshAllUsage("session-wakeup"),
-    wake: (record, canRun) => wakeCodexSession(record, canRun, { codexHome: resolveCodexHome(codexAccessOptions(runtimeProfile)) }),
-    changed: () => notifyDataChanged(["sessionWakeups"]),
-    log: (message) => store.addAppLog({ scope: "session-wakeup", action: "schedule", message })
-  });
-  if (!runtimeProfile.isolated) sessionWakeups.start();
-  codexTaskRunner = createCodexTaskRunner({ codexHome: () => resolveCodexHome(codexAccessOptions(runtimeProfile)) });
-  scheduledTasks = createScheduledTaskService({
-    repository: createScheduledTaskStore(store.db),
-    execute: (record, onSession) => codexTaskRunner!.execute(record, onSession),
-    changed: () => notifyDataChanged(["scheduledTasks"]),
-    log: (message) => store.addAppLog({ scope: "scheduled-task", action: "execute", message })
-  });
-  if (!runtimeProfile.isolated) scheduledTasks.start();
   gateway = createGateway(store, authService, {
-    onSessionQuotaExhausted: (sessionId: string) => {
-      try { sessionWakeups?.trigger(sessionId); }
-      catch { store.addAppLog({ level: "error", scope: "session-wakeup", message: "保存会话唤醒任务失败，请检查数据目录。" }); }
-    },
     refreshAllUsage,
     ensureUsableAccounts: () => refreshAllUsage("gateway-no-usable-account"),
     refreshAccountToken: refreshGatewayAccountToken,
@@ -559,14 +530,6 @@ function registerIpc() {
   handleIpc("tokens:models", () => store.listTokenLogModels());
   handleIpc("tokens:summary", (_event, query) => store.tokenSummary(query));
   handleIpc("quota:summary", () => gatewayQuotaSummary());
-  handleIpc("sessionWakeups:list", () => sessionWakeups!.list());
-  handleIpc("sessionWakeups:save", (_event, input) => sessionWakeups!.save(input));
-  handleIpc("sessionWakeups:setEnabled", (_event, id, enabled) => sessionWakeups!.setEnabled(id, enabled));
-  handleIpc("sessionWakeups:delete", (_event, id) => sessionWakeups!.delete(id));
-  handleIpc("scheduledTasks:list", () => scheduledTasks!.list());
-  handleIpc("scheduledTasks:save", (_event, input) => scheduledTasks!.save(input));
-  handleIpc("scheduledTasks:setEnabled", (_event, id, enabled) => scheduledTasks!.setEnabled(id, enabled));
-  handleIpc("scheduledTasks:delete", (_event, id) => scheduledTasks!.delete(id));
   handleIpc("tokens:clear", () => {
     const result = store.clearTokenLogs();
     store.addAppLog({
@@ -787,14 +750,6 @@ function gatewayCodexOptions() {
   return { ...codexAccessOptions(runtimeProfile), modelCatalogPath: modelCatalogService.path };
 }
 
-function accountModeGatewayBaseUrl(settings: Dynamic): string {
-  const configuredHost = String(settings.gateway_host || "localhost").trim();
-  const reachableHost = configuredHost === "0.0.0.0" || configuredHost === "::" || configuredHost === "[::]"
-    ? "localhost"
-    : configuredHost;
-  const host = reachableHost.includes(":") && !reachableHost.startsWith("[") ? `[${reachableHost}]` : reachableHost;
-  return `http://${host}:${settings.gateway_port || "8436"}/v1`;
-}
 
 async function stopGateway(reason: Dynamic = "manual") {
   const status = await gateway.stop();
@@ -1015,11 +970,8 @@ function syncDetectedCodexAuthMode() {
 }
 
 async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
-  sessionWakeups?.stop();
-  scheduledTasks?.stop();
   if (shuttingDown) return;
   shuttingDown = true;
-  await codexTaskRunner?.stop();
   if (usageRefreshTimer) {
     clearInterval(usageRefreshTimer);
     usageRefreshTimer = null;

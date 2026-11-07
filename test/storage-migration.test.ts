@@ -6,8 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { BACKUP_MAGIC, createSecretCodec } from "../src/main/secret-codec.ts";
 import { createStore } from "../src/main/store.ts";
-import { createSessionWakeupStore } from "../src/main/session-wakeup-store.ts";
-import { createScheduledTaskStore } from "../src/main/scheduled-task-store.ts";
 
 const passthroughCodec = createSecretCodec({
   isEncryptionAvailable: () => true,
@@ -24,7 +22,7 @@ test("migrations create a verified backup, model pricing storage, and remove obs
       dataDir: fixture.directory,
       dbPath: fixture.database
     });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 8);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 9);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     const compactColumn = store.db.prepare("PRAGMA table_info(upstreams)").all()
       .find((column) => column.name === "compact_adapt_enabled");
@@ -84,7 +82,7 @@ test("current migration upgrades an existing v1 database with its own verified b
   const fixture = createV1Fixture();
   try {
     const store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 8);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 9);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     store.db.close();
     const backups = backupFiles(fixture.directory);
@@ -110,7 +108,7 @@ test("v8 migration preserves historical costs, rolls back failures and stores ti
     for (const column of ["requested_service_tier", "service_tier", "service_tier_source", "service_tier_multiplier"]) {
       original.db.exec(`ALTER TABLE request_logs DROP COLUMN ${column}`);
     }
-    original.db.exec("DELETE FROM schema_migrations WHERE version = 8; PRAGMA user_version = 7");
+    original.db.exec("DELETE FROM schema_migrations WHERE version >= 8; PRAGMA user_version = 7");
     original.db.exec("DELETE FROM settings WHERE key LIKE 'billing_service_tier_%'");
     original.db.close();
     assert.throws(() => createStore({ ...options, migrationHooks: { beforeMigrationCommit: ({ version }) => { if (version === 8) throw new Error("rollback-v8"); } } }), /rollback-v8/);
@@ -286,52 +284,13 @@ test("v1 migration refuses a corrupted backup before changing the source databas
   }
 });
 
-test("会话唤醒配置和等待进度在数据库重开后保留", () => {
-  const fixture = createLegacyFixture();
-  try {
-    let store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    const record = { id: "wake-test", sessionId: "session-test", status: "waiting", attempts: 2, maxAttempts: 3, nextAttemptAt: 2_000_000_000_000 };
-    createSessionWakeupStore(store.db).put(record);
-    store.db.close();
-    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    const repository = createSessionWakeupStore(store.db);
-    assert.deepEqual(repository.list(), [record]);
-    assert.throws(() => repository.put({ ...record, id: "duplicate" }), /UNIQUE/);
-    repository.delete(record.id);
-    assert.deepEqual(repository.list(), []);
-    store.db.close();
-  } finally { fixture.writer.close(); cleanupFixture(fixture.directory); }
-});
-
-test("升级到定时任务表时保留会话唤醒，定时配置和执行记录可重开读取", () => {
-  const fixture = createLegacyFixture();
-  try {
-    let store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    const wakeup = { id: "wake-before-v7", sessionId: "session", status: "waiting", attempts: 1 };
-    createSessionWakeupStore(store.db).put(wakeup);
-    store.db.exec("DROP TABLE scheduled_tasks; DELETE FROM schema_migrations WHERE version >= 7; PRAGMA user_version = 6");
-    store.db.close();
-    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    assert.deepEqual(createSessionWakeupStore(store.db).list(), [wakeup]);
-    const task = { id: "scheduled-test", name: "定时测试", target: "existing", cron: "0 * * * *", message: "多行\n消息", runCount: 2, nextRunAt: 2_000_000_000_000 };
-    createScheduledTaskStore(store.db).put(task);
-    store.db.close();
-    store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    const repository = createScheduledTaskStore(store.db);
-    assert.deepEqual(repository.list(), [task]);
-    repository.delete(task.id);
-    assert.deepEqual(repository.list(), []);
-    store.db.close();
-  } finally { fixture.writer.close(); cleanupFixture(fixture.directory); }
-});
-
 test("quota normalization defaults backfill old databases and preserve saved values after reopening", () => {
   const fixture = createLegacyFixture();
   let store;
   try {
     store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
     const settings = store.getSettings();
-    assert.equal(settings.gpt_quota_normalization_enabled, "false");
+    assert.equal(settings.gpt_quota_normalization_enabled, undefined);
     assert.equal(settings.gpt_quota_multiplier_plus, "1");
     assert.equal(settings.gpt_quota_multiplier_prolite, "10");
     assert.equal(settings.gpt_quota_multiplier_pro, "20");
@@ -403,3 +362,46 @@ function cleanupFixture(directory) {
     if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
   }
 }
+
+// 仅使用临时数据库模拟 v8 升级，确保下线功能的清理可回滚且不触碰业务记录。
+test("v9 removes task tables after backup and rolls back failed cleanup", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-retired-tasks-"));
+  const database = path.join(directory, "codex-gateway.sqlite");
+  const options = { secretCodec: passthroughCodec, dataDir: directory, dbPath: database };
+  try {
+    const original = createStore(options);
+    original.saveAccount({ id: "preserved-account", name: "保留账号", access_token: "preserved-token" });
+    original.addTokenLog({ method: "POST", estimated_cost: 12.5 });
+    original.saveSettings({ show_session_wakeups_menu: "true", show_scheduled_tasks_menu: "true", billing_currency: "USD" });
+    original.db.exec("CREATE TABLE session_wakeups (id TEXT PRIMARY KEY, session_id TEXT UNIQUE, data_json TEXT); CREATE TABLE scheduled_tasks (id TEXT PRIMARY KEY, data_json TEXT)");
+    original.db.prepare("INSERT INTO session_wakeups VALUES (?, ?, ?)").run("w", "session", '{"enabled":true}');
+    original.db.prepare("INSERT INTO scheduled_tasks VALUES (?, ?)").run("t", '{"enabled":true}');
+    original.db.exec("DELETE FROM schema_migrations WHERE version = 9; PRAGMA user_version = 8");
+    original.db.close();
+    assert.throws(() => createStore({ ...options, migrationHooks: { beforeMigrationCommit: ({ version }) => { if (version === 9) throw new Error("rollback-v9"); } } }), /rollback-v9/);
+    const failed = new DatabaseSync(database);
+    assert.equal(failed.prepare("PRAGMA user_version").get().user_version, 8);
+    assert.equal(failed.prepare("SELECT COUNT(*) AS count FROM session_wakeups").get().count, 1);
+    assert.equal(failed.prepare("SELECT COUNT(*) AS count FROM scheduled_tasks").get().count, 1);
+    assert.equal(failed.prepare("SELECT value FROM settings WHERE key = 'show_scheduled_tasks_menu'").get().value, "true");
+    failed.close();
+    const upgraded = createStore(options);
+    assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, 9);
+    assert.equal(upgraded.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name IN ('session_wakeups','scheduled_tasks')").get().count, 0);
+    assert.equal(upgraded.getSettings().show_session_wakeups_menu, undefined);
+    assert.equal(upgraded.getSettings().show_scheduled_tasks_menu, undefined);
+    assert.equal(upgraded.getSettings().billing_currency, "USD");
+    assert.equal(upgraded.listAccounts()[0].access_token, "preserved-token");
+    assert.equal(upgraded.listTokenLogs().items[0].estimated_cost, 12.5);
+    upgraded.db.close();
+    const backupFile = backupFiles(directory).find(file => file.includes("schema-v8-"));
+    assert.ok(backupFile);
+    const restoredPath = decryptBackup(backupFile, directory);
+    const restored = new DatabaseSync(restoredPath, { readOnly: true });
+    assert.equal(restored.prepare("SELECT COUNT(*) AS count FROM scheduled_tasks").get().count, 1);
+    restored.close();
+    const restarted = createStore(options);
+    assert.equal(restarted.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name IN ('session_wakeups','scheduled_tasks')").get().count, 0);
+    restarted.db.close();
+  } finally { cleanupFixture(directory); }
+});

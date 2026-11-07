@@ -3,6 +3,7 @@ import { Alert, Button, Card, Flex, Segmented, Select, Space, Switch, Tag, Typog
 import { useEffect, useMemo, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
+import { accountModeGatewayBaseUrl } from "../../../shared/account-mode-config";
 import { isUsableAccount } from "../../lib/formatters";
 
 type AuthMode = "gateway" | "account" | "";
@@ -13,6 +14,8 @@ interface CodexIntegrationPageProps {
   accounts: PublicAccount[];
   gatewayBase: string;
   modelCatalogPath: string;
+  /** 账号模式使用的订阅模型目录路径。 */
+  accountModelCatalogPath: string;
   onMessage: (message: string) => void;
   onSaveSettings: (settings: Settings) => Promise<unknown>;
   onApplyGateway: () => Promise<void>;
@@ -24,6 +27,7 @@ export const CodexIntegrationPage = ({
   accounts,
   gatewayBase,
   modelCatalogPath,
+  accountModelCatalogPath,
   onMessage,
   onSaveSettings,
   onApplyGateway,
@@ -146,6 +150,11 @@ export const CodexIntegrationPage = ({
             </Flex>
             <Typography.Text type="secondary">通过现有 API 服务透明转发，仅记录请求日志</Typography.Text>
           </Space>
+          {useApiProxy && <CodePreview title="config.toml" value={providerToml(
+            { ...settings, codex_config_use_openai_base_url: "true" },
+            accountModeGatewayBaseUrl(settings),
+            accountModelCatalogPath
+          )} />}
         </Space>
       )}
 

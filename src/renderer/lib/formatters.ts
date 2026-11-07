@@ -52,3 +52,8 @@ export const resetCreditStatusLabel = (status: unknown): string => {
   if (value === "expired") return "已过期";
   return String(status || "-");
 };
+
+export const formatDurationSeconds = (value: unknown): string => {
+  if (value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0) return "-";
+  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format(Number(value) / 1000)} s`;
+};

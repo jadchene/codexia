@@ -33,7 +33,7 @@ import type { TableColumnsType } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import type { ConsumeResetCreditResult, PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
-import { quotaNormalizationFromSettings, quotaPlanMultiplier } from "../../../shared/quota-normalization";
+import { quotaNormalizationFromSettings, quotaPlanMultiplier, quotaRemainingPercent } from "../../../shared/quota-normalization";
 import { subscriptionPlanLabel } from "../../../shared/subscription-plan";
 import { formatTime, parseResetCredits, resetCreditStatusLabel } from "../../lib/formatters";
 
@@ -104,14 +104,15 @@ export const AccountsPage = ({
     }
   };
   const resetCredits = useMemo(() => parseResetCredits(detailAccount), [detailAccount]);
-  const enabledAccounts = accounts.filter((account) => account.enabled && account.status !== "disabled");
+  const enabledAccounts = accounts.filter((account) => account.enabled && account.status !== "disabled" && account.has_access_token);
   const normalization = quotaNormalizationFromSettings(settings);
+  const capacity = enabledAccounts.reduce((sum, account) => sum + 100 * quotaPlanMultiplier(account.subscription_plan, normalization), 0);
   const totalFiveHourRemaining = enabledAccounts.reduce(
-    (total, account) => total + Math.max(0, 100 - Number(account.quota_5h_used_percent || 0)) * quotaPlanMultiplier(account.subscription_plan, normalization),
+    (total, account) => total + remainingQuota(account.quota_5h_used_percent) * quotaPlanMultiplier(account.subscription_plan, normalization),
     0
   );
   const totalSevenDayRemaining = enabledAccounts.reduce(
-    (total, account) => total + Math.max(0, 100 - Number(account.quota_7d_used_percent || 0)) * quotaPlanMultiplier(account.subscription_plan, normalization),
+    (total, account) => total + remainingQuota(account.quota_7d_used_percent) * quotaPlanMultiplier(account.subscription_plan, normalization),
     0
   );
 
@@ -241,11 +242,11 @@ export const AccountsPage = ({
         </Col>
         {settings.ignore_five_hour_limit !== "true" && (
           <Col xs={24} md={6}>
-            <Card size="small"><Statistic title="5 小时总剩余额度" value={totalFiveHourRemaining} precision={1} suffix={normalization.normalizeQuotaToPlus ? "% plus" : "%"} /></Card>
+            <Card size="small"><Statistic title="5 小时总剩余额度" value={quotaRemainingPercent(totalFiveHourRemaining, capacity)} precision={1} suffix="%" /></Card>
           </Col>
         )}
         <Col xs={24} md={6}>
-          <Card size="small"><Statistic title="7 天总剩余额度" value={totalSevenDayRemaining} precision={1} suffix={normalization.normalizeQuotaToPlus ? "% plus" : "%"} /></Card>
+          <Card size="small"><Statistic title="7 天总剩余额度" value={quotaRemainingPercent(totalSevenDayRemaining, capacity)} precision={1} suffix="%" /></Card>
         </Col>
       </Row>
 
@@ -371,3 +372,6 @@ const quotaColumn = (
     );
   }
 });
+
+/** 缺失或非法额度不计入剩余容量，正常值限定为 0–100。 */
+const remainingQuota = (used: unknown): number => Number.isFinite(Number(used)) ? Math.max(0, Math.min(100, 100 - Number(used))) : 0;

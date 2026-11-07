@@ -23,7 +23,6 @@ const EDITABLE_SETTING_KEYS = new Set([
   "ignore_five_hour_limit", "codex_config_use_openai_base_url",
   "debug_api_logging",
   "auto_review_upstream_model",
-  "show_session_wakeups_menu", "show_scheduled_tasks_menu",
   "billing_currency", "request_log_retention_days", "app_log_retention_days", "login_session_retention_days",
   "appearance_theme", "appearance_density", "appearance_font_family", "navigation_collapsed"
 ]);
@@ -61,15 +60,12 @@ const ENUM_SETTINGS = {
   close_behavior: ["exit", "tray"],
   codex_quota_headers_mode: ["block", "rewrite"],
   ignore_five_hour_limit: ["true", "false"],
-  gpt_quota_normalization_enabled: ["true", "false"],
   debug_api_logging: ["true", "false"],
   codex_config_use_openai_base_url: ["true", "false"],
   gateway_websocket_reject_http_only_model_upgrade: ["true", "false"],
   appearance_theme: ["light", "dark", "system"],
   appearance_density: ["comfortable", "compact"],
   navigation_collapsed: ["true", "false"],
-  show_session_wakeups_menu: ["true", "false"],
-  show_scheduled_tasks_menu: ["true", "false"],
   billing_currency: ["USD", "CNY", "EUR", "JPY"]
 };
 

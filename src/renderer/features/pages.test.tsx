@@ -13,8 +13,6 @@ import { OverviewPage } from "./overview/OverviewPage";
 import { RequestAnalyticsPage } from "./request-analytics/RequestAnalyticsPage";
 import { RuntimeLogsPage } from "./runtime-logs/RuntimeLogsPage";
 import { ServicesPage } from "./services/ServicesPage";
-import { SessionWakeupsPage } from "./session-wakeups/SessionWakeupsPage";
-import { ScheduledTasksPage } from "./scheduled-tasks/ScheduledTasksPage";
 import { UpstreamsPage } from "./upstreams/UpstreamsPage";
 import { currentLogQuery } from "../lib/log-query";
 
@@ -29,46 +27,6 @@ describe("Ant Design pages", () => {
     Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
   afterEach(() => cleanup());
-
-  it.each(["existing", "new"])("定时任务支持 %s 目标并原样保存多行消息", async (target) => {
-    const save = vi.fn().mockResolvedValue({});
-    Object.assign(window.codexGateway, { listScheduledTasks: vi.fn().mockResolvedValue([]), saveScheduledTask: save });
-    renderWithQueries(<ScheduledTasksPage onMessage={vi.fn()} />);
-    await screen.findByText("暂无定时任务");
-    await userEvent.click(screen.getByRole("button", { name: /新建任务/ }));
-    await userEvent.type(screen.getByLabelText("任务名称"), "夜间检查");
-    if (target === "new") {
-      await userEvent.click(screen.getByRole("radio", { name: "每次新建会话" }));
-      await userEvent.type(screen.getByLabelText("工作目录"), "E:\\Personal\\my-project");
-    } else {
-      await userEvent.type(screen.getByLabelText("会话 ID"), "00000000-0000-4000-8000-000000000001");
-    }
-    fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: "检查项目\n报告结果。" } });
-    await userEvent.click(screen.getByLabelText("执行频率"));
-    await userEvent.click(screen.getByText("每隔几分钟"));
-    await userEvent.click(screen.getByRole("button", { name: "生成表达式" }));
-    expect((screen.getByLabelText("Cron 表达式") as HTMLInputElement).value).toBe("*/30 * * * *");
-    await userEvent.click(screen.getByRole("button", { name: /保.*存/ }));
-    await waitFor(() => expect(save).toHaveBeenCalledOnce());
-    expect(save.mock.calls[0]![0]).toMatchObject({ target, cron: "*/30 * * * *", enabled: true, message: "检查项目\n报告结果。" });
-    expect(save.mock.calls[0]![0].sessionId).toBe(target === "new" ? "" : "00000000-0000-4000-8000-000000000001");
-    expect(save.mock.calls[0]![0].workingDirectory).toBe(target === "new" ? "E:\\Personal\\my-project" : "");
-  });
-
-  it("登记会话唤醒时保存会话、跨日时段和次数上限", async () => {
-    const save = vi.fn().mockResolvedValue({});
-    Object.assign(window.codexGateway, { listSessionWakeups: vi.fn().mockResolvedValue([]), saveSessionWakeup: save });
-    renderWithQueries(<SessionWakeupsPage onMessage={vi.fn()} />);
-    await screen.findByText("暂无会话唤醒登记");
-    await userEvent.click(screen.getByRole("button", { name: /登记会话/ }));
-    await userEvent.type(screen.getByLabelText("会话 ID"), "00000000-0000-4000-8000-000000000001");
-    await userEvent.type(screen.getByLabelText("会话名称"), "夜间任务");
-    await userEvent.click(screen.getByRole("button", { name: /保.*存/ }));
-    await waitFor(() => expect(save).toHaveBeenCalledOnce());
-    const input = save.mock.calls[0]![0];
-    expect(input).toMatchObject({ sessionId: "00000000-0000-4000-8000-000000000001", name: "夜间任务", resumeGoal: false, enabled: true, maxAttempts: 3 });
-    expect(input.endsAt - input.startsAt).toBeGreaterThanOrEqual(8 * 3600_000);
-  });
 
   it("uses the page definitions for navigation and the current page title", () => {
     render(
@@ -94,7 +52,6 @@ describe("Ant Design pages", () => {
 
   it("renders overview model channel metrics", async () => {
     const user = userEvent.setup();
-    const onRefreshAccounts = vi.fn().mockResolvedValue(undefined);
     renderWithQueries(<OverviewPage
       accounts={[]}
       gateway={{ running: true, url: "http://localhost:8436", activeHttpRequests: 2, activeWebSockets: 3 }}
@@ -103,26 +60,26 @@ describe("Ant Design pages", () => {
       tokenSummary={{ total: { calls: 12, total_tokens: 1000, input_tokens: 800, cached_input_tokens: 400, average_duration_ms: 250, errors: 2, estimated_cost: 0.12 }, byAccount: [] }}
       quotaSummary={{ capacity_percent: 200, primary: { remaining_percent: 115 }, secondary: { remaining_percent: 150 } }}
       settings={{}}
-      onRefreshAccounts={onRefreshAccounts}
     />);
-    expect(screen.getByRole("button", { name: /刷新额度/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /刷新额度|启动 API 服务|停止 API 服务/ })).toBeNull();
     expect(screen.getByText("API 服务")).toBeTruthy();
     expect(screen.getByText("MCP 服务")).toBeTruthy();
     await waitFor(() => expect(window.codexGateway.listUpstreams).toHaveBeenCalled());
     expect(await screen.findByText("可选模型")).toBeTruthy();
     expect(screen.getByText("缓存命中")).toBeTruthy();
     expect(screen.getByText("平均耗时")).toBeTruthy();
+    expect(screen.getByText("输出速度")).toBeTruthy();
+    expect(screen.getByText("平均耗时").closest(".ant-statistic")?.textContent).toContain("0.3s");
+    expect(screen.getByText("s")).toBeTruthy();
     expect(screen.getByText("估算成本（美元）")).toBeTruthy();
     expect(screen.queryByText("今日调用统计")).toBeNull();
-    expect(screen.getByText("115.0%")).toBeTruthy();
+    expect(screen.queryByText("115.0%")).toBeNull();
     expect(screen.getByText("http://localhost:8436/v1")).toBeTruthy();
     expect(screen.getByText("57.5%")).toBeTruthy();
-    expect(screen.getByText("150.0%")).toBeTruthy();
+    expect(screen.getByText("75.0%")).toBeTruthy();
     await user.hover(screen.getByText("1,000"));
     expect(await screen.findByText("输入：800")).toBeTruthy();
     expect(screen.getByText("缓存命中率：50.0%")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /刷新额度/ }));
-    expect(onRefreshAccounts).toHaveBeenCalledOnce();
   });
 
   it.each([true, false])("counts the merged visible models once with the official channel enabled: %s", async (officialEnabled) => {
@@ -146,22 +103,22 @@ describe("Ant Design pages", () => {
     expect(window.codexGateway.getModelManagement).toHaveBeenCalledOnce();
   });
 
-  it("shows Plus-stacked quota above 100% while overview rings use total capacity", () => {
+  it("shows bounded capacity percentages without Plus suffix or overview rings", () => {
     renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
       quotaSummary={{ capacity_percent: 1100, primary: { remaining_percent: 480 }, secondary: { remaining_percent: 1100 } }} settings={{ gpt_quota_normalization_enabled: "true" }} />);
-    expect(screen.getByText("480.0% plus")).toBeTruthy();
+    expect(screen.queryByText("480.0% plus")).toBeNull();
     expect(screen.getByText("43.6%")).toBeTruthy();
-    expect(screen.getByText("1100.0% plus")).toBeTruthy();
-    expect(screen.getAllByRole("progressbar").map((bar) => Number(bar.getAttribute("aria-valuenow")))).toEqual([43, 100]);
+    expect(screen.getByText("100.0%")).toBeTruthy();
+    expect(screen.queryAllByRole("progressbar")).toHaveLength(0);
   });
 
   it("renders normalized GPT pool totals and progress on model channels", async () => {
     const pool = createUpstream("pool-normalized", "GPT 账号池", "chatgpt_subscription_pool");
     Object.assign(pool.balance.subscriptionPool!, { quotaCapacityPercent: 1100, fiveHourRemainingPercent: 480, sevenDayRemainingPercent: 880 });
     window.codexGateway.listUpstreams = vi.fn().mockResolvedValue([pool]);
-    renderWithQueries(<UpstreamsPage normalizeQuotaToPlus />);
-    expect(await screen.findByText("480.0% plus")).toBeTruthy();
-    expect(screen.getByText("880.0% plus")).toBeTruthy();
+    renderWithQueries(<UpstreamsPage />);
+    expect(await screen.findByText("43.6%")).toBeTruthy();
+    expect(screen.getByText("80.0%")).toBeTruthy();
     const bars = screen.getAllByRole("progressbar");
     expect(bars.map((bar) => Number(bar.getAttribute("aria-valuenow")))).toEqual([43, 80]);
   });
@@ -169,7 +126,7 @@ describe("Ant Design pages", () => {
   it.each([[0, 0, 0], [0.1, 0.05, 50]])("overview handles capacity %s without distorting its ratio", (capacity, remaining, expected) => {
     renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} gatewayBase="http://localhost:8436/v1" mcpGateway={{ running: false }} tokenSummary={emptySummary}
       quotaSummary={{ capacity_percent: capacity, primary: { remaining_percent: remaining }, secondary: { remaining_percent: remaining } }} settings={{}} />);
-    expect(screen.getAllByRole("progressbar").map((bar) => Number(bar.getAttribute("aria-valuenow")))).toEqual([expected, expected]);
+    expect(screen.getAllByText(`${expected.toFixed(1)}%`)).toHaveLength(2);
   });
 
   it("opens account browser login", async () => {
@@ -248,6 +205,17 @@ describe("Ant Design pages", () => {
     expect(document.querySelector(".v1-summary-cards")?.textContent).not.toContain("令牌续期");
     expect(document.querySelectorAll(".v1-summary-cards > .ant-col-md-6")).toHaveLength(3);
 
+    const mixedAccounts = [
+      { ...props.accounts[0]!, subscription_plan: "plus", quota_5h_used_percent: 20, quota_7d_used_percent: 20 },
+      { ...props.accounts[0]!, id: "pro", subscription_plan: "pro", quota_5h_used_percent: 60, quota_7d_used_percent: 60 },
+      { ...props.accounts[0]!, id: "disabled", subscription_plan: "promax", enabled: false },
+      { ...props.accounts[0]!, id: "no-token", subscription_plan: "promax", has_access_token: false },
+      { ...props.accounts[0]!, id: "free", subscription_plan: "free", quota_5h_used_percent: 0, quota_7d_used_percent: 0 }
+    ];
+    view.rerender(<AccountsPage {...props} accounts={mixedAccounts} settings={{ gpt_quota_normalization_enabled: "false" }} />);
+    expect(screen.getByText("5 小时总剩余额度").closest(".ant-card")?.textContent).toContain("41.9%");
+    expect(screen.getByText("7 天总剩余额度").closest(".ant-card")?.textContent).toContain("41.9%");
+    expect(document.querySelector(".v1-summary-cards")?.textContent).not.toContain("plus");
     view.rerender(<AccountsPage {...props} settings={{ ignore_five_hour_limit: "true" }} />);
     expect(screen.queryByText("5 小时总剩余额度")).toBeNull();
     expect(screen.getByText("7 天总剩余额度")).toBeTruthy();
@@ -567,6 +535,9 @@ describe("Ant Design pages", () => {
     const rowToken = screen.getByText("1,234 / 234 / 56");
     expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
     expect(screen.getByText("28.0")).toBeTruthy();
+    expect(screen.getByText("2 s")).toBeTruthy();
+    expect(screen.getByText("成功")).toBeTruthy();
+    expect(screen.queryByText("200")).toBeNull();
     expect(rowToken.getAttribute("title")).toBeNull();
     await user.hover(rowToken);
     expect(await screen.findByText("缓存命中率：19.0%")).toBeTruthy();
@@ -596,6 +567,8 @@ describe("Ant Design pages", () => {
     for (const label of ["渠道类型", "请求优先级", "计费优先级", "计费依据", "优先级倍率"]) {
       expect(screen.queryByText(label)).toBeNull();
     }
+    expect(screen.getByText("HTTP状态码")).toBeTruthy();
+    expect(screen.getByText("200")).toBeTruthy();
     expect(screen.getByText("计费倍率")).toBeTruthy();
     expect(screen.getByText("错误信息")).toBeTruthy();
     expect(screen.getByText("2 倍")).toBeTruthy();
@@ -681,8 +654,8 @@ describe("Ant Design pages", () => {
       ]
     };
     render(<RuntimeLogsPage pageData={pageData} paused={false} newLogCount={0} onPausedChange={onPausedChange} onMessage={vi.fn()} onQuery={onQuery} />);
-    expect(screen.getByText("api")).toBeTruthy();
-    expect(screen.getByText("api-ws")).toBeTruthy();
+    expect(screen.getByText("接口服务")).toBeTruthy();
+    expect(screen.getByText("长连接代理")).toBeTruthy();
     expect(screen.queryByText("gateway-websocket")).toBeNull();
     await user.click(screen.getByRole("button", { name: /暂停自动刷新/ }));
     expect(onPausedChange).toHaveBeenCalledWith(true);
@@ -729,7 +702,7 @@ describe("Ant Design pages", () => {
     const onApplyGateway = vi.fn().mockResolvedValue(undefined);
     const onSaveSettings = vi.fn().mockResolvedValue(undefined);
     render(<CodexIntegrationPage settings={{ codex_auth_mode: "" }} accounts={[]}
-      gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json"
+      gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json" accountModelCatalogPath="D:/data/account-models.json"
       onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
     expect(screen.getByRole("radio", { name: /API 模式/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /API 模式/ }));
@@ -758,7 +731,7 @@ describe("Ant Design pages", () => {
         has_refresh_token: true
       }]}
       gatewayBase="http://localhost:8436/v1"
-      modelCatalogPath="D:/data/models.json"
+      modelCatalogPath="D:/data/models.json" accountModelCatalogPath="D:/data/account-models.json"
       onMessage={vi.fn()}
       onSaveSettings={vi.fn()}
       onApplyGateway={vi.fn()}
@@ -771,6 +744,14 @@ describe("Ant Design pages", () => {
     expect(screen.queryByText(/account@example\.com/, { selector: ".ant-select-item-option-content" })).toBeNull();
     await user.click(screen.getByText("测试账号", { selector: ".ant-select-item-option-content" }));
     expect(screen.getByText("通过现有 API 服务透明转发，仅记录请求日志")).toBeTruthy();
+    expect(screen.queryByText("config.toml")).toBeNull();
+    await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
+    const preview = screen.getByText("config.toml").closest(".ant-card")!;
+    expect(preview.textContent).toContain('model_catalog_json = "D:/data/account-models.json"');
+    expect(preview.textContent).toContain('openai_base_url = "http://localhost:8436/v1"');
+    expect(preview.textContent).not.toContain('model_provider');
+    await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
+    expect(screen.queryByText("config.toml")).toBeNull();
     await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onApplyAccount).toHaveBeenCalledWith("account-1", true);

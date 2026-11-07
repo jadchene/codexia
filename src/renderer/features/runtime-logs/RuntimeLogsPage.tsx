@@ -3,6 +3,7 @@ import { Button, Card, DatePicker, Descriptions, Drawer, Empty, Flex, Input, Pag
 import type { TableColumnsType } from "antd";
 import { useState } from "react";
 import type { AppLog, AppLogPage } from "../../../shared/contracts/logs";
+import { logActionLabels, logDictionaryLabel, logDictionaryOptions, logLevelLabels, logScopeLabels, logStatusLabels } from "../../lib/runtime-log-labels";
 import { formatTime } from "../../lib/formatters";
 import { isTodayRange, todayLogFilters, toLogQuery, withTodayRange, type LogFilterValues } from "../../lib/log-query";
 import { useDayRollover } from "../../lib/use-day-rollover";
@@ -55,11 +56,11 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
       title: "级别",
       dataIndex: "level",
       width: 76,
-      render: (value: string) => <Tag color={levelColor(value)}>{String(value || "info").toUpperCase()}</Tag>
+      render: (value: string) => <Tag color={levelColor(value)}>{logDictionaryLabel(logLevelLabels, value, "级别")}</Tag>
     },
-    { title: "模块", dataIndex: "scope", width: 110, ellipsis: true, render: (value) => scopeLabel(value) },
-    { title: "动作", dataIndex: "action", width: 150, ellipsis: true, render: (value) => value || "-" },
-    { title: "状态", dataIndex: "status", width: 130, ellipsis: true, render: (value) => value ? <Tag>{value}</Tag> : "-" },
+    { title: "模块", dataIndex: "scope", width: 110, ellipsis: true, render: (value) => logDictionaryLabel(logScopeLabels, value, "模块") },
+    { title: "动作", dataIndex: "action", width: 150, ellipsis: true, render: (value) => logDictionaryLabel(logActionLabels, value, "动作") },
+    { title: "状态", dataIndex: "status", width: 130, ellipsis: true, render: (value) => value ? <Tag>{logDictionaryLabel(logStatusLabels, value, "状态")}</Tag> : "-" },
     { title: "消息", dataIndex: "message", width: 560, ellipsis: true, render: (value) => value || "-" }
   ];
 
@@ -90,17 +91,17 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
             value={filters.level || undefined}
             placeholder="全部级别"
             style={{ width: 150 }}
-            options={["debug", "info", "warn", "error"].map((value) => ({ value, label: value.toUpperCase() }))}
+            options={logDictionaryOptions(logLevelLabels, pageData.filterOptions?.levels ?? [], "级别")}
             onChange={(value) => setFilters((current) => ({ ...current, level: value || "" }))}
           />
         </div>
         <div>
           <Typography.Text type="secondary" className="v1-filter-label">模块</Typography.Text>
-          <Input value={filters.scope} placeholder="模块名模糊匹配" style={{ width: 220 }} onChange={(event) => setFilters((current) => ({ ...current, scope: event.target.value }))} />
+          <Select allowClear value={filters.scope || undefined} placeholder="全部模块" style={{ width: 180 }} options={logDictionaryOptions(logScopeLabels, pageData.filterOptions?.scopes ?? [], "模块")} onChange={(value) => setFilters((current) => ({ ...current, scope: value || "" }))} />
         </div>
         <div>
           <Typography.Text type="secondary" className="v1-filter-label">状态</Typography.Text>
-          <Input value={filters.status} placeholder="状态模糊匹配" style={{ width: 170 }} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} />
+          <Select allowClear value={filters.status || undefined} placeholder="全部状态" style={{ width: 180 }} options={logDictionaryOptions(logStatusLabels, pageData.filterOptions?.statuses ?? [], "状态")} onChange={(value) => setFilters((current) => ({ ...current, status: value || "" }))} />
         </div>
         <div>
           <Typography.Text type="secondary" className="v1-filter-label">关键词</Typography.Text>
@@ -144,10 +145,10 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Descriptions bordered column={1} size="small" items={[
               { key: "time", label: "时间", children: formatTime(selectedLog.created_at) },
-              { key: "level", label: "级别", children: <Tag color={levelColor(selectedLog.level)}>{selectedLog.level.toUpperCase()}</Tag> },
-              { key: "scope", label: "模块", children: scopeLabel(selectedLog.scope) },
-              { key: "action", label: "动作", children: selectedLog.action || "-" },
-              { key: "status", label: "状态", children: selectedLog.status || "-" }
+              { key: "level", label: "级别", children: <Tag color={levelColor(selectedLog.level)}>{logDictionaryLabel(logLevelLabels, selectedLog.level, "级别")}</Tag> },
+              { key: "scope", label: "模块", children: logDictionaryLabel(logScopeLabels, selectedLog.scope, "模块") },
+              { key: "action", label: "动作", children: logDictionaryLabel(logActionLabels, selectedLog.action, "动作") },
+              { key: "status", label: "状态", children: logDictionaryLabel(logStatusLabels, selectedLog.status, "状态") }
             ]} />
             <Typography.Paragraph copyable={{ text: selectedLog.message || "" }} className="v1-log-message">{selectedLog.message || "-"}</Typography.Paragraph>
           </Space>
@@ -163,17 +164,4 @@ const levelColor = (level: unknown): string => {
   if (value === "warn" || value === "warning") return "warning";
   if (value === "debug") return "default";
   return "processing";
-};
-
-const scopeLabel = (scope: unknown): string => {
-  const value = String(scope || "");
-  const labels: Record<string, string> = {
-    gateway: "api",
-    "gateway-http": "api-http",
-    "gateway-websocket": "api-ws",
-    upstream: "channels",
-    usage: "usage",
-    "v1-dev": "dev"
-  };
-  return labels[value] || value || "-";
 };

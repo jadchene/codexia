@@ -13,7 +13,7 @@ type Db = any;
 type Row = Record<string, any>;
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-const LATEST_SCHEMA_VERSION = 8;
+const LATEST_SCHEMA_VERSION = 9;
 const MIGRATION_BACKUP_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite(?:\.enc)?$/;
 const PLAINTEXT_MIGRATION_BACKUP_FILE_PATTERN = /^codex-gateway-schema-v\d+-.*\.sqlite$/;
@@ -85,6 +85,7 @@ export function createStore(options: StoreOptions = {}): Store {
     migrateV6(db, options.migrationHooks);
     migrateV7(db, options.migrationHooks);
     migrateV8(db, options.migrationHooks);
+    migrateV9(db, options.migrationHooks);
     migrateSecrets(db, secretCodec);
   } catch (error) {
     db.close();
@@ -262,8 +263,6 @@ function migrate(db: Db): void {
     codex_bundled_override_json: "",
     model_management_json: "[]",
     billing_currency: "USD",
-    show_session_wakeups_menu: "false",
-    show_scheduled_tasks_menu: "false",
     request_log_retention_days: "30",
     app_log_retention_days: "14",
     login_session_retention_days: "7"
@@ -968,7 +967,7 @@ function tokenSummary(db: Db, query: Partial<LogQuery> = {}): TokenSummary {
   const total = db.prepare(`
     SELECT
       COUNT(*) AS calls,
-      COALESCE(SUM(CASE WHEN CAST(request_logs.status AS INTEGER) >= 400 THEN 1 ELSE 0 END), 0) AS errors,
+      COALESCE(SUM(CASE WHEN CAST(request_logs.status AS INTEGER) BETWEEN 200 AND 299 THEN 0 ELSE 1 END), 0) AS errors,
       COALESCE(SUM(CASE WHEN request_logs.fallback_reason IS NOT NULL AND request_logs.fallback_reason <> '' THEN 1 ELSE 0 END), 0) AS fallback_count,
       COALESCE(AVG(request_logs.duration_ms), 0) AS average_duration_ms,
       1000.0 * SUM(CASE WHEN duration_ms > 0 AND output_tokens >= 0 THEN output_tokens ELSE 0 END)
@@ -1038,7 +1037,11 @@ function tokenLogFilter(range: ReturnType<typeof normalizeLogQuery>): { where: s
     clauses.push("request_logs.session_id LIKE ?");
     params.push(`%${range.sessionId}%`);
   }
-  if (range.status) {
+  if (range.status === "success") {
+    clauses.push("CAST(request_logs.status AS INTEGER) BETWEEN 200 AND 299");
+  } else if (range.status === "failed") {
+    clauses.push("(request_logs.status IS NULL OR CAST(request_logs.status AS INTEGER) NOT BETWEEN 200 AND 299)");
+  } else if (range.status) {
     clauses.push("CAST(request_logs.status AS TEXT) = ?");
     params.push(range.status);
   }
@@ -1136,12 +1139,12 @@ function listAppLogs(db: Db, query: Partial<LogQuery> = {}): AppLogPage {
     params.push(range.level);
   }
   if (range.scope) {
-    clauses.push("scope LIKE ?");
-    params.push(`%${range.scope}%`);
+    clauses.push("scope = ?");
+    params.push(range.scope);
   }
   if (range.status) {
-    clauses.push("status LIKE ?");
-    params.push(`%${range.status}%`);
+    clauses.push("status = ?");
+    params.push(range.status);
   }
   if (range.keyword) {
     clauses.push("(message LIKE ? OR action LIKE ? OR scope LIKE ?)");
@@ -1157,6 +1160,9 @@ function listAppLogs(db: Db, query: Partial<LogQuery> = {}): AppLogPage {
   const total = db.prepare(`
     SELECT COUNT(*) AS total FROM app_logs WHERE ${where}
   `).get(...params).total;
+  const distinctValues = (column: "level" | "scope" | "status"): string[] => db.prepare(
+    `SELECT DISTINCT ${column} AS value FROM app_logs WHERE ${column} IS NOT NULL AND ${column} != '' ORDER BY ${column}`
+  ).all().map((row: Row) => String(row.value));
   return {
     items,
     total,
@@ -1164,7 +1170,8 @@ function listAppLogs(db: Db, query: Partial<LogQuery> = {}): AppLogPage {
     pageSize: range.pageSize,
     startAt: range.startAt,
     endAt: range.endAt,
-    query: logQueryFromRange(range)
+    query: logQueryFromRange(range),
+    filterOptions: { levels: distinctValues("level"), scopes: distinctValues("scope"), statuses: distinctValues("status") }
   };
 }
 
@@ -1252,3 +1259,20 @@ function toInt(value: unknown): number {
   const number = Number(value || 0);
   return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : 0;
 }
+
+/** 移除已下线的自动任务数据；迁移前沿用加密备份，失败时完整回滚。 */
+const migrateV9 = (db: Db, hooks: MigrationHooks = {}): void => {
+  if (schemaVersion(db) >= 9) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec("DROP TABLE IF EXISTS session_wakeups; DROP TABLE IF EXISTS scheduled_tasks");
+    db.prepare("DELETE FROM settings WHERE key IN (?, ?)").run("show_session_wakeups_menu", "show_scheduled_tasks_menu");
+    hooks.beforeMigrationCommit?.({ db, version: 9 });
+    db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(9, now());
+    db.exec("PRAGMA user_version = 9");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+};

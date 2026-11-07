@@ -1,4 +1,4 @@
-import { quotaPlanMultiplier, type QuotaNormalizationOptions } from "../../shared/quota-normalization.ts";
+import { quotaRemainingPercent, quotaPlanMultiplier, type QuotaNormalizationOptions } from "../../shared/quota-normalization.ts";
 
 export interface GatewayAccountQuota {
   id: string;
@@ -251,12 +251,12 @@ function buildCodexQuotaSnapshotDetail(
   const detail = buildAccountPoolQuotaDetail(accounts, nowSeconds, options);
   const { pool, primary, secondary, summary } = detail;
   const ignoreFiveHour = options.ignoreFiveHourLimit === true;
-  const secondaryUsed = roundHeaderPercent(protocolUsedPercent(summary.secondary.remaining_percent, summary.capacity_percent, options));
+  const secondaryUsed = roundHeaderPercent(protocolUsedPercent(summary.secondary.remaining_percent, summary.capacity_percent));
   const snapshot: CodexQuotaSnapshot = {
     primary: {
       used_percent: ignoreFiveHour
         ? secondaryUsed
-        : roundHeaderPercent(protocolUsedPercent(summary.primary.remaining_percent, summary.capacity_percent, options)),
+        : roundHeaderPercent(protocolUsedPercent(summary.primary.remaining_percent, summary.capacity_percent)),
       window_minutes: ignoreFiveHour ? 10080 : 300,
       reset_after_seconds: summary.primary.reset_after_seconds,
       reset_at: summary.primary.reset_at
@@ -287,14 +287,13 @@ function buildAccountPoolQuotaDetail(
   const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
   const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
   const ignoreFiveHour = options.ignoreFiveHourLimit === true;
-  const displayPercent = (value: number): number => options.normalizeQuotaToPlus ? value : roundDisplayPercent(value);
-  const secondaryRemaining = displayPercent(totalRemainingPercent(pool, "quota_7d_used_percent", options));
+  const secondaryRemaining = totalRemainingPercent(pool, "quota_7d_used_percent", options);
   const summary: AccountPoolQuotaSummary = {
     capacity_percent: pool.reduce((sum, account) => sum + quotaPlanMultiplier(account.subscription_plan, options) * 100, 0),
     primary: {
       remaining_percent: ignoreFiveHour
         ? secondaryRemaining
-        : displayPercent(totalRemainingPercent(pool, "quota_5h_used_percent", options)),
+        : totalRemainingPercent(pool, "quota_5h_used_percent", options),
       reset_after_seconds: ignoreFiveHour ? secondary.value : primary.value,
       reset_at: ignoreFiveHour ? (secondary.selected?.reset_at ?? 0) : (primary.selected?.reset_at ?? 0)
     },
@@ -385,10 +384,9 @@ function totalRemainingPercent(accounts: GatewayAccountQuota[], field: keyof Gat
     }, 0);
 }
 
-/** 启用折算时响应头使用总容量占比，关闭时保持原有叠加规则。 */
-const protocolUsedPercent = (totalRemaining: number, capacity: number, options: QuotaOptions): number => {
-  const remaining = options.normalizeQuotaToPlus ? (capacity > 0 ? totalRemaining / capacity * 100 : 0) : totalRemaining;
-  return 100 - Math.min(100, Math.max(0, remaining));
+/** 响应头始终使用套餐加权总容量占比。 */
+const protocolUsedPercent = (totalRemaining: number, capacity: number): number => {
+  return 100 - quotaRemainingPercent(totalRemaining, capacity);
 };
 
 function resetAfterSeconds(
@@ -426,9 +424,6 @@ function roundHeaderPercent(value: number): number {
   return Math.round(clampPercent(value) * 10) / 10;
 }
 
-function roundDisplayPercent(value: number): number {
-  return Math.round(Math.max(0, value) * 10) / 10;
-}
 
 function bodyText(body: unknown): string {
   return Buffer.isBuffer(body)

@@ -154,21 +154,24 @@ test("app log queries filter level, scope, status, and keyword without renderer-
       startAt: 0,
       endAt: Math.floor(Date.now() / 1000) + 10,
       level: "error",
-      scope: "gateway",
-      status: "fail",
+      scope: "gateway-http",
+      status: "failed",
       keyword: "request-42"
     });
     assert.equal(result.total, 1);
     assert.equal(result.items[0].message, "gateway failure request-42");
+    assert.equal(store.listAppLogs({ scope: "gateway" }).total, 0);
+    assert.equal(store.listAppLogs({ status: "fail" }).total, 0);
+    assert.deepEqual(result.filterOptions.scopes, ["gateway-http", "mcp"]);
     assert.deepEqual(result.query, {
       page: 1,
       pageSize: 20,
       startAt: 0,
       endAt: result.query.endAt,
-      status: "fail",
+      status: "failed",
       keyword: "request-42",
       level: "error",
-      scope: "gateway"
+      scope: "gateway-http"
     });
   } finally {
     store.db.close();
@@ -786,3 +789,21 @@ function testSecretCodec() {
     decryptString: (value) => value.toString("utf8").replace(/^encrypted:/, "")
   });
 }
+
+
+test("request outcome filters match list and summary across HTTP status boundaries", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-outcome-filter-"));
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    for (const status of [199, 200, 204, 299, 300, 400, 500]) store.addTokenLog({ status, duration_ms: 250 });
+    const range = { startAt: 0, endAt: Math.floor(Date.now() / 1000) + 10 };
+    assert.equal(store.listTokenLogs({ ...range, status: "success" }).total, 3);
+    assert.equal(store.listTokenLogs({ ...range, status: "failed" }).total, 4);
+    assert.equal(store.tokenSummary({ ...range, status: "success" }).total.errors, 0);
+    assert.equal(store.tokenSummary({ ...range, status: "failed" }).total.errors, 4);
+    assert.equal(store.tokenSummary({ ...range, status: "failed" }).total.calls, 4);
+  } finally {
+    store.db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

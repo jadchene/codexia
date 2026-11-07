@@ -10,7 +10,6 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts, the of
 
 - Manage subscription pools and model channels through a local Responses API service.
 - View account quota, request analytics, and estimated costs.
-- Wake sessions automatically and schedule Codex tasks.
 - Manage Codex integration and an optional [MCP service](https://github.com/jadchene/mcp-gateway).
 
 ## Quick Start
@@ -26,7 +25,6 @@ Codexia is a Windows desktop app for using ChatGPT subscription accounts, the of
 - **API mode** combines the account pool and model channels. Shared model IDs prefer the enabled pool; disable the pool to use the official API.
 - **Account mode** uses the selected subscription account and supports the pool's model catalog override, excluding third-party channel models.
 - Third-party model IDs must be unique across channels and the built-in catalog. Configure model rates per channel; estimates do not represent actual bills.
-- Enable Session Wakeups and Scheduled Tasks under **Settings → General → Optional menus**, and keep Codexia and relevant sessions running. Hiding menus does not stop existing tasks.
 - Other Responses API clients can use `http://localhost:8436/v1` with the local access key from Settings.
 - Codex configuration defaults to the current user's `.codex` directory. Set `CODEX_HOME` to use another location.
 

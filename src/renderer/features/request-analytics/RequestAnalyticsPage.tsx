@@ -28,6 +28,7 @@ import type { Settings } from "../../../shared/contracts/settings";
 import { currencyName } from "../../lib/currency";
 import {
   cacheHitRate,
+  formatDurationSeconds,
   formatTime,
   formatTokenNumber
 } from "../../lib/formatters";
@@ -156,9 +157,9 @@ export const RequestAnalyticsPage = ({
       key: "status",
       dataIndex: "status",
       width: 76,
-      render: (value) => <Tag color={Number(value) >= 200 && Number(value) < 300 ? "success" : "error"}>{value || "-"}</Tag>
+      render: (value) => <Tag color={Number(value) >= 200 && Number(value) < 300 ? "success" : "error"}>{Number(value) >= 200 && Number(value) < 300 ? "成功" : "失败"}</Tag>
     },
-    { key: "duration", title: "耗时", dataIndex: "duration_ms", width: 110, render: (value) => value ? `${formatTokenNumber(value)} ms` : "-" },
+    { key: "duration", title: "耗时", dataIndex: "duration_ms", width: 110, render: formatDurationSeconds },
     {
       key: "outputSpeed",
       title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度</Tooltip>,
@@ -278,7 +279,7 @@ export const RequestAnalyticsPage = ({
               value={filters.status || undefined}
               placeholder="全部状态"
               style={{ width: 140 }}
-              options={["200", "400", "401", "403", "422", "426", "429", "500", "502", "503"].map((value) => ({ value, label: value }))}
+              options={[{ value: "success", label: "成功" }, { value: "failed", label: "失败" }]}
               onChange={(value) => setFilters((current) => ({ ...current, status: value || "" }))}
             />
           </div>
@@ -293,7 +294,7 @@ export const RequestAnalyticsPage = ({
             <div className="v1-analytics-metric"><Statistic title="总 Token" value={summary.total.total_tokens || 0} /></div>
           </TokenUsageTooltip>
           <div className="v1-analytics-metric"><Statistic title="缓存命中" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} suffix="%" /></div>
-          <div className="v1-analytics-metric"><Statistic title="平均耗时" value={summary.total.average_duration_ms || 0} precision={0} suffix="ms" /></div>
+          <div className="v1-analytics-metric"><Statistic title="平均耗时" value={Math.round(Number(summary.total.average_duration_ms || 0) / 100) / 10} precision={1} suffix="s" /></div>
           <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度</Tooltip>}
             value={summary.total.output_tokens_per_second ?? "-"} precision={1} /></div>
           <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
@@ -472,8 +473,8 @@ const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
     会话: log.session_id || "-",
     客户端路径: log.request_path || "-",
     渠道路径: log.upstream_path || "-",
-    状态: log.status || "-",
-    耗时: log.duration_ms ? `${log.duration_ms} ms` : "-",
+    HTTP状态码: log.status || "-",
+    耗时: formatDurationSeconds(log.duration_ms),
     输入Token: log.input_tokens || 0,
     缓存输入: log.cached_input_tokens || 0,
     输出Token: log.output_tokens || 0,

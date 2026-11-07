@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildAccountPoolQuotaSummary, buildCodexQuotaHeaders, buildCodexQuotaSnapshot } from "../src/main/gateway/quota.ts";
 import { editableSettingsPatch } from "../src/main/renderer-boundary.ts";
-import { DEFAULT_QUOTA_PLAN_MULTIPLIERS, quotaNormalizationFromSettings, quotaPlanMultiplier } from "../src/shared/quota-normalization.ts";
+import { DEFAULT_QUOTA_PLAN_MULTIPLIERS, quotaNormalizationFromSettings, quotaPlanMultiplier, quotaRemainingPercent } from "../src/shared/quota-normalization.ts";
 
 const account = (plan: string, used: number, extra = {}) => ({
   id: plan, subscription_plan: plan, enabled: true, status: "active", access_token: "test",
@@ -18,25 +18,27 @@ describe("Plus 基准额度", () => {
     expect(buildCodexQuotaSnapshot([account(plan, 40)], 500, options).primary.used_percent).toBe(multiplier === 0 ? 100 : 40);
   });
 
-  it("混合套餐叠加超过 100%，响应头与圆环共用加权总容量占比", () => {
+  it("混合套餐内部容量换算为有界百分比，与响应头共用总容量占比", () => {
     const accounts = [account("plus", 20), account("prolite", 60), account("pro", 90), account("promax", 40), account("free", 0), account("go", 0)];
     const summary = buildAccountPoolQuotaSummary(accounts, 500, options);
     expect(summary.capacity_percent).toBe(8100);
     expect(summary.primary.remaining_percent).toBe(3680);
+    expect(quotaRemainingPercent(summary.primary.remaining_percent, summary.capacity_percent).toFixed(1)).toBe("45.4");
     const headers = buildCodexQuotaHeaders(accounts, 500, options);
     expect(headers["x-codex-primary-used-percent"]).toBe("54.6");
     expect(headers["x-codex-secondary-used-percent"]).toBe("54.6");
     expect(buildCodexQuotaSnapshot(accounts, 500, options).primary.used_percent).toBe(54.6);
   });
 
-  it("默认关闭与显式关闭都保持等权叠加和原响应头规则", () => {
+  it("旧版关闭配置也始终使用套餐权重和总容量占比", () => {
     const accounts = [account("plus", 20), account("promax", 60), account("free", 0)];
     for (const config of [{}, { gpt_quota_normalization_enabled: "false", gpt_quota_multiplier_promax: "90" }]) {
       const off = quotaNormalizationFromSettings(config);
       const summary = buildAccountPoolQuotaSummary(accounts, 500, off);
-      expect(summary.capacity_percent).toBe(300);
-      expect(summary.primary.remaining_percent).toBe(220);
-      expect(buildCodexQuotaHeaders(accounts, 500, off)["x-codex-primary-used-percent"]).toBe("0");
+      const multiplier = config.gpt_quota_multiplier_promax ? 90 : 50;
+      expect(summary.capacity_percent).toBe((1 + multiplier) * 100);
+      expect(summary.primary.remaining_percent).toBe(80 + multiplier * 40);
+      expect(buildCodexQuotaHeaders(accounts, 500, off)["x-codex-primary-used-percent"]).toBe(multiplier === 90 ? "59.6" : "59.2");
     }
   });
 
@@ -90,11 +92,15 @@ describe("Plus 基准额度", () => {
   });
 
   it("边界验证拒绝非法倍率，读取历史非法值时回退默认值", () => {
-    expect(editableSettingsPatch({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5" })).toEqual({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5" });
+    expect(editableSettingsPatch({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: "12.5" })).toEqual({ gpt_quota_multiplier_pro: "12.5" });
     for (const value of ["", "-1", "NaN", "Infinity", "1001", "abc"]) {
       expect(() => editableSettingsPatch({ gpt_quota_multiplier_pro: value })).toThrow(/倍率/);
       expect(quotaPlanMultiplier("pro", quotaNormalizationFromSettings({ gpt_quota_normalization_enabled: "true", gpt_quota_multiplier_pro: value }))).toBe(20);
     }
-    expect(() => editableSettingsPatch({ gpt_quota_normalization_enabled: "yes" })).toThrow();
+    expect(editableSettingsPatch({ gpt_quota_normalization_enabled: "false" })).toEqual({});
   });
+});
+
+it.each([[150, 100, 100], [-1, 100, 0], [1, 0, 0], [NaN, 100, 0], [100, Infinity, 0], [0.005, 0.01, 50]])("额度显示 %s / %s 为 %s", (remaining, capacity, expected) => {
+  expect(quotaRemainingPercent(remaining, capacity)).toBe(expected);
 });

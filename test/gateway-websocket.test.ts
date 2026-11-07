@@ -85,7 +85,7 @@ test("WebSocket quota rewriting leaves incompatible payloads unchanged", () => {
   const store = { listAccounts: () => [] };
   const helpers = { buildCodexQuotaSnapshot };
 
-  assert.strictEqual(rewriteUpstreamMessage(rateLimitEvent, false, { codex_quota_headers_mode: "block" }, store, helpers), rateLimitEvent);
+  assert.strictEqual(rewriteUpstreamMessage(rateLimitEvent, false, { codex_quota_headers_mode: "block" }, store, helpers), false);
   assert.strictEqual(rewriteUpstreamMessage(rateLimitEvent, true, { codex_quota_headers_mode: "rewrite" }, store, helpers), rateLimitEvent);
   assert.strictEqual(rewriteUpstreamMessage(text, false, { codex_quota_headers_mode: "rewrite" }, store, helpers), text);
   assert.strictEqual(rewriteUpstreamMessage(otherEvent, false, { codex_quota_headers_mode: "rewrite" }, store, helpers), otherEvent);
@@ -1037,8 +1037,7 @@ test("WebSocket quota errors reconnect before output and switch the same turn to
     assert.equal(closeDetail.code, 1012);
     assert.equal(messages.some((event) => event.type === "error"), false);
     const rateLimits = messages.find((event) => event.type === "codex.rate_limits");
-    assert.equal(rateLimits.rate_limits.primary.used_percent, 50);
-    assert.equal(rateLimits.rate_limits.secondary.used_percent, 25);
+    assert.equal(rateLimits, undefined);
     assert.equal(harness.accounts[0].quota_5h_used_percent, 50);
     assert.equal(harness.accounts[0].quota_7d_used_percent, 25);
 
@@ -1122,10 +1121,10 @@ test("WebSocket rewrite stores the account event before forwarding the aggregate
 
     assert.equal(rewritten.type, "codex.rate_limits");
     assert.equal(rewritten.correlation_id, "rate-limit-1");
-    assert.equal(rewritten.rate_limits.primary.used_percent, 10);
+    assert.equal(rewritten.rate_limits.primary.used_percent, 55);
     assert.equal(rewritten.rate_limits.primary.window_minutes, 300);
     assert.equal(rewritten.rate_limits.primary.reset_at, 2_000_000_000);
-    assert.equal(rewritten.rate_limits.secondary.used_percent, 15);
+    assert.equal(rewritten.rate_limits.secondary.used_percent, 57.5);
     assert.equal(rewritten.rate_limits.secondary.window_minutes, 10080);
     assert.equal(rewritten.rate_limits.secondary.reset_at, 2_000_100_000);
     assert.deepEqual(rewritten.rate_limits.credits, { balance: 0, has_credits: false, unlimited: false });
@@ -1534,10 +1533,8 @@ function externalApiHooks(getHarness, supportsWebSocket = true, compactAdaptEnab
   };
 }
 
-test("WebSocket 额度错误在无法换号时登记唤醒", async () => {
-  const notifications = [];
+test("WebSocket 额度错误在无法换号时仍返回客户端", async () => {
   const harness = await startHarness({
-    hooks: { onSessionQuotaExhausted: (id) => notifications.push(id) },
     onConnection(websocket) {
       websocket.once("message", () => websocket.send(JSON.stringify({ type: "error", error: { code: "usage_limit_reached", message: "quota exceeded" } })));
     }
@@ -1547,16 +1544,13 @@ test("WebSocket 额度错误在无法换号时登记唤醒", async () => {
     const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "wake-ws-session" });
     const messages = nextMessages(websocket, 1);
     websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
-    await messages;
-    assert.deepEqual(notifications, ["wake-ws-session"]);
+    assert.equal(JSON.parse((await messages)[0].toString()).type, "error");
     websocket.close();
   } finally { await harness.close(); }
 });
 
-test("WebSocket 握手轮换全部因额度失败后登记唤醒", async () => {
-  const notifications = [];
+test("WebSocket 握手轮换全部因额度失败后返回错误", async () => {
   const harness = await startHarness({
-    hooks: { onSessionQuotaExhausted: (id) => notifications.push(id) },
     onUpgrade(_request, socket) {
       socket.end('HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nx-codex-primary-used-percent: 100\r\nx-codex-primary-reset-after-seconds: 1800\r\nConnection: close\r\n\r\n{"error":"usage_limit_reached"}');
     }
@@ -1566,7 +1560,6 @@ test("WebSocket 握手轮换全部因额度失败后登记唤醒", async () => {
     const messages = nextMessages(websocket, 1);
     websocket.send(JSON.stringify({ type: "response.create", model: "gpt-test" }));
     await messages;
-    assert.deepEqual(notifications, ["wake-ws-handshake"]);
     websocket.close();
   } finally { await harness.close(); }
 });
@@ -1773,3 +1766,34 @@ function localDateKey(date) {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}${month}${day}`;
 }
+
+// 两条订阅 WebSocket 路径都应隐藏额度，同时保持响应转发和本地额度同步。
+test.each(['/v1/responses', '/v1/realtime?call_id=hidden'])('hidden quota does not leak events on %s', async (requestPath) => {
+  const harness = await startHarness({
+    onHeaders(headers) { headers.push('x-codex-primary-used-percent: 23'); },
+    onConnection(websocket) {
+      websocket.on('message', () => {
+        websocket.send(JSON.stringify({ type: 'codex.rate_limits', rate_limits: { primary: { used_percent: 37, window_minutes: 300 } } }));
+        websocket.send(JSON.stringify({ type: 'response.completed', response: { usage: { input_tokens: 1, output_tokens: 1 } } }));
+      });
+    }
+  }, { codex_quota_headers_mode: 'block' });
+  try {
+    const { websocket, response } = await connectGateway(harness, requestPath, {});
+    assert.equal(response.headers['x-codex-primary-used-percent'], undefined);
+    const pending = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: 'response.create' }));
+    assert.equal(JSON.parse((await pending).toString()).type, 'response.completed');
+    assert.equal(harness.accounts[0].quota_5h_used_percent, 37);
+    harness.store.saveSettings({ codex_quota_headers_mode: 'rewrite' });
+    const rewritten = nextMessages(websocket, 2);
+    websocket.send(JSON.stringify({ type: 'response.create' }));
+    assert.equal(JSON.parse((await rewritten)[0].toString()).type, 'codex.rate_limits');
+    harness.store.saveSettings({ codex_quota_headers_mode: 'block' });
+    const hiddenAgain = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: 'response.create' }));
+    assert.equal(JSON.parse((await hiddenAgain).toString()).type, 'response.completed');
+    websocket.close();
+    await nextClose(websocket);
+  } finally { await harness.close(); }
+});

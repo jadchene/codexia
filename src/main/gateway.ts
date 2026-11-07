@@ -4,7 +4,6 @@ import http from "node:http";
 import { quotaNormalizationFromSettings } from "../shared/quota-normalization.ts";
 import { randomUUID } from "node:crypto";
 import { pickGatewayAccount } from "./selection.ts";
-import { notifySessionQuotaExhausted } from "./gateway/session-wakeup.ts";
 import { createGatewayRouting } from "./gateway-routing.ts";
 import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
 import { createAccountModeApiProxy } from "./account-mode-api-proxy.ts";
@@ -435,10 +434,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
     disposeUpstream = result.dispose || (() => {});
     routeResultForLog = result;
     const { account, target, response, body, tokenUsage: errorUsage } = result;
-    if (target?.kind === "chatgpt_subscription_pool" && isQuotaExhaustedResponse(response.status, body)) {
-      notifySessionQuotaExhausted(req.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
-        hooks.onSessionQuotaExhausted, true, result.unavailableAccountIds || []);
-    }
+
     accountForLog = account;
     targetForLog = target;
     const actualUpstreamUrl = result.upstreamUrl || request.upstreamUrl;
@@ -503,10 +499,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       }
       const tokenUsage = usageParser.latestUsage();
       const streamFailure = usageParser.terminalFailure();
-      if (target?.kind === "chatgpt_subscription_pool" && isQuotaExhaustedResponse(429, usageParser.terminalError())) {
-        notifySessionQuotaExhausted(req.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true",
-          hooks.onSessionQuotaExhausted, true, account?.id ? [account.id] : []);
-      }
+
       store.addTokenLog({
         account_id: account?.id || null,
         method: req.method,
@@ -542,9 +535,7 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
     }
   } catch (error: Dynamic) {
     const cancellation = cancellationKind(error, lifecycle.signal);
-    if (["SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "AUTO_REVIEW_FALLBACK_UNAVAILABLE"].includes(error?.code)) {
-      notifySessionQuotaExhausted(req.headers, store.listAccounts(), settings.ignore_five_hour_limit === "true", hooks.onSessionQuotaExhausted);
-    }
+
     const status = Number(error?.statusCode || (cancellation === "client_cancelled" ? 499 : 502));
     const message = cancellationMessage(cancellation, error);
     const requestPath = request?.originalPath || `${pathname}${parsedUrl.search}`;

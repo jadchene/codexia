@@ -1,11 +1,11 @@
 import {
   ApiOutlined,
   DashboardOutlined,
-  ReloadOutlined,
   TeamOutlined
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Flex, List, Progress, Row, Space, Statistic, Tooltip, Typography } from "antd";
+import { Alert, Card, Col, Flex, List, Row, Space, Statistic, Tooltip, Typography } from "antd";
+import { quotaRemainingPercent } from "../../../shared/quota-normalization";
 import type { ReactNode } from "react";
 import type { AppLog, TokenSummary } from "../../../shared/contracts/logs";
 import { currencyName } from "../../lib/currency";
@@ -36,8 +36,6 @@ interface OverviewPageProps {
   };
   settings: SettingsRecord;
   recentLogs?: AppLog[];
-  onToggleGateway?: () => Promise<void>;
-  onRefreshAccounts?: () => Promise<void>;
 }
 
 interface QuotaDetail {
@@ -53,9 +51,7 @@ export const OverviewPage = ({
   tokenSummary,
   quotaSummary,
   settings,
-  recentLogs = [],
-  onToggleGateway,
-  onRefreshAccounts
+  recentLogs = []
 }: OverviewPageProps) => {
   const upstreamQuery = useQuery({
     queryKey: ["upstreams", "overview"],
@@ -78,38 +74,35 @@ export const OverviewPage = ({
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <div className="v1-page-card">
-        <Flex gap={8} wrap className="v1-table-toolbar">
-          <Button type="primary" onClick={() => void onToggleGateway?.()}>{gateway.running ? "停止 API 服务" : "启动 API 服务"}</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void onRefreshAccounts?.()}>刷新额度</Button>
-        </Flex>
         <Row gutter={[16, 16]}>
-          <MetricCard icon={<TeamOutlined />} title="可用订阅账号" value={`${usableAccounts}/${accounts.length}`} />
-          <MetricCard icon={<ApiOutlined />} title="可用第三方渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
-          <MetricCard icon={<DashboardOutlined />} title="可选模型" value={modelsQuery.isError ? "-" : modelCount} loading={modelsQuery.isLoading} />
+          <MetricCard span={8} icon={<TeamOutlined />} title="可用订阅账号" value={`${usableAccounts}/${accounts.length}`} />
+          <MetricCard span={10} icon={<ApiOutlined />} title="可用第三方渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
+          <MetricCard span={6} icon={<DashboardOutlined />} title="可选模型" value={modelsQuery.isError ? "-" : modelCount} loading={modelsQuery.isLoading} />
         </Row>
       </div>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} xl={settings.ignore_five_hour_limit === "true" ? 12 : 8}>
+        <Col xs={24} xl={settings.ignore_five_hour_limit === "true" ? 16 : 12}>
           <ServiceAddressCard gatewayBase={gateway.running ? gatewayBase : "未启动"} mcpGatewayUrl={mcpGateway.url || "未启动"} />
         </Col>
         {settings.ignore_five_hour_limit !== "true" && (
-          <Col xs={24} md={12} xl={8}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} normalizeQuotaToPlus={settings.gpt_quota_normalization_enabled === "true"} /></Col>
+          <Col xs={24} md={12} xl={6}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} /></Col>
         )}
-        <Col xs={24} md={12} xl={settings.ignore_five_hour_limit === "true" ? 12 : 8}>
-          <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} capacity={quotaSummary.capacity_percent} normalizeQuotaToPlus={settings.gpt_quota_normalization_enabled === "true"} />
+        <Col xs={24} md={12} xl={settings.ignore_five_hour_limit === "true" ? 8 : 6}>
+          <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} capacity={quotaSummary.capacity_percent} />
         </Col>
       </Row>
 
-      <Card title="今日调用" className="v1-overview-card">
-        <Row gutter={[16, 20]}>
+      <Card title="今日调用" className="v1-overview-card v1-statistics-card">
+        <div className="v1-overview-statistics">
           <StatisticColumn title="调用" value={total.calls || 0} />
           <StatisticColumn title="总 Token" value={total.total_tokens || 0} tooltip={<TokenUsageDetails usage={total} />} />
           <StatisticColumn title="缓存命中" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} suffix="%" />
-          <StatisticColumn title="平均耗时" value={Number(total.average_duration_ms || 0)} precision={0} suffix="ms" />
+          <StatisticColumn title="输出速度" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
+          <StatisticColumn title="平均耗时" value={Math.round(Number(total.average_duration_ms || 0) / 100) / 10} precision={1} suffix="s" />
           <StatisticColumn title="错误" value={Number(total.errors || 0)} />
           <StatisticColumn title={`估算成本（${currencyName(settings.billing_currency || "USD")}）`} value={Number(total.estimated_cost || 0)} precision={4} />
-        </Row>
+        </div>
       </Card>
 
       <Card title="需要关注" className="v1-overview-card">
@@ -125,17 +118,19 @@ export const OverviewPage = ({
 };
 
 const MetricCard = ({
+  span,
   icon,
   title,
   value,
   loading = false
 }: {
+  span: number;
   icon: ReactNode;
   title: string;
   value: string | number;
   loading?: boolean;
 }) => (
-  <Col xs={24} sm={12} xl={8}>
+  <Col xs={24} md={span}>
     <Card loading={loading} className="v1-overview-card">
       <Flex align="center" gap={14}>
         <div className="v1-overview-icon">{icon}</div>
@@ -173,19 +168,16 @@ const ServiceAddressCard = ({ gatewayBase, mcpGatewayUrl }: { gatewayBase: strin
   </Card>
 );
 
-const QuotaCard = ({ title, detail, capacity, normalizeQuotaToPlus }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined; normalizeQuotaToPlus: boolean }) => {
-  const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
-  const totalCapacity = Number(capacity ?? 100);
-  const progress = Math.round(Math.max(0, Math.min(100, totalCapacity > 0 ? remaining / totalCapacity * 100 : 0)) * 10) / 10;
+const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined }) => {
+  const remaining = quotaRemainingPercent(Number(detail?.remaining_percent || 0), Number(capacity ?? 100));
   return (
     <Card className="v1-overview-card v1-overview-status-card v1-overview-quota-card">
       <Typography.Text type="secondary">{title}</Typography.Text>
       <div className="v1-overview-quota-body">
         <div>
-          <Typography.Title level={3}>{remaining.toFixed(1)}%{normalizeQuotaToPlus ? " plus" : ""}</Typography.Title>
+          <Typography.Title level={3}>{remaining.toFixed(1)}%</Typography.Title>
           <Typography.Text type="secondary">重置：{formatTime(detail?.reset_at)}</Typography.Text>
         </div>
-        <Progress type="dashboard" percent={progress} size={92} strokeColor={progress < 20 ? "#dc2626" : "#2563eb"} />
       </div>
     </Card>
   );
@@ -199,12 +191,12 @@ const StatisticColumn = ({
   tooltip
 }: {
   title: string;
-  value: number;
+  value: number | string;
   precision?: number;
   suffix?: string;
   tooltip?: ReactNode;
 }) => (
-  <Col xs={12} lg={8} xl={4}>
+  <div className="v1-statistic-item">
     {tooltip ? (
       <Tooltip title={tooltip}>
         <div><Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} /></div>
@@ -212,7 +204,7 @@ const StatisticColumn = ({
     ) : (
       <Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} />
     )}
-  </Col>
+  </div>
 );
 
 const TokenUsageDetails = ({ usage }: { usage: TokenSummary["total"] }) => (

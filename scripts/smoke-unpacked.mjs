@@ -63,12 +63,12 @@ try {
     fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
     fs.writeFileSync(screenshotPath, await captureScreenshot(target.webSocketDebuggerUrl));
   }
+  inspection.statisticLayout = await inspectStatisticLayout(target.webSocketDebuggerUrl, child);
   inspection.pageCount = await inspectLazyPages(target.webSocketDebuggerUrl, child);
+  await navigateToPage(target.webSocketDebuggerUrl, child, "settings", "账号与额度");
   inspection.quotaNormalization = await inspectQuotaNormalization(target.webSocketDebuggerUrl);
   inspection.officialPricing = await inspectOfficialPricing(target.webSocketDebuggerUrl);
   inspection.overviewModelCount = await inspectOverviewModelCount(target.webSocketDebuggerUrl, child);
-  inspection.sessionWakeupCrud = await inspectSessionWakeupCrud(target.webSocketDebuggerUrl);
-  inspection.scheduledTaskCrud = await inspectScheduledTaskCrud(target.webSocketDebuggerUrl);
 } finally {
   stopProcessTree(child.pid);
 }
@@ -133,7 +133,6 @@ async function inspectQuotaNormalization(webSocketDebuggerUrl) {
     const api = window.codexGateway;
     const defaults = { plus: '1', prolite: '10', pro: '20', promax: '50', free: '0', go: '0', other: '1' };
     const original = (await api.bootstrap()).settings;
-    if (original.gpt_quota_normalization_enabled !== 'false') throw new Error('套餐额度折算没有默认关闭');
     for (const [plan, value] of Object.entries(defaults)) {
       if (original['gpt_quota_multiplier_' + plan] !== value) throw new Error('套餐默认倍率错误：' + plan);
     }
@@ -147,61 +146,18 @@ async function inspectQuotaNormalization(webSocketDebuggerUrl) {
       if (document.getElementById('gpt_quota_multiplier_' + plan)?.value !== value) throw new Error('套餐倍率表单错误：' + plan);
     }
     const toggle = document.querySelector('[aria-label="按 Plus 基准折算额度"]');
-    if (toggle?.getAttribute('aria-checked') !== 'false') throw new Error('折算开关的初始状态错误');
+    if (toggle) throw new Error('不应显示额度折算开关');
     try {
-      await api.saveSettings({ gpt_quota_normalization_enabled: 'true', gpt_quota_multiplier_pro: '12.5' });
+      await api.saveSettings({ gpt_quota_multiplier_pro: '12.5' });
       const saved = (await api.bootstrap()).settings;
-      if (saved.gpt_quota_normalization_enabled !== 'true' || saved.gpt_quota_multiplier_pro !== '12.5') throw new Error('套餐额度配置保存失败');
+      if (saved.gpt_quota_multiplier_pro !== '12.5') throw new Error('套餐额度配置保存失败');
       const quota = await api.quotaSummary();
       if (!Number.isFinite(quota.capacity_percent) || !Number.isFinite(quota.primary.remaining_percent)) throw new Error('额度折算结果无效');
     } finally {
-      await api.saveSettings({ gpt_quota_normalization_enabled: original.gpt_quota_normalization_enabled, gpt_quota_multiplier_pro: original.gpt_quota_multiplier_pro });
+      await api.saveSettings({ gpt_quota_multiplier_pro: original.gpt_quota_multiplier_pro });
     }
     const restored = (await api.bootstrap()).settings;
-    if (restored.gpt_quota_normalization_enabled !== original.gpt_quota_normalization_enabled || restored.gpt_quota_multiplier_pro !== original.gpt_quota_multiplier_pro) throw new Error('额度配置恢复失败');
-    return true;
-  })()`);
-}
-
-async function inspectScheduledTaskCrud(webSocketDebuggerUrl) {
-  return evaluate(webSocketDebuggerUrl, `(async () => {
-    const api = window.codexGateway;
-    const now = Date.now();
-    const record = await api.saveScheduledTask({
-      name: '定时任务打包检查', target: 'existing', sessionId: crypto.randomUUID(), workingDirectory: '',
-      cron: '0 22 * * *', message: '只用于配置读写检查，不执行。', enabled: false,
-      startsAt: now + 86400000, endsAt: now + 172800000
-    });
-    try {
-      let saved = (await api.listScheduledTasks()).find(item => item.id === record.id);
-      if (!saved || saved.cron !== '0 22 * * *') throw new Error('定时任务保存结果不正确');
-      await api.setScheduledTaskEnabled(record.id, true);
-      saved = (await api.listScheduledTasks()).find(item => item.id === record.id);
-      if (!saved?.enabled || saved.nextRunAt <= now) throw new Error('定时任务启用后未安排未来触发');
-      await api.setScheduledTaskEnabled(record.id, false);
-    } finally { await api.deleteScheduledTask(record.id); }
-    if ((await api.listScheduledTasks()).some(item => item.id === record.id)) throw new Error('定时任务删除操作未生效');
-    return true;
-  })()`);
-}
-
-async function inspectSessionWakeupCrud(webSocketDebuggerUrl) {
-  return evaluate(webSocketDebuggerUrl, `(async () => {
-    const api = window.codexGateway;
-    const now = Date.now();
-    const record = await api.saveSessionWakeup({
-      sessionId: crypto.randomUUID(), name: '唤醒打包检查', enabled: false,
-      resumeGoal: true, startsAt: now, endsAt: now + 3600000, maxAttempts: 2
-    });
-    try {
-      let saved = (await api.listSessionWakeups()).find(item => item.id === record.id);
-      if (!saved || saved.maxAttempts !== 2 || saved.resumeGoal !== true) throw new Error('会话唤醒保存结果不正确');
-      await api.setSessionWakeupEnabled(record.id, true);
-      saved = (await api.listSessionWakeups()).find(item => item.id === record.id);
-      if (!saved?.enabled) throw new Error('会话唤醒启用操作未生效');
-      await api.setSessionWakeupEnabled(record.id, false);
-    } finally { await api.deleteSessionWakeup(record.id); }
-    if ((await api.listSessionWakeups()).some(item => item.id === record.id)) throw new Error('会话唤醒删除操作未生效');
+    if (restored.gpt_quota_multiplier_pro !== original.gpt_quota_multiplier_pro) throw new Error('额度配置恢复失败');
     return true;
   })()`);
 }
@@ -324,21 +280,61 @@ async function waitForRenderer(webSocketDebuggerUrl, processHandle) {
   throw new Error(`Timed out waiting for packaged preload and React bootstrap.${lastError ? ` ${lastError.message}` : ""}`);
 }
 
+/** 使用真实 Chromium 排版检查统计项的权重、换行及窄容器边界。 */
+async function inspectStatisticLayout(webSocketDebuggerUrl, processHandle) {
+  const results = {};
+  for (const [route, title, selector] of [
+    ["overview", "今日调用", ".v1-overview-statistics"],
+    ["analytics", "汇总指标", ".v1-analytics-summary"]
+  ]) {
+    await navigateToPage(webSocketDebuggerUrl, processHandle, route, title);
+    results[route] = await evaluate(webSocketDebuggerUrl, `(() => {
+      const container = document.querySelector(${JSON.stringify(selector)});
+      const sizing = container.parentElement;
+      const originalWidth = sizing.style.width;
+      const originalFlex = sizing.style.flex;
+      const samples = [];
+      try {
+        sizing.style.flex = 'none';
+        for (const width of [1100, 780, 420, 280]) {
+          sizing.style.width = width + 'px';
+          const bounds = container.getBoundingClientRect();
+          const cells = Array.from(container.children).map(cell => ({
+            title: cell.querySelector('.ant-statistic-title')?.textContent,
+            width: cell.getBoundingClientRect().width,
+            left: cell.getBoundingClientRect().left,
+            right: cell.getBoundingClientRect().right,
+            top: cell.getBoundingClientRect().top
+          }));
+          if (cells.some(cell => cell.width <= 0 || cell.left < bounds.left - 1 || cell.right > bounds.right + 1)) throw new Error('统计项超出容器');
+          if (width === 1100) {
+            const calls = cells.find(cell => cell.title === '调用');
+            const tokens = cells.find(cell => cell.title === '总 Token');
+            const cost = cells.find(cell => cell.title.startsWith('估算成本'));
+            if (!(tokens.width > calls.width && cost.width > calls.width)) throw new Error('统计项仍为平均宽度');
+          }
+          if (width === 280 && new Set(cells.map(cell => Math.round(cell.top))).size <= 1) throw new Error('窄屏统计项未换行');
+          samples.push({ width, cells: cells.map(({ title, width }) => ({ title, width: Math.round(width) })) });
+        }
+      } finally { sizing.style.width = originalWidth; sizing.style.flex = originalFlex; }
+      return samples;
+    })()`);
+    if (screenshotPath) {
+      const file = screenshotPath.replace(/\.png$/i, '-' + route + '-statistics.png');
+      await evaluate(webSocketDebuggerUrl, `document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block: 'center', behavior: 'instant'}); true`);
+      fs.writeFileSync(file, await captureScreenshot(webSocketDebuggerUrl));
+    }
+  }
+  return results;
+}
+
 async function inspectLazyPages(webSocketDebuggerUrl, processHandle) {
-  // 检查默认菜单状态，再在隔离副本中开启可选菜单以覆盖全部页面。
-  const menusHidden = await evaluate(webSocketDebuggerUrl, `(async () => {
-    const settings = (await window.codexGateway.bootstrap()).settings;
-    const labels = Array.from(document.querySelectorAll('.v1-navigation [role="menuitem"]')).map(item => item.textContent);
-    return settings.show_session_wakeups_menu === 'false' && settings.show_scheduled_tasks_menu === 'false'
-      && !labels.some(label => label.includes('会话唤醒') || label.includes('定时任务'));
-  })()`);
-  if (!menusHidden) throw new Error("可选菜单没有默认关闭");
-  await evaluate(webSocketDebuggerUrl, `(async () => {
-    await window.codexGateway.saveSettings({ show_session_wakeups_menu: 'true', show_scheduled_tasks_menu: 'true' });
-    return true;
-  })()`);
-  await evaluate(webSocketDebuggerUrl, "location.reload(); true");
-  await waitForRenderer(webSocketDebuggerUrl, processHandle);
+  // 已下线的任务菜单及预加载接口均不可再访问。
+  const removed = await evaluate(webSocketDebuggerUrl, `({
+    menus: Array.from(document.querySelectorAll("[role=menuitem]")).some(item => /会话唤醒|定时任务/.test(item.textContent)),
+    methods: Object.keys(window.codexGateway).filter(key => /SessionWakeup|ScheduledTask/.test(key))
+  })`);
+  if (removed.menus || removed.methods.length) throw new Error("已下线任务功能仍可访问");
   const pages = [
     ["overview", "运行概览"],
     ["accounts", "订阅账号"],
@@ -346,8 +342,6 @@ async function inspectLazyPages(webSocketDebuggerUrl, processHandle) {
     ["services", "服务管理"],
     ["analytics", "调用分析"],
     ["runtimeLogs", "运行日志"],
-    ["sessionWakeups", "会话唤醒"],
-    ["scheduledTasks", "定时任务"],
     ["codexIntegration", "接入模式"],
     ["settings", "设置中心"]
   ];
@@ -492,7 +486,7 @@ function verifyLegacyUpgrade(databasePath, applicationRoot) {
       }
     });
     const browserMarkerPreserved = fs.existsSync(path.join(applicationRoot, "data", "browser", "v0-browser-marker.txt"));
-    if (version !== 8 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
+    if (version !== 9 || fixtureValue !== "preserved" || builtInUpstream !== "https://legacy.example.test/backend-api/codex"
       || !compactAdaptColumn || legacyRoutingTableCount !== 0 || encryptedBackups.length < 1 || !browserMarkerPreserved) {
       throw new Error("Packaged legacy upgrade did not preserve data, reach the current schema, or create an encrypted backup.");
     }

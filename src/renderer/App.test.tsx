@@ -12,9 +12,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it.each(["sessionWakeups", "scheduledTasks"])("hides optional menus by default and persists independent switches from %s", async (route) => {
+it.each(["sessionWakeups", "scheduledTasks"])("redirects removed routes and ignores old menu switches from %s", async (route) => {
   const user = userEvent.setup();
-  let settings: Record<string, string> = {};
+  let settings: Record<string, string> = { show_session_wakeups_menu: "true", show_scheduled_tasks_menu: "true" };
   const bootstrap = vi.fn(async () => ({
     app: { version: "1.9.8" }, settings, accounts: [],
     tokenLogs: { items: [], total: 0, page: 1, pageSize: 10 }, tokenSummary: { total: {}, byAccount: [] },
@@ -32,27 +32,12 @@ it.each(["sessionWakeups", "scheduledTasks"])("hides optional menus by default a
   expect(screen.queryByRole("menuitem", { name: /会话唤醒/ })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: /定时任务/ })).toBeNull();
   await user.click(screen.getByRole("menuitem", { name: /设置中心/ }));
-  const wakeups = await screen.findByRole("switch", { name: "显示会话唤醒菜单" });
-  expect(wakeups.getAttribute("aria-checked")).toBe("false");
-  expect(screen.getByRole("switch", { name: "显示定时任务菜单" }).getAttribute("aria-checked")).toBe("false");
-  await user.click(wakeups);
-  await user.click(screen.getByRole("button", { name: /保存设置/ }));
-  expect(await screen.findByRole("menuitem", { name: /会话唤醒/ })).toBeTruthy();
-  expect(screen.queryByRole("menuitem", { name: /定时任务/ })).toBeNull();
-  await user.click(screen.getByRole("switch", { name: "显示会话唤醒菜单" }));
-  await user.click(screen.getByRole("switch", { name: "显示定时任务菜单" }));
-  await user.click(screen.getByRole("button", { name: /保存设置/ }));
-  expect(await screen.findByRole("menuitem", { name: /定时任务/ })).toBeTruthy();
-  expect(screen.queryByRole("menuitem", { name: /会话唤醒/ })).toBeNull();
-  expect(settings.show_session_wakeups_menu).toBe("false");
-  expect(settings.show_scheduled_tasks_menu).toBe("true");
-  cleanup();
-  render(<MemoryRouter initialEntries={["/settings"]}><QueryClientProvider client={client}><AntApp><App /></AntApp></QueryClientProvider></MemoryRouter>);
-  expect(await screen.findByRole("menuitem", { name: /定时任务/ })).toBeTruthy();
-  expect(screen.queryByRole("menuitem", { name: /会话唤醒/ })).toBeNull();
+  await screen.findByText("应用行为");
+  expect(screen.queryByRole("switch", { name: /显示会话唤醒|显示定时任务/ })).toBeNull();
+  expect(screen.getAllByRole("menuitem").filter(item => /会话唤醒|定时任务/.test(item.textContent || ""))).toHaveLength(0);
 });
 
-it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model channel data after %s setting changes", async (field) => {
+it.each(["fiveHour", "multiplier"])("refreshes quota and model channel data after %s setting changes", async (field) => {
   const user = userEvent.setup();
   const settings = {
     ignore_five_hour_limit: field === "fiveHour" ? "true" : "false",
@@ -105,13 +90,11 @@ it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model 
   await screen.findByText("忽略 5 小时限制");
   expect(screen.queryByText("重启服务后生效")).toBeNull();
   if (field === "multiplier") {
-    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
     const input = screen.getByRole("spinbutton", { name: "Pro 200 倍率" });
     await user.clear(input);
     await user.type(input, "12.5");
-    await user.click(screen.getByRole("switch", { name: "按 Plus 基准折算额度" }));
   } else {
-    await user.click(screen.getByRole("switch", { name: field === "fiveHour" ? "忽略 5 小时限制" : "按 Plus 基准折算额度" }));
+    await user.click(screen.getByRole("switch", { name: "忽略 5 小时限制" }));
   }
   await user.click(screen.getByRole("button", { name: /保存设置/ }));
   await waitFor(() => expect(quotaSummary).toHaveBeenCalledOnce());
@@ -120,9 +103,8 @@ it.each(["fiveHour", "normalization", "multiplier"])("refreshes quota and model 
   expect(screen.getByRole("status").textContent).not.toContain("重启");
 
   await user.click(screen.getByText("运行概览"));
-  const suffix = field === "normalization" ? " plus" : "";
-  expect(await screen.findByText(`170.0%${suffix}`)).toBeTruthy();
-  expect(screen.getByText(`150.0%${suffix}`)).toBeTruthy();
+  expect(await screen.findByText("85.0%")).toBeTruthy();
+  expect(screen.getByText("75.0%")).toBeTruthy();
 });
 
 it("refreshes the visible model channels when background data changes", async () => {

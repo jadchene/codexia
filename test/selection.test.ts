@@ -275,10 +275,10 @@ test("buildCodexQuotaHeaders rewrites quota headers from account pool", () => {
       quota_7d_reset_at: 100
     }
   ], 500);
-  assert.equal(headers["x-codex-primary-used-percent"], "0");
+  assert.equal(headers["x-codex-primary-used-percent"], "30");
   assert.equal(headers["x-codex-primary-window-minutes"], "300");
   assert.equal(headers["x-codex-primary-reset-after-seconds"], "400");
-  assert.equal(headers["x-codex-secondary-used-percent"], "0");
+  assert.equal(headers["x-codex-secondary-used-percent"], "40");
   assert.equal(headers["x-codex-secondary-window-minutes"], "10080");
   assert.equal(headers["x-codex-secondary-reset-after-seconds"], "3500");
   assert.equal(headers["x-codex-plan-type"], "unknown");
@@ -297,7 +297,7 @@ test("buildCodexQuotaSnapshot uses the same aggregate as response headers", () =
   const snapshot = buildCodexQuotaSnapshot(accounts, 500);
 
   assert.equal(snapshot.primary.used_percent, Number(headers["x-codex-primary-used-percent"]));
-  assert.equal(snapshot.primary.used_percent, 70.6);
+  assert.equal(snapshot.primary.used_percent, 85.3);
   assert.equal(snapshot.primary.window_minutes, Number(headers["x-codex-primary-window-minutes"]));
   assert.equal(snapshot.primary.reset_after_seconds, Number(headers["x-codex-primary-reset-after-seconds"]));
   assert.equal(snapshot.primary.reset_at, 1_000);
@@ -307,20 +307,20 @@ test("buildCodexQuotaSnapshot uses the same aggregate as response headers", () =
   assert.equal(snapshot.secondary.reset_at, 2_000);
 });
 
-test("buildCodexQuotaHeaders caps stacked remaining quota before subtraction", () => {
+test("buildCodexQuotaHeaders uses total capacity before subtraction", () => {
   const accounts = [
     { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 80, quota_5h_reset_at: 100 },
     { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 50, quota_5h_reset_at: 200 }
   ];
   const headers = buildCodexQuotaHeaders(accounts, 500);
   const summary = buildAccountPoolQuotaSummary(accounts, 500);
-  assert.equal(headers["x-codex-primary-used-percent"], "30");
+  assert.equal(headers["x-codex-primary-used-percent"], "65");
   assert.equal(summary.capacity_percent, 200);
   assert.equal(summary.primary.remaining_percent, 70);
   assert.equal(headers["x-codex-primary-reset-after-seconds"], "0");
 });
 
-test("application quota summary keeps remaining capacity above 100 while response headers cap it", () => {
+test("internal quota capacity is converted to a bounded percentage in response headers", () => {
   const accounts = [
     { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 10, quota_7d_used_percent: 20 },
     { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 20, quota_7d_used_percent: 30 }
@@ -331,16 +331,16 @@ test("application quota summary keeps remaining capacity above 100 while respons
   assert.equal(summary.capacity_percent, 200);
   assert.equal(summary.primary.remaining_percent, 170);
   assert.equal(summary.secondary.remaining_percent, 150);
-  assert.equal(headers["x-codex-primary-used-percent"], "0");
-  assert.equal(headers["x-codex-secondary-used-percent"], "0");
+  assert.equal(headers["x-codex-primary-used-percent"], "15");
+  assert.equal(headers["x-codex-secondary-used-percent"], "25");
 });
 
-test("buildCodexQuotaHeaders subtracts stacked remaining quota from 100", () => {
+test("buildCodexQuotaHeaders subtracts the remaining capacity ratio from 100", () => {
   const headers = buildCodexQuotaHeaders([
     { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 90 },
     { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 80 }
   ], 500);
-  assert.equal(headers["x-codex-primary-used-percent"], "70");
+  assert.equal(headers["x-codex-primary-used-percent"], "85");
 });
 
 test("syncAccountUsageFromHeaders stores quota snapshots for the active account", () => {

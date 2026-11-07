@@ -40,9 +40,8 @@ test("畸形 HTTP 和 WebSocket 请求返回 400 且不影响后续请求", asyn
   }
 });
 
-test("HTTP 账号池轮换用尽后登记唤醒，单个账号耗尽或认证失败不登记", async () => {
+test("HTTP 账号池额度耗尽、认证失败和换号成功保持原响应", async () => {
   for (const mode of ["quota", "failover", "auth", "sse"]) {
-    const notifications = [];
     const attempts = [];
     const harness = await startHarness((req, res) => {
       attempts.push(req.headers.authorization);
@@ -56,26 +55,24 @@ test("HTTP 账号池轮换用尽后登记唤醒，单个账号耗尽或认证失
         res.writeHead(mode === "auth" ? 401 : 429, { "content-type": "application/json", "x-codex-primary-used-percent": "100", "x-codex-primary-reset-after-seconds": "1800" });
         res.end(mode === "auth" ? '{"error":"invalid_token"}' : '{"error":"usage_limit_reached"}');
       }
-    }, {}, { onSessionQuotaExhausted: (id) => notifications.push(id) });
+    });
     try {
       if (mode === "sse") harness.accounts.splice(1);
       const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("wake-http-session", "wake-turn") });
       await response.text();
-      assert.deepEqual(notifications, ["quota", "sse"].includes(mode) ? ["wake-http-session"] : []);
+      assert.equal(response.status, mode === "quota" ? 429 : mode === "auth" ? 401 : 200);
       if (mode === "quota") assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-b"]);
     } finally { await harness.close(); }
   }
 });
 
-test("HTTP 选不到账号时仅在真实额度用尽的情况下登记唤醒", async () => {
-  const notifications = [];
-  const harness = await startHarness((_req, res) => res.end("{}"), {}, { onSessionQuotaExhausted: (id) => notifications.push(id) });
+test("HTTP 账号池额度全部用尽时返回 503", async () => {
+  const harness = await startHarness((_req, res) => res.end("{}"));
   try {
     for (const account of harness.accounts) { account.quota_7d_used_percent = 100; account.quota_7d_reset_at = 2_000_000_000; }
     const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("empty-pool-session", "turn") });
     await response.text();
     assert.equal(response.status, 503);
-    assert.deepEqual(notifications, ["empty-pool-session"]);
   } finally { await harness.close(); }
 });
 
@@ -85,13 +82,12 @@ test("HTTP stream failures are logged as errors while preserving upstream SSE an
     [{ type: "response.failed", response: { error: { code: "model_capacity_exceeded", message: "Selected model is at capacity. Please try a different model" } } }, 429, "Selected model is at capacity. Please try a different model"],
     [{ type: "response.failed", response: { error: { code: "server_error", message: "Generation failed" } } }, 500, "Generation failed"]
   ] as const) {
-    const notifications: string[] = [];
     const payload = `data: ${JSON.stringify(event)}\n\n`;
     const harness = await startHarness((_req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write(payload.slice(0, 25));
       res.end(payload.slice(25));
-    }, {}, { onSessionQuotaExhausted: (id: string) => notifications.push(id) });
+    });
     try {
       harness.accounts.splice(1);
       const response = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("capacity-session", "turn") });
@@ -99,7 +95,6 @@ test("HTTP stream failures are logged as errors while preserving upstream SSE an
       assert.equal(await response.text(), payload);
       assert.equal(harness.tokenLogs.at(-1).status, status);
       assert.equal(harness.tokenLogs.at(-1).message, message);
-      assert.deepEqual(notifications, []);
     } finally {
       await harness.close();
     }
@@ -221,8 +216,8 @@ test("HTTP gateway rewrites account quota headers with the aggregate pool quota"
     const response = await gatewayFetch(harness, "/v1/responses", {
       headers: codexHeaders("session-rewrite-quota", "turn-rewrite-quota")
     });
-    assert.equal(response.headers.get("x-codex-primary-used-percent"), "10");
-    assert.equal(response.headers.get("x-codex-secondary-used-percent"), "15");
+    assert.equal(response.headers.get("x-codex-primary-used-percent"), "55");
+    assert.equal(response.headers.get("x-codex-secondary-used-percent"), "57.5");
     assert.equal(await response.text(), 'data: {"type":"response.completed"}\n\n');
     assert.equal(harness.accounts[0].quota_5h_used_percent, 90);
     assert.equal(harness.accounts[0].quota_7d_used_percent, 95);
@@ -249,7 +244,7 @@ test("HTTP quota headers normalize mixed plans and use newly saved multipliers",
     await customized.text();
     harness.store.saveSettings({ gpt_quota_normalization_enabled: "false" });
     const legacy = await gatewayFetch(harness, "/v1/responses", { headers: codexHeaders("weighted-3", "weighted-3") });
-    assert.equal(legacy.headers.get("x-codex-primary-used-percent"), "0");
+    assert.equal(legacy.headers.get("x-codex-primary-used-percent"), "53.3");
     await legacy.text();
   } finally { await harness.close(); }
 });
