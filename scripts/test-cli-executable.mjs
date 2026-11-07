@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { buildCli } from "./build-cli.mjs";
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "codexia exe 中文 "));
@@ -11,7 +11,16 @@ try {
   const external = path.join(temporary, "external");
   fs.mkdirSync(installation);
   fs.mkdirSync(external);
-  const executable = await buildCli(path.join(installation, process.platform === "win32" ? "codexia-cli.exe" : "codexia-cli"));
+  const executable = await buildCli(path.join(installation, process.platform === "win32" ? "codexia-cli.exe" : "codexia-cli"), { platform: process.platform === "win32" ? "windows" : "linux" });
+  // Validate the actual Windows artifact even when running behavior tests on Linux.
+  const windowsExe = process.platform === "win32" ? executable : await buildCli(path.join(temporary, "windows", "codexia-cli.exe"));
+  const pe = fs.readFileSync(windowsExe);
+  assert.equal(pe.toString("ascii", 0, 2), "MZ");
+  const header = pe.readUInt32LE(0x3c);
+  assert.equal(pe.toString("ascii", header, header + 4), "PE\0\0");
+  assert.equal(pe.readUInt16LE(header + 4), process.arch === "arm64" ? 0xaa64 : 0x8664);
+  assert.equal(pe.readUInt16LE(header + 24 + 68), 3, "CLI must use the Windows console subsystem");
+  assert.ok(pe.length < 5 * 1024 * 1024, "CLI must not embed another large runtime");
   const version = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
   function run(entry, args, input = "") {
     return spawnSync(entry, args, {
@@ -27,7 +36,7 @@ try {
   }
   const missing = run(executable, ["mode"]);
   assert.equal(missing.status, 1, missing.stderr);
-  assert.match(missing.stderr, /ENOENT/);
+  assert.match(missing.stderr, /Cannot start same-directory Codexia/);
 
   const linkedDirectory = path.join(external, "linked installation");
   fs.symlinkSync(installation, linkedDirectory, process.platform === "win32" ? "junction" : "dir");
@@ -50,9 +59,14 @@ try {
   if (process.platform === "linux") {
     fs.writeFileSync(path.join(installation, "Codexia.exe"), `#!${process.execPath}
 const fs = require('node:fs');
+if (process.argv.includes('--quick')) { process.stdout.write('quick'); }
+else if (process.argv.includes('--bulk')) { process.stdout.write('x'.repeat(256 * 1024)); }
+else if (process.argv.includes('--block')) { process.stdout.write('ready'); process.stdin.resume(); }
+else {
 process.stdout.write(JSON.stringify({args:process.argv.slice(2),input:fs.readFileSync(0,'utf8'),cwd:process.cwd(),nodeMode:process.env.ELECTRON_RUN_AS_NODE??null}));
 process.stderr.write('child stderr');
 process.exitCode = 7;
+}
 `, { mode: 0o755 });
     const args = ["mode", "空 格", 'quote"', "trailing\\", "$(echo wrong)&"];
     for (const entry of entries) {
@@ -61,6 +75,29 @@ process.exitCode = 7;
       assert.deepEqual(JSON.parse(result.stdout), { args: ["--cli", ...args], input: "input\n", cwd: external, nodeMode: null });
       assert.equal(result.stderr, "child stderr");
     }
+    const bulk = run(executable, ["--bulk"]);
+    assert.equal(bulk.status, 0, bulk.stderr);
+    assert.equal(bulk.stdout, "x".repeat(256 * 1024));
+    // Keep the parent's stdin open: --help must still exit without waiting for input.
+    async function live(args, interrupt) {
+      const child = spawn(executable, args, { cwd: external, stdio: ["pipe", "pipe", "pipe"] });
+      let output = "";
+      const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+      child.stdout.on("data", (data) => {
+        output += data;
+        if (interrupt && output.includes("ready")) child.kill("SIGINT");
+      });
+      try {
+        const code = await new Promise((resolve, reject) => {
+          child.on("error", reject);
+          child.on("close", (code) => resolve(code));
+        });
+        assert.equal(code, interrupt ? 130 : 0);
+        assert.equal(output, interrupt ? "ready" : "quick");
+      } finally { clearTimeout(timer); child.stdin.destroy(); }
+    }
+    await live(["--quick"], false);
+    await live(["--block"], true);
   } else {
     console.log("Run npm run smoke:unpacked to verify forwarding to the real Windows Codexia.exe.");
   }

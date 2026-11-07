@@ -59,7 +59,7 @@ Each mode has its own automatic app-server restart switch. After applying config
 
 ### CLI: version and access modes
 
-The Windows unpacked build includes `codexia-cli.exe`, a Node.js single executable. Run it directly without installing Node.js or opening the desktop app. Symlinks resolve to the original installation directory; CLI never selects an installation based on the current working directory.
+The Windows unpacked build includes `codexia-cli.exe`, a small native console launcher that reuses the bundled Electron runtime. Run it directly without installing Node.js or opening the desktop app. Symlinks resolve to the original installation directory; CLI never selects an installation based on the current working directory.
 
 ```powershell
 .\codexia-cli.exe --version
@@ -88,4 +88,4 @@ Currently `access-mode.get` reads the current mode, choices, preferences and gat
 
 Other installations are ignored even when they run the same version in single-instance mode. Requests remain pinned to the chosen process and are never redirected after it exits or restarts. Inbox request files and the HTTP control service are no longer used; obsolete HTTP configuration keys are removed on startup.
 
-CLI executable packaging uses Node.js SEA and the build-only `postject` dependency. Build Windows releases on Windows with Node.js 24+ matching the Electron architecture. `npm run build:cli` builds only the CLI executable; `npm run test:cli-executable` validates the actual executable. `npm run pack:unpacked` includes it automatically. Linux builds are for executable integration tests only.
+CLI packaging requires Go 1.24+ on the build machine only (no third-party Go dependencies). Set `CODEXIA_GO` if Go is not on PATH. `npm run build:cli` produces `dist/cli/codexia-cli.exe`, including when cross-compiling on Linux; `npm run test:cli-executable` checks process forwarding with a native host build. `npm run pack:unpacked` builds the Windows release on Windows and includes the EXE automatically. Users do not need Go or Node.js. Keep the CLI next to `Codexia.exe`; symlinks to the CLI are supported.

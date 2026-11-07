@@ -2,40 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { inject } from "postject";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const manifest = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-// Build with the exact runtime being embedded; SEA blobs are Node-version specific.
-export async function buildCli(output) {
-  if (!["win32", "linux"].includes(process.platform) || Number(process.versions.node.split(".")[0]) < 24) {
-    throw new Error("CLI packaging requires Node.js 24+ on Windows (Linux is supported for tests).");
-  }
+// No third-party Go packages or end-user runtimes are required.
+export async function buildCli(output, { platform = "windows", arch = process.arch } = {}) {
+  const goarch = { x64: "amd64", arm64: "arm64" }[arch];
+  if (!goarch || !["windows", "linux"].includes(platform)) throw new Error("CLI supports Windows/Linux x64 and arm64 builds.");
   fs.mkdirSync(path.dirname(output), { recursive: true });
-  const temporary = fs.mkdtempSync(path.join(path.dirname(output), ".cli-sea-"));
+  const temporary = fs.mkdtempSync(path.join(path.dirname(output), ".cli-native-"));
   try {
-    const blob = path.join(temporary, "cli.blob");
-    const config = path.join(temporary, "sea.json");
-    fs.writeFileSync(config, JSON.stringify({
-      main: path.join(root, "scripts", "cli-launcher.cjs"),
-      output: blob,
-      disableExperimentalSEAWarning: true,
-      useSnapshot: false,
-      useCodeCache: false,
-      assets: { manifest: path.join(root, "package.json") }
-    }));
-    const env = { ...process.env };
-    delete env.NODE_OPTIONS;
-    const prepared = spawnSync(process.execPath, ["--experimental-sea-config", config], { env, encoding: "utf8" });
-    if (prepared.error || prepared.status !== 0) {
-      throw new Error(`Cannot prepare CLI executable: ${prepared.error?.message ?? prepared.stderr}`);
-    }
-    const executable = path.join(temporary, process.platform === "win32" ? "codexia-cli.exe" : "codexia-cli");
-    fs.copyFileSync(process.execPath, executable);
-    fs.chmodSync(executable, 0o755);
-    await inject(executable, "NODE_SEA_BLOB", fs.readFileSync(blob), {
-      sentinelFuse: "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2"
+    const executable = path.join(temporary, "codexia-cli.exe");
+    const built = spawnSync(process.env.CODEXIA_GO || "go", [
+      "build", "-trimpath", "-buildvcs=false", "-ldflags", `-s -w -X main.version=${manifest.version}`,
+      "-o", executable, "."
+    ], {
+      cwd: path.join(root, "native", "cli"), encoding: "utf8",
+      env: { ...process.env, GOOS: platform, GOARCH: goarch, CGO_ENABLED: "0", GOTOOLCHAIN: "local",
+        GOCACHE: process.env.GOCACHE || path.join(root, "node_modules", ".cache", "go-build") }
     });
+    if (built.error || built.status !== 0) {
+      throw new Error(`CLI build requires Go 1.24+ (set CODEXIA_GO to its executable): ${built.error?.message ?? built.stderr}`);
+    }
     fs.copyFileSync(executable, output);
     fs.chmodSync(output, 0o755);
   } finally {
@@ -45,7 +34,7 @@ export async function buildCli(output) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const output = path.join(root, "dist", "cli", process.platform === "win32" ? "codexia-cli.exe" : "codexia-cli");
+  const output = path.join(root, "dist", "cli", "codexia-cli.exe");
   await buildCli(output);
-  console.log(`CLI executable created: ${output}`);
+  console.log(`CLI executable created: ${output} (${fs.statSync(output).size} bytes)`);
 }

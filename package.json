@@ -62,7 +62,6 @@
     "@vitejs/plugin-react": "6.0.4",
     "electron": "43.8.4",
     "happy-dom": "21.0.4",
-    "postject": "1.0.0-alpha.6",
     "rcedit": "5.0.2",
     "tsup": "8.5.1",
     "typescript": "7.0.2",
