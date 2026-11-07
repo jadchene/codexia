@@ -56,3 +56,23 @@ MIT. See [LICENSE](LICENSE).
 Choose Account, OpenAI API, Third-party API, or Gateway mode (formerly API mode). The two independent API modes use one selected channel and its model catalog; channel enable switches only control gateway routing. All three non-gateway modes can use the local gateway as a monitoring proxy without changing business payloads, credentials, quotas, or routing.
 
 Each mode has its own automatic app-server restart switch. After applying configuration it runs `codex app-server daemon restart` with the same `CODEX_HOME`. Active account tokens are read from Codex’s `auth.json`; Codex owns token refresh.
+
+### CLI: version and access modes
+
+The Windows unpacked build includes a separate `codexia-cli.cmd` launcher. It does not require a separate Node.js installation or a running desktop app. Use this explicit filename to avoid resolving `Codexia.exe` instead.
+
+```powershell
+.\codexia-cli.cmd --version
+.\codexia-cli.cmd mode
+.\codexia-cli.cmd mode switch
+.\codexia-cli.cmd mode switch --mode account --account <account-id> --proxy false --restart true
+.\codexia-cli.cmd mode switch --mode openai --channel <channel-id> --proxy false --restart true
+.\codexia-cli.cmd mode switch --mode third_party --channel <channel-id> --proxy true --restart false
+.\codexia-cli.cmd mode switch --mode gateway --restart true
+```
+
+`mode` shows the saved mode, detected Codex authentication, proxy/restart preferences and available account/channel IDs. Interactive switching offers accounts or channels of the selected type. Import accounts and configure channels/models in the desktop app first. Tokens and API keys are never printed.
+
+Direct access does not launch the desktop app, and completing a command never closes an existing desktop instance. Gateway access or proxy monitoring automatically starts Codexia in the tray if needed and waits for the gateway before applying the configuration. An existing desktop process handles changes through an authenticated local control channel. Restart preferences are saved per mode; a daemon restart failure is reported separately from an already applied configuration.
+
+For development, build with `npm run build:main`, then use `npm run cli -- --version`, `npm run cli -- mode`, or `npm run cli -- mode switch`. Add `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex` for isolated development data. The CLI uses the same system secret storage as the desktop app; it is not a server/headless Electron distribution. Windows is the packaged target; other systems still need a working Electron environment and system secret storage.

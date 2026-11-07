@@ -26,6 +26,7 @@
   "main": "dist/main/main.mjs",
   "scripts": {
     "dev": "node scripts/dev-electron.mjs",
+    "cli": "node scripts/cli-launcher.cjs",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
     "build:main": "tsup --config tsup.main.config.ts && node scripts/check-main-bundle.mjs",

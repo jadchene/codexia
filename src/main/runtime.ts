@@ -1,3 +1,5 @@
+import { startCliControl } from "./cli-control.ts";
+import { createCliAccess } from "./cli-access.ts";
 import { createRequestLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
 import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
@@ -85,6 +87,7 @@ let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 let singleInstanceServer: Server | null = null;
+let closeCliControl: (() => Promise<void>) | undefined;
 const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
 const usageResetRefreshAttempts = new Map<string, { resetAt: number; count: number }>();
 let shuttingDown = false;
@@ -100,7 +103,9 @@ function handleSecondInstance() {
   showMainWindow();
 }
 
-app.on("second-instance", handleSecondInstance);
+app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
+  if (!(additionalData as { cli?: boolean })?.cli && !_argv.includes("--cli-service-start")) handleSecondInstance();
+});
 
 const singleInstanceChannel = useSingleInstance && hasSingleInstanceLock
   ? acquireSingleInstanceChannel({ onSecondInstance: handleSecondInstance })
@@ -242,6 +247,22 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
+  if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) closeCliControl = await startCliControl(store.paths.dataDir, createCliAccess({
+    store, upstreams: upstreamService, catalog: modelCatalogService,
+    codexOptions: codexAccessOptions(runtimeProfile),
+    ensureGateway: async () => {
+      await startGateway("cli");
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const status = gateway.status();
+        if (status.running) return;
+        if (status.error) throw new Error(status.error);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("网关未就绪，接入配置尚未应用。");
+    },
+    onApplied: () => { notifyDataChanged(["settings", "accounts", "upstreams", "upstreamModels"]); updateTrayMenu(); },
+    restart: async (options) => { await restartCodexDaemon(options); }
+  }));
   scheduleUsageRefresh("startup");
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
@@ -1012,6 +1033,8 @@ function syncDetectedCodexAuthMode() {
 async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
   if (shuttingDown) return;
   shuttingDown = true;
+  await closeCliControl?.();
+  closeCliControl = undefined;
   if (usageRefreshTimer) {
     clearInterval(usageRefreshTimer);
     usageRefreshTimer = null;

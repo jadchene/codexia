@@ -54,3 +54,30 @@ npm run pack:unpacked
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+### 命令行：版本与接入模式
+
+Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要先打开桌面应用，也不需要另外安装 Node.js。请显式使用这个入口，避免同目录的 `Codexia.exe` 被终端优先匹配。
+
+```powershell
+.\codexia-cli.cmd --version
+.\codexia-cli.cmd mode
+.\codexia-cli.cmd mode switch
+```
+
+`mode` 显示已保存的接入模式、Codex 认证识别结果、代理和重启选项，以及可选账号／渠道的 ID。`mode switch` 依次选择四种接入模式、账号或对应类型的 API 渠道、是否启用网关代理、是否在应用后重启 Codex daemon app-server。账号和渠道需先在桌面应用中导入／配置，命令不会输出 Token 或 API Key。
+
+也可以提供完整参数，无需交互：
+
+```powershell
+.\codexia-cli.cmd mode switch --mode account --account <账号ID> --proxy false --restart true
+.\codexia-cli.cmd mode switch --mode openai --channel <官方渠道ID> --proxy false --restart true
+.\codexia-cli.cmd mode switch --mode third_party --channel <第三方渠道ID> --proxy true --restart false
+.\codexia-cli.cmd mode switch --mode gateway --restart true
+```
+
+- 直连切换不会启动桌面应用；命令结束仅退出命令行进程，已经运行的 Codexia 保持运行。
+- 网关模式或启用代理时，自动启动未运行的 Codexia（托盘方式），并等待网关就绪后应用配置；已运行时复用现有进程。端口冲突或启动失败会返回错误，不报告应用成功。
+- 四种模式分别保存自动重启偏好。重启失败会明确提示配置已应用；未选择重启时，已有 Codex 进程可能仍使用旧配置。
+- 开发环境先运行 `npm run build:main`，再使用 `npm run cli -- --version`、`npm run cli -- mode` 或 `npm run cli -- mode switch`。需要隔离测试时，增加 `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex`。
+- CLI 复用桌面应用的数据目录和系统安全存储；它不是无界面服务器版 Electron。Windows 是打包支持平台，其他系统仍需 Electron 可用的运行环境及系统安全存储。
