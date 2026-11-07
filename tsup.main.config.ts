@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: { main: "src/main/main.ts" },
+  entry: { main: "src/main/main.ts", "request-log-worker": "src/main/request-log-worker.ts" },
   format: ["esm"],
   outDir: "dist/main",
   outExtension: () => ({ js: ".mjs" }),

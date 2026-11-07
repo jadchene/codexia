@@ -4,8 +4,9 @@ import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const bundlePath = path.join(projectRoot, "dist", "main", "main.mjs");
-const bundle = fs.readFileSync(bundlePath, "utf8");
+const bundle = ["main.mjs", "request-log-worker.mjs"]
+  .map((name) => fs.readFileSync(path.join(projectRoot, "dist", "main", name), "utf8"))
+  .join("\n");
 
 const forbidden = [
   {

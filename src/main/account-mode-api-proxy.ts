@@ -1,3 +1,4 @@
+import { createRequestMetadataParser } from "./request-metadata.ts";
 import { randomUUID } from "node:crypto";
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
@@ -10,11 +11,10 @@ import { createAccountModeResponsesObserver } from "./account-mode-responses-obs
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { emptyUsage, createSseUsageParser } from "./gateway/usage-parser.ts";
 import { buildResponsesRequestLog } from "./responses-request-log.ts";
-import { normalizeServiceTier, serviceTierFromObject } from "../shared/service-tier.ts";
+import { normalizeServiceTier } from "../shared/service-tier.ts";
 import { syncAccountUsageFromEvent, syncAccountUsageFromHeaders, type GatewayAccountQuota } from "./gateway/quota.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
-const DEFAULT_REQUEST_METADATA_LIMIT_BYTES = 16 * 1024 * 1024;
 const RESPONSES_PATH = "/backend-api/codex/responses";
 const PUBLIC_RESPONSES_PATH = "/v1/responses";
 const DEFAULT_UPSTREAM_BASE_URL = "https://chatgpt.com";
@@ -104,8 +104,7 @@ const handleHttpRequest = async (
   const debugEnabled = observed && settings.debug_api_logging === "true" && apiDebugLogger.isEnabled();
   const requestId = debugEnabled ? randomUUID() : "";
   const requestCapture = debugEnabled ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
-  // 计费字段按网关请求体上限采集，避免较小的调试日志上限截断模型和优先级。
-  const metadataCapture = observed ? createBodyCapture(positiveInteger(settings.gateway_request_body_limit_bytes, DEFAULT_REQUEST_METADATA_LIMIT_BYTES)) : null;
+  const metadata = observed ? createRequestMetadataParser() : null;
   const responseCapture = debugEnabled ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
   const quotaAccount = options.apiTarget ? null : resolveProxyAccount(request, store);
   const usageParser = observed ? createSseUsageParser((event) => syncAccountUsageFromEvent(quotaAccount, event, store)) : null;
@@ -118,8 +117,8 @@ const handleHttpRequest = async (
   const finishLog = (statusCode: number, message: string | null): void => {
     if (!observed || finished) return;
     finished = true;
-    const requestBody = metadataCapture?.snapshot().body || "";
-    const model = modelFromBody(requestBody);
+    const requestMetadata = metadata?.finish();
+    const model = requestMetadata?.model || "";
     try {
       store.addTokenLog(buildResponsesRequestLog({
         account: options.apiTarget ? null : quotaAccount || selectedAccount(settings),
@@ -131,7 +130,7 @@ const handleHttpRequest = async (
         status: statusCode,
         durationMs: Date.now() - startedAt,
         usage: usageParser?.latestUsage() || emptyUsage(),
-        requestedServiceTier: normalizeServiceTier(request.headers["openai-service-tier"]) ?? serviceTierFromBody(requestBody),
+        requestedServiceTier: normalizeServiceTier(request.headers["openai-service-tier"]) ?? normalizeServiceTier(requestMetadata?.serviceTier),
         settings,
         clientModel: model,
         upstreamModel: model,
@@ -167,7 +166,7 @@ const handleHttpRequest = async (
     clientRequest.once("error", reject);
     request.on("data", (chunk: Buffer) => {
       requestCapture?.push(chunk);
-      metadataCapture?.push(chunk);
+      metadata?.feed(chunk);
     });
     request.once("end", () => {
       if (!debugEnabled) return;
@@ -198,15 +197,6 @@ const handleHttpRequest = async (
     if (clientRequest) activeRequests.delete(clientRequest);
     notifyStatus();
   });
-};
-
-/** 从已捕获的请求体读取优先级，缺失时按标准估算。 */
-const serviceTierFromBody = (body: string): string | null => {
-  try {
-    return serviceTierFromObject(JSON.parse(body));
-  } catch {
-    return null;
-  }
 };
 
 const createAccountProxyWebSocketServer = (
@@ -310,8 +300,7 @@ const createAccountProxyWebSocketServer = (
           requestPath: PUBLIC_RESPONSES_PATH,
           upstreamPath: `${mappedPath.pathname}${mappedPath.search}`,
           settings,
-          getModelPricing: options.getModelPricing,
-          onIdleTimeout: () => {}
+          getModelPricing: options.getModelPricing
         }) : null;
         if (debugEnabled) safelyObserve(store, () => writeWebSocketDebug(apiDebugLogger, connectionId, {
           kind: "response",
@@ -471,15 +460,6 @@ const resolveProxyAccount = (request: IncomingMessage, store: ProxyStore): Gatew
     ? (account.account_id || account.workspace_id) === accountId
     : Boolean(token && account.access_token === token));
   return matching.find((account) => token && account.access_token === token) ?? (matching.length === 1 ? matching[0]! : null);
-};
-
-const modelFromBody = (body: string): string => {
-  try {
-    const payload = JSON.parse(body) as { model?: unknown };
-    return String(payload.model || "").trim();
-  } catch {
-    return "";
-  }
 };
 
 const parseProtocols = (value: string | string[] | undefined): string[] => String(Array.isArray(value) ? value.join(",") : value || "")

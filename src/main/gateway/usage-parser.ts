@@ -43,14 +43,17 @@ export function createSseUsageParser(onEvent?: (event: Record<string, unknown>) 
       const trimmed = line.trim();
       const payload = trimmed.startsWith("data:") ? trimmed.slice(5).trim() : trimmed;
       if (!payload || payload === "[DONE]") continue;
-      try {
-        const event = JSON.parse(payload) as Record<string, unknown>;
-        if (event.type === "response.completed") completed = true;
-        if (event.type === "error" || event.type === "response.failed") terminalError = payload;
-        onEvent?.(event);
-      } catch {}
-      let usage = parseUsageJson(payload);
-      if (!hasUsage(usage)) usage = { ...usage, ...parseUsageFromJsonTail(payload) };
+      let event: unknown;
+      let parsed = false;
+      try { event = JSON.parse(payload); parsed = true; } catch {}
+      if (event && typeof event === "object") {
+        const record = event as Record<string, unknown>;
+        if (record.type === "response.completed") completed = true;
+        if (record.type === "error" || record.type === "response.failed") terminalError = payload;
+        try { onEvent?.(record); } catch {}
+      }
+      // Tail recovery is only needed for truncated JSON, not ordinary text deltas.
+      const usage = parsed ? usageFromObject(event) : parseUsageFromJsonTail(payload);
       if (hasUsage(usage)) latest = { ...latest, ...usage };
       else if (usage.service_tier) latest.service_tier = usage.service_tier;
     }
@@ -136,7 +139,7 @@ function parseUsageSse(text: string): TokenUsage {
   return latest;
 }
 
-function usageFromObject(value: unknown): TokenUsage {
+export function usageFromObject(value: unknown): TokenUsage {
   const serviceTier = serviceTierFromObject(value);
   const tierFields = serviceTier ? { service_tier: serviceTier } : {};
   const usage = findUsage(value);

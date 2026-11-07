@@ -123,7 +123,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       routing,
       apiDebugLogger
     };
-    accountModeApiProxy = createAccountModeApiProxy(store, apiDebugLogger, {
+    accountModeApiProxy = createAccountModeApiProxy({ ...store, addTokenLog: hooks.addMonitorTokenLog || store.addTokenLog }, apiDebugLogger, {
       resolveOptions: () => {
         const settings = store.getSettings();
         if (!["openai", "third_party"].includes(settings.codex_auth_mode)) return {

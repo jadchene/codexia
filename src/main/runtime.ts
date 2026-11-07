@@ -1,3 +1,4 @@
+import { createRequestLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
 import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
@@ -72,6 +73,7 @@ if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
 let store!: ReturnType<typeof createStore>;
+let monitorLogWriter: ReturnType<typeof createRequestLogWriter> | undefined;
 let gateway!: ReturnType<typeof createGateway>;
 let mcpGateway!: ReturnType<typeof createMcpGatewayService>;
 let authService!: ReturnType<typeof createAuthService>;
@@ -223,6 +225,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     store.addAppLog({ level: "warn", scope: "models", action: "remote-refresh", status: "failed", message: error.message });
   });
   gateway = createGateway(store, authService, {
+    addMonitorTokenLog: (entry: Record<string, unknown>) => {
+      monitorLogWriter ??= createRequestLogWriter(store.paths.dbPath);
+      return monitorLogWriter.enqueue(entry);
+    },
     refreshAllUsage,
     ensureUsableAccounts: () => refreshAllUsage("gateway-no-usable-account"),
     refreshAccountToken: refreshGatewayAccountToken,
@@ -528,11 +534,12 @@ function registerIpc() {
     notifyDataChanged(["upstreams", "appLogs"]);
     return result;
   });
-  handleIpc("tokens:list", (_event, query) => store.listTokenLogs(query));
-  handleIpc("tokens:models", () => store.listTokenLogModels());
-  handleIpc("tokens:summary", (_event, query) => store.tokenSummary(query));
+  handleIpc("tokens:list", async (_event, query) => { await monitorLogWriter?.flush(); return store.listTokenLogs(query); });
+  handleIpc("tokens:models", async () => { await monitorLogWriter?.flush(); return store.listTokenLogModels(); });
+  handleIpc("tokens:summary", async (_event, query) => { await monitorLogWriter?.flush(); return store.tokenSummary(query); });
   handleIpc("quota:summary", () => gatewayQuotaSummary());
-  handleIpc("tokens:clear", () => {
+  handleIpc("tokens:clear", async () => {
+    await monitorLogWriter?.flush();
     const result = store.clearTokenLogs();
     store.addAppLog({
       scope: "logs",
@@ -1086,6 +1093,10 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
         });
       }
     }
+  }
+  if (monitorLogWriter) {
+    try { await monitorLogWriter.close(); }
+    catch (error) { console.warn("监控日志退出落盘失败", error); }
   }
   if (mcpGateway) {
     try {

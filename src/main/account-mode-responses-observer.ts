@@ -2,12 +2,10 @@ import type { IncomingMessage } from "node:http";
 import type { RawData } from "ws";
 import type { Settings } from "../shared/contracts/settings";
 import type { ModelPricing } from "../shared/contracts/upstreams";
-import { extractTokenUsage, emptyUsage, type TokenUsage } from "./gateway/usage-parser.ts";
+import { usageFromObject, emptyUsage, type TokenUsage } from "./gateway/usage-parser.ts";
 import { buildResponsesRequestLog } from "./responses-request-log.ts";
 import { normalizeServiceTier, serviceTierFromObject } from "../shared/service-tier.ts";
 import { syncAccountUsageFromEvent, type GatewayAccountQuota } from "./gateway/quota.ts";
-
-const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 interface ResponsesObserverStore {
   /** 长连接内读取当前计费设置。 */
@@ -26,7 +24,6 @@ interface ResponsesObserverOptions {
   upstreamPath: string;
   settings: Settings;
   getModelPricing?: ((modelId: string) => ModelPricing | null | undefined) | undefined;
-  onIdleTimeout: () => void;
 }
 
 interface CurrentRequest {
@@ -46,21 +43,8 @@ type JsonEvent = Record<string, any>;
  */
 export const createAccountModeResponsesObserver = (options: ResponsesObserverOptions) => {
   let currentRequest: CurrentRequest | null = null;
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const clearIdleTimer = (): void => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = null;
-  };
-
-  const armIdleTimer = (): void => {
-    clearIdleTimer();
-    idleTimer = setTimeout(options.onIdleTimeout, positiveInteger(options.settings.gateway_websocket_idle_timeout_ms, DEFAULT_IDLE_TIMEOUT_MS));
-  };
-
   const finish = (status: number, message: string | null): void => {
     if (!currentRequest) return;
-    clearIdleTimer();
     options.store.addTokenLog(buildResponsesRequestLog({
       account: options.accountId ? { id: options.accountId } : null,
       target: options.target || null,
@@ -97,10 +81,8 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
         upstreamModel: model,
         usage: emptyUsage()
       };
-      armIdleTimer();
     },
     onUpstreamMessage(data: RawData, isBinary: boolean): void {
-      if (currentRequest) armIdleTimer();
       if (isBinary) return;
       const event = parseJson(data);
       if (!event) return;
@@ -111,7 +93,7 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
         currentRequest.clientModel ||= model;
         currentRequest.upstreamModel ||= model;
       }
-      const usage = extractTokenUsage(data);
+      const usage = usageFromObject(event);
       if (hasUsage(usage)) currentRequest.usage = { ...currentRequest.usage, ...usage };
       else if (usage.service_tier) currentRequest.usage.service_tier = usage.service_tier;
       if (event.type === "response.completed") finish(200, null);
@@ -122,7 +104,7 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
       const message = `WebSocket closed before response completion (${code}${reason.length ? `: ${reason.toString()}` : ""})`;
       finish(code === 1000 ? 499 : 502, message);
     },
-    dispose: clearIdleTimer
+    dispose: () => { currentRequest = null; }
   };
 };
 
@@ -149,8 +131,3 @@ const errorStatus = (event: JsonEvent): number => {
 const errorMessage = (event: JsonEvent): string => String(
   event.error?.message || event.message || event.error?.code || event.code || "WebSocket response failed."
 ).slice(0, 1000);
-
-const positiveInteger = (value: unknown, fallback: number): number => {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.trunc(number) : fallback;
-};
