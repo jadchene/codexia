@@ -18,9 +18,9 @@ interface SyncMetadata {
   snapshot: Snapshot;
 }
 export interface CliDiscoveryOptions { singleInstance?: boolean; globalFile?: string; }
-const syncDirectory = (dataDir: string) => path.join(dataDir, "sync");
-const instanceFile = (dataDir: string) => path.join(syncDirectory(dataDir), "instance.json");
-const requestFile = (dataDir: string) => path.join(syncDirectory(dataDir), "request.json");
+const inboxDirectory = (dataDir: string) => path.join(dataDir, "inbox");
+const instanceFile = (dataDir: string) => path.join(inboxDirectory(dataDir), "instance.json");
+const requestFile = (dataDir: string) => path.join(inboxDirectory(dataDir), "request.json");
 
 function readJson<T>(file: string): T | null {
   try { return JSON.parse(fs.readFileSync(file, "utf8")) as T; } catch { return null; }
@@ -47,7 +47,7 @@ function validSelection(s: AccessSelection | undefined): boolean {
 
 /** Watch one local directory; no socket, listening port or credential exchange. */
 export async function startCliControl(dataDir: string, backend: CliBackend, options: CliDiscoveryOptions = {}) {
-  const directory = syncDirectory(dataDir);
+  const directory = inboxDirectory(dataDir);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const instanceDirectory = canonicalInstanceDirectory(dataDir);
   const instanceId = randomUUID();

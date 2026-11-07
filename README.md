@@ -80,7 +80,7 @@ For development, build with `npm run build:main`, then use `npm run cli -- --ver
 
 ### Directory synchronization
 
-The running desktop watches `sync/` under its data directory. CLI selections are published to `sync/request.json`; there is no dedicated command socket or HTTP API. `sync/instance.json` holds the process identity and account/channel choices without credentials. Single-instance discovery still uses a per-user registration pointing to the owning installation.
+The running desktop watches `inbox/` under its data directory. CLI selections are published to `inbox/request.json`; there is no dedicated command socket or HTTP API. `inbox/instance.json` holds the process identity and account/channel choices without credentials. Single-instance discovery still uses a per-user registration pointing to the owning installation.
 
 The extensible envelope contains `version: 1`, a unique `id`, `type: "access-mode.apply"`, `targetInstanceId` from `instance.json`, `createdAt` and `expiresAt` (Unix milliseconds), `status: "pending"`, and a `payload` containing `{ "mode": "third_party", "targetId": "channel-id", "proxy": true, "restart": false }`. Future operations add message types without changing this envelope. Supported modes are `account`, `openai`, `third_party`, and `gateway`; gateway uses an empty `targetId` and `proxy: false`.
 

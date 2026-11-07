@@ -85,7 +85,7 @@ Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要�
 
 ### 目录同步消息
 
-运行中的 Codexia 默认监听对应数据目录的 `sync/`，CLI 通过写入 `sync/request.json` 提交接入修改，不再建立专用命令管道或 HTTP API。`sync/instance.json` 保存实例信息及不含密钥的账号/渠道选项快照，单实例模式保留当前用户范围的实例目录登记。
+运行中的 Codexia 默认监听对应数据目录的 `inbox/`，CLI 通过写入 `inbox/request.json` 提交接入修改，不再建立专用命令管道或 HTTP API。`inbox/instance.json` 保存实例信息及不含密钥的账号/渠道选项快照，单实例模式保留当前用户范围的实例目录登记。
 
 消息使用通用封装，后续功能通过新增 `type` 扩展，业务参数统一放入 `payload`：
 
@@ -94,7 +94,7 @@ Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要�
   "version": 1,
   "id": "每次请求生成的 UUID",
   "type": "access-mode.apply",
-  "targetInstanceId": "从 sync/instance.json 读取的 instanceId",
+  "targetInstanceId": "从 inbox/instance.json 读取的 instanceId",
   "createdAt": 1794052800000,
   "expiresAt": 1794052890000,
   "status": "pending",

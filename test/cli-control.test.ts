@@ -20,13 +20,13 @@ it("directory sync applies once, deletes successful requests and refreshes the s
     const selection = { mode: "openai" as const, targetId: "api", proxy: true, restart: false };
     await remote.apply(selection);
     expect(apply).toHaveBeenCalledExactlyOnceWith(selection);
-    expect(fs.existsSync(path.join(dir, "sync/request.json"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "inbox/request.json"))).toBe(false);
     expect((await connectCliControl(dir))!.show()).toBe("after");
     current = "desktop change"; close.refresh();
     expect((await connectCliControl(dir))!.show()).toBe("desktop change");
-    const metadata = JSON.parse(fs.readFileSync(path.join(dir, "sync/instance.json"), "utf8"));
+    const metadata = JSON.parse(fs.readFileSync(path.join(dir, "inbox/instance.json"), "utf8"));
     expect(metadata.token).toBeUndefined(); expect(metadata.endpoint).toBeUndefined();
-    if (process.platform !== "win32") expect(fs.statSync(path.join(dir, "sync/instance.json")).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(fs.statSync(path.join(dir, "inbox/instance.json")).mode & 0o777).toBe(0o600);
   } finally { await close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -36,10 +36,10 @@ it("generic envelopes reject unsupported versions, message types, stale requests
   const backend: CliBackend = { show: () => "current", choices: () => [], defaults: () => ({ targetId: "", proxy: false, restart: false }), apply };
   const close = await startCliControl(dir, backend);
   try {
-    const metadata = JSON.parse(fs.readFileSync(path.join(dir, "sync/instance.json"), "utf8"));
+    const metadata = JSON.parse(fs.readFileSync(path.join(dir, "inbox/instance.json"), "utf8"));
     const message = { version: 1, id: "test", type: "access-mode.apply", targetInstanceId: metadata.instanceId,
       createdAt: Date.now(), expiresAt: Date.now() + 90000, status: "pending", payload: { mode: "gateway", targetId: "", proxy: false, restart: false } };
-    const file = path.join(dir, "sync/request.json");
+    const file = path.join(dir, "inbox/request.json");
     for (const patch of [{ version: 2 }, { type: "future.action" }, { expiresAt: 1 }, { payload: { ...message.payload, proxy: "false" } }]) {
       fs.writeFileSync(file, JSON.stringify({ ...message, ...patch }));
       await vi.waitFor(() => expect(JSON.parse(fs.readFileSync(file, "utf8")).status).toBe("failed"));
@@ -62,13 +62,13 @@ it("concurrent CLI requests cannot overwrite an active selection, and errors rea
     const selection = { mode: "gateway" as const, targetId: "", proxy: false, restart: false };
     const first = remote.apply(selection);
     await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
-    const message = JSON.parse(fs.readFileSync(path.join(dir, "sync/request.json"), "utf8"));
+    const message = JSON.parse(fs.readFileSync(path.join(dir, "inbox/request.json"), "utf8"));
     expect(message).toMatchObject({ version: 1, type: "access-mode.apply", payload: selection, status: "applying" });
     await expect(remote.apply(selection)).rejects.toThrow(/正在进行/);
     release(); await first;
     apply.mockRejectedValueOnce(new Error("配置已应用，但重启失败"));
     await expect(remote.apply(selection)).rejects.toThrow("配置已应用，但重启失败");
-    expect(fs.existsSync(path.join(dir, "sync/request.json"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "inbox/request.json"))).toBe(false);
   } finally { release(); await close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -77,7 +77,7 @@ it("restart does not replay a request from the previous instance", async () => {
   const apply = vi.fn(async () => {});
   const backend: CliBackend = { show: () => "current", choices: () => [], defaults: () => ({ targetId: "", proxy: false, restart: false }), apply };
   const close = await startCliControl(dir, backend);
-  const file = path.join(dir, "sync/request.json");
+  const file = path.join(dir, "inbox/request.json");
   await close();
   fs.writeFileSync(file, JSON.stringify({ version: 1, id: "old", type: "access-mode.apply", status: "applying" }));
   const closeNew = await startCliControl(dir, backend);
@@ -105,8 +105,8 @@ it("separate installation directories never reuse control metadata or single-ins
   const notified = vi.fn();
   try {
     // Portable copies can include a live instance's old control file.
-    fs.mkdirSync(path.join(second, "sync"));
-    fs.copyFileSync(path.join(first, "sync/instance.json"), path.join(second, "sync/instance.json"));
+    fs.mkdirSync(path.join(second, "inbox"));
+    fs.copyFileSync(path.join(first, "inbox/instance.json"), path.join(second, "inbox/instance.json"));
     expect(await connectCliControl(second)).toBeNull();
     closeSecond = await startCliControl(second, backend("second", secondApply));
     const a = (await connectCliControl(first))!; const b = (await connectCliControl(second))!;
