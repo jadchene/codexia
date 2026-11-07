@@ -73,22 +73,17 @@ The Windows unpacked build includes a separate `codexia-cli.cmd` launcher. It do
 
 `mode` shows the saved mode, detected Codex authentication, proxy/restart preferences and available account/channel IDs. Interactive switching offers accounts or channels of the selected type. Import accounts and configure channels/models in the desktop app first. Tokens and API keys are never printed.
 
-CLI never starts Codexia or the gateway automatically. If Codexia is not running, CLI writes SQLite and Codex configuration locally for all four modes. A stopped gateway does not prevent saving; gateway/proxy selections print a manual-start reminder afterward. When a desktop is running, all reads and writes use its HTTP API. Discovery follows the launcher installation’s single-instance setting: globally reuse the current user’s single-instance desktop when enabled, or only the same installation when disabled. Changing this setting still requires a desktop restart. Restart preferences remain per mode; a daemon restart failure explicitly reports that configuration was already applied.
+CLI only associates with the desktop in its own installation directory, independently of the desktop single-instance setting. It never discovers or reuses other installations. Without a running local desktop, CLI writes that installation's SQLite and Codex configuration itself for all four modes. With a running local desktop, it delegates through local IPC and requires matching application versions. CLI never starts Codexia or the gateway automatically. A stopped gateway does not prevent saving; gateway/proxy selections print a manual-start reminder. Restart preferences remain per mode; daemon restart errors report that configuration may already be applied.
 
 For development, build with `npm run build:main`, then use `npm run cli -- --version`, `npm run cli -- mode`, or `npm run cli -- mode switch`. Add `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex` for isolated development data. The CLI uses the same system secret storage as the desktop app; it is not a server/headless Electron distribution. Windows is the packaged target; other systems still need a working Electron environment and system secret storage.
 
 
-### External HTTP API
+### Local process communication
 
-Settings → External API configures the listening address, port and independent Bearer key. Restart the application after saving changes. The default is `127.0.0.1:8437`; this service starts with Codexia independently of the model gateway. Generate and copy a new key in settings before saving it. Use distinct API ports for multiple installations.
+CLI talks to its own installation's desktop over a Windows named pipe or Unix Socket. No HTTP listener, IP/port settings, or API key configuration is needed. `data/cli-control.json` only records the current endpoint, instance directory, application version and a temporary authentication token generated on every launch; it carries no configuration requests or upstream credentials.
 
-All routes use `/codexia/api`. Currently one resource is implemented:
+The extensible request envelope contains `version: 1`, `appVersion: "2.0.0"`, a unique `id`, `method` and `params`. CLI attaches the target instance directory and temporary token. Responses echo the ID and versions, with `ok` and either `result` or `error: { code, message }`. Application and protocol versions are checked separately.
 
-- `GET /codexia/api/access-mode` returns `{ "ok": true, "result": ... }`. The result contains `current` (mode, target ID, proxy and restart; `null` when unset), per-mode `choices` and `defaults`, `gatewayRunning`, and human-readable `show`. No account tokens or upstream API keys are returned.
-- `POST /codexia/api/access-mode` accepts `Content-Type: application/json` and `{ "mode": "third_party", "targetId": "channel-id", "proxy": true, "restart": false }`, saves configuration and refreshes the desktop. Modes are `account`, `openai`, `third_party`, and `gateway`; gateway requires an empty target ID and `proxy: false`.
+Currently `access-mode.get` reads the current mode, choices, preferences and gateway state. `access-mode.apply` accepts `{ "mode": "third_party", "targetId": "channel-id", "proxy": true, "restart": false }`. Gateway mode uses an empty target ID and `proxy: false`. Future features register additional methods with their own parameter validation without changing the transport. Unknown methods and incompatible versions never execute writes.
 
-Send `Authorization: Bearer <API key>` with every request. POST success returns `{ "ok": true, "result": { "gatewayRunning": false, "warning": "manual-start reminder, or an empty string" } }`. Saving works with the gateway stopped; neither API nor CLI starts the gateway or desktop. The `restart` flag only controls restarting Codex daemon app-server after applying configuration.
-
-Errors use `{ "ok": false, "error": { "code": "CODE", "message": "details" } }`: HTTP 401 for authentication, 400 for malformed JSON/parameters, 413 above 16 KiB, and 500 for execution failures. A daemon restart failure can occur after configuration was applied; check the reported state before retrying.
-
-CLI exchanges business data exclusively over HTTP when Codexia is running. There is no inbox watcher or JSON request protocol. The local `control-api.json` and global single-instance registration only locate the owning process; they do not carry synchronization requests.
+Other installations are ignored even when they run the same version in single-instance mode. Requests remain pinned to the chosen process and are never redirected after it exits or restarts. Inbox request files and the HTTP control service are no longer used; obsolete HTTP configuration keys are removed on startup.

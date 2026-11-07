@@ -1,70 +1,56 @@
-import fs from "node:fs";
-import http from "node:http";
 import { canonicalInstanceDirectory } from "./single-instance.ts";
-import type { AccessSelection, CliBackend } from "./cli.ts";
-import { ACCESS_MODE_API_PATH, controlApiFile, type AccessModeSnapshot, type ControlApiMetadata, type ApiDiscoveryOptions } from "./control-api.ts";
+import { ACCESS_MODES, type AccessMode, type AccessSelection, type CliBackend } from "./cli.ts";
+import { ControlError, controlFile, readControlMetadata, requestLocalControl, startLocalControl, type ControlMetadata, type ControlOptions } from "./local-control.ts";
 
-const unavailable = () => Object.assign(new Error("Codexia 外部 API 尚未就绪。"), { code: "CLI_UNAVAILABLE" });
-function readConnection(file: string): ControlApiMetadata | null {
-  try {
-    const v = JSON.parse(fs.readFileSync(file, "utf8"));
-    return typeof v.url === "string" && typeof v.apiKey === "string" && typeof v.instanceId === "string"
-      && typeof v.instanceDirectory === "string" && typeof v.singleInstance === "boolean" ? v : null;
-  } catch { return null; }
+interface Snapshot {
+  current: AccessSelection | null;
+  show: string;
+  choices: Record<AccessMode, ReturnType<CliBackend["choices"]>>;
+  defaults: Record<AccessMode, ReturnType<CliBackend["defaults"]>>;
+  gatewayRunning: boolean;
 }
-async function request<T>(connection: ControlApiMetadata, selection?: AccessSelection): Promise<T> {
-  return new Promise((resolve, reject) => {
-    let connected = false; let complete = false;
-    const finish = (error?: Error, value?: T) => {
-      if (complete) return;
-      complete = true; clearTimeout(deadline); req.destroy();
-      if (error) reject(error); else resolve(value!);
-    };
-    const body = selection ? JSON.stringify(selection) : undefined;
-    const req = http.request(new URL(ACCESS_MODE_API_PATH, connection.url), {
-      method: selection ? "POST" : "GET", agent: false,
-      headers: { Authorization: `Bearer ${connection.apiKey}`, "X-Codexia-Instance": connection.instanceId,
-        ...(body ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } : {}) }
-    }, (res) => {
-      let bytes = 0; const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => {
-        bytes += chunk.length;
-        if (bytes > 1024 * 1024) { finish(new Error("API 响应过大。")); return; }
-        chunks.push(chunk);
-      });
-      res.once("error", () => finish(new Error("API 响应中断，请检查配置是否已应用。")));
-      res.once("end", () => {
-        try {
-          const response = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          finish(res.statusCode === 200 && response.ok === true ? undefined : new Error(response.error?.message || "API 请求失败。"), response.result);
-        } catch { finish(new Error("API 响应无效。")); }
-      });
-    });
-    const deadline = setTimeout(() => finish(new Error("Codexia API 请求超时；请先查看当前模式，勿盲目重复应用。")), selection ? 90000 : 3000);
-    req.once("socket", (socket) => socket.once("connect", () => { connected = true; }));
-    req.once("error", () => finish(connected ? new Error("API 连接中断，请检查配置是否已应用。") : unavailable()));
-    req.end(body);
-  });
+function validSelection(value: unknown): value is AccessSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const s = value as Record<string, unknown>;
+  return typeof s.mode === "string" && Object.hasOwn(ACCESS_MODES, s.mode)
+    && typeof s.targetId === "string" && s.targetId.length <= 512
+    && typeof s.proxy === "boolean" && typeof s.restart === "boolean"
+    && (s.mode !== "gateway" || (!s.proxy && s.targetId === ""));
+}
+export function startCliControl(dataDir: string, backend: CliBackend, options: ControlOptions) {
+  return startLocalControl(dataDir, {
+    "access-mode.get": () => {
+      const modes = Object.keys(ACCESS_MODES) as AccessMode[];
+      return { current: backend.current?.() ?? null, show: backend.show(), gatewayRunning: backend.gatewayRunning?.() ?? false,
+        choices: Object.fromEntries(modes.map((mode) => [mode, backend.choices(mode)])),
+        defaults: Object.fromEntries(modes.map((mode) => [mode, backend.defaults(mode)])) };
+    },
+    "access-mode.apply": async (params) => {
+      if (!validSelection(params)) throw new ControlError("INVALID_PARAMS", "接入参数无效。");
+      await backend.apply(params);
+      return { gatewayRunning: backend.gatewayRunning?.() ?? false };
+    }
+  }, options);
 }
 
-/** Only instance discovery uses a local record; all data exchange uses HTTP. */
-export async function connectCliControl(dataDir: string, options: ApiDiscoveryOptions = {}): Promise<CliBackend | null> {
-  const candidates: ControlApiMetadata[] = [];
-  if (options.singleInstance && options.globalFile) {
-    const global = readConnection(options.globalFile);
-    if (global?.singleInstance) candidates.push(global);
-  }
-  const local = readConnection(controlApiFile(dataDir));
-  if (local?.instanceDirectory === canonicalInstanceDirectory(dataDir)) candidates.push(local);
-  for (const connection of candidates) {
-    let snapshot: AccessModeSnapshot;
-    try { snapshot = await request<AccessModeSnapshot>(connection); }
-    catch (error) { if ((error as { code?: string })?.code === "CLI_UNAVAILABLE") continue; throw error; }
+export async function connectCliControl(dataDir: string, options: ControlOptions): Promise<CliBackend | null> {
+  const connect = async (metadata: ControlMetadata): Promise<CliBackend | null> => {
+    let snapshot: Snapshot;
+    try { snapshot = await requestLocalControl<Snapshot>(metadata, options.appVersion, "access-mode.get"); }
+    catch (error) { if (error instanceof ControlError && error.code === "UNAVAILABLE") return null; throw error; }
     if (!snapshot?.choices || !snapshot.defaults) throw new Error("Codexia 未返回接入配置。");
     let gatewayRunning = snapshot.gatewayRunning;
     return { current: () => snapshot.current, show: () => snapshot.show, choices: (mode) => snapshot.choices[mode], defaults: (mode) => snapshot.defaults[mode],
       gatewayRunning: () => gatewayRunning,
-      apply: async (selection) => { gatewayRunning = (await request<{ gatewayRunning: boolean }>(connection, selection)).gatewayRunning; } };
+      apply: async (selection) => {
+        gatewayRunning = (await requestLocalControl<{ gatewayRunning: boolean }>(metadata, options.appVersion, "access-mode.apply", selection)).gatewayRunning;
+      } };
+  };
+  const directory = canonicalInstanceDirectory(dataDir);
+  const local = readControlMetadata(controlFile(dataDir));
+  if (local?.instanceDirectory === directory) {
+    const service = await connect(local);
+    if (service) return service;
   }
   return null;
 }

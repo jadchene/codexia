@@ -1,4 +1,4 @@
-import { startControlApi } from "./control-api.ts";
+import { startCliControl } from "./cli-control.ts";
 import { createCliAccess } from "./cli-access.ts";
 import { createMonitorLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
@@ -87,7 +87,7 @@ let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 let singleInstanceServer: Server | null = null;
-let closeControlApi: Awaited<ReturnType<typeof startControlApi>> | undefined;
+let closeCliControl: Awaited<ReturnType<typeof startCliControl>> | undefined;
 const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
 const usageResetRefreshAttempts = new Map<string, { resetAt: number; count: number }>();
 let shuttingDown = false;
@@ -247,21 +247,15 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
-  if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) closeControlApi = await startControlApi(store.paths.dataDir, { ...createCliAccess({
+  if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) closeCliControl = await startCliControl(store.paths.dataDir, { ...createCliAccess({
     store, upstreams: upstreamService, catalog: modelCatalogService,
     codexOptions: codexAccessOptions(runtimeProfile),
     onApplied: () => { notifyDataChanged(["settings", "accounts", "upstreams", "upstreamModels"]); updateTrayMenu(); },
     restart: async (options) => { await restartCodexDaemon(options); }
   }), gatewayRunning: () => gateway.status().running }, {
-    host: store.getSettings().control_api_host || "127.0.0.1",
-    port: Number(store.getSettings().control_api_port || "8437"),
-    apiKey: store.getSettings().control_api_key || "",
-    singleInstance: useSingleInstance,
-    globalFile: runtimeProfile.isolated
-      ? path.join(runtimeProfile.paths!.runtimeRoot, "cli-single-instance.json")
-      : path.join(app.getPath("appData"), "Codexia", "cli-single-instance.json")
+    appVersion: app.getVersion()
   }).catch((error: Error) => {
-    store.addAppLog({ level: "error", scope: "control-api", action: "start", status: "failed", message: `外部 API 启动失败：${error.message}` });
+    store.addAppLog({ level: "error", scope: "cli", action: "start", status: "failed", message: `进程通信服务启动失败：${error.message}` });
     return undefined;
   });
   scheduleUsageRefresh("startup");
@@ -471,7 +465,6 @@ function registerIpc() {
   handleIpc("settings:save", async (_event, patch) => {
     const editablePatch = editableSettingsPatch(patch);
     if (!editablePatch.gateway_api_key) delete editablePatch.gateway_api_key;
-    if (!editablePatch.control_api_key) delete editablePatch.control_api_key;
     const requestedDebugLogging = editablePatch.debug_api_logging;
     delete editablePatch.debug_api_logging;
     let settings = store.saveSettings({
@@ -1035,8 +1028,8 @@ function syncDetectedCodexAuthMode() {
 async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
   if (shuttingDown) return;
   shuttingDown = true;
-  await closeControlApi?.();
-  closeControlApi = undefined;
+  await closeCliControl?.();
+  closeCliControl = undefined;
   if (usageRefreshTimer) {
     clearInterval(usageRefreshTimer);
     usageRefreshTimer = null;

@@ -215,9 +215,6 @@ function migrate(db: Db): void {
   addColumnIfMissing(db, "accounts", "has_five_hour_quota", "INTEGER");
   const defaults = {
     ...QUOTA_NORMALIZATION_DEFAULT_SETTINGS,
-    control_api_host: "127.0.0.1",
-    control_api_port: "8437",
-    control_api_key: randomGatewayApiKey(),
     gateway_host: "localhost",
     gateway_port: "8436",
     gateway_api_key: randomGatewayApiKey(),
@@ -285,6 +282,7 @@ function migrate(db: Db): void {
   fillBlankSetting(db, "mcp_gateway_host", "127.0.0.1");
   fillBlankSetting(db, "mcp_gateway_port", "3000");
   fillBlankSetting(db, "mcp_gateway_path", "/mcp");
+  db.exec("DELETE FROM settings WHERE key IN ('control_api_host', 'control_api_port', 'control_api_key')");
   repairLastRefreshAllUsageAt(db);
 }
 

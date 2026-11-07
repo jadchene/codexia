@@ -808,13 +808,19 @@ test("request outcome filters match list and summary across HTTP status boundari
   }
 });
 
-test("external API settings validate addresses, ports and keys without exposing the key", () => {
-  const key = "control-key-".repeat(5);
-  assert.equal(publicSettings({ control_api_key: key }).control_api_key, undefined);
-  assert.equal(publicSettings({ control_api_key: key }).control_api_key_configured, "true");
-  assert.deepEqual(editableSettingsPatch({ control_api_host: "127.0.0.1", control_api_port: "8437", control_api_key: key }),
-    { control_api_host: "127.0.0.1", control_api_port: "8437", control_api_key: key });
-  for (const patch of [{ control_api_host: "http://localhost" }, { control_api_port: "65536" }, { control_api_key: "short" }]) {
-    assert.throws(() => editableSettingsPatch(patch));
-  }
+test("retiring the control HTTP service removes only its obsolete settings", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-retire-control-api-"));
+  const options = { secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") };
+  let store = createStore(options);
+  try {
+    const gatewayKey = store.getSettings().gateway_api_key;
+    store.saveSettings({ control_api_host: "0.0.0.0", control_api_port: "8437", control_api_key: "obsolete-key", codex_auth_mode: "gateway" });
+    assert.equal(publicSettings(store.getSettings()).control_api_key, undefined);
+    store.db.close(); store = createStore(options);
+    assert.equal(store.getSettings().control_api_key, undefined);
+    assert.equal(store.getSettings().control_api_host, undefined);
+    assert.equal(store.getSettings().control_api_port, undefined);
+    assert.equal(store.getSettings().gateway_api_key, gatewayKey);
+    assert.equal(store.getSettings().codex_auth_mode, "gateway");
+  } finally { store.db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });

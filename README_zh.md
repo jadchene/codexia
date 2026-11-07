@@ -77,32 +77,33 @@ Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要�
 ```
 
 - 直连切换不会启动桌面应用；命令结束仅退出命令行进程，已经运行的 Codexia 保持运行。
-- CLI 不会自动启动 Codexia 或网关。Codexia 未运行时，四种模式均由 CLI 本地写入 SQLite 和 Codex 配置；需要网关但服务未启动时，保存完成后提示手动启动，不阻止配置变更。Codexia 已运行时，使用 HTTP API 完成读写。实例发现跟随 CLI 所在目录的“单实例运行”设置：开启时全局复用当前用户的单实例 Codexia，关闭时只复用同目录实例；该设置仍需重启应用生效。
+- CLI 只关联自己同级目录的 Codexia，完全不考虑桌面的“单实例运行”设置，也不查找其他目录实例。同目录 Codexia 未运行时，四种模式均由 CLI 本地写入该目录的 SQLite 和 Codex 配置；已运行时通过本机 IPC 交给它处理，并校验双方应用版本一致。CLI 不自动启动 Codexia 或网关；网关停止时仍保存配置，仅提示手动启动。
 - 四种模式分别保存自动重启偏好。重启失败会明确提示配置已应用；未选择重启时，已有 Codex 进程可能仍使用旧配置。
 - 开发环境先运行 `npm run build:main`，再使用 `npm run cli -- --version`、`npm run cli -- mode` 或 `npm run cli -- mode switch`。需要隔离测试时，增加 `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex`。
 - CLI 复用桌面应用的数据目录和系统安全存储；它不是无界面服务器版 Electron。Windows 是打包支持平台，其他系统仍需 Electron 可用的运行环境及系统安全存储。
 
 
-### 外部 HTTP API
+### 本机进程间通信
 
-在“设置 → 外部 API”配置监听地址、端口和独立 API 密钥，保存后重启应用生效。默认监听 `127.0.0.1:8437`，随 Codexia 启动，与模型网关是否运行无关。外部程序使用 `Authorization: Bearer <API 密钥>`；可在设置中生成、复制新密钥并保存。多实例使用不同 API 端口。
+CLI 与同目录 Codexia 使用 Windows 命名管道或 Unix Socket 通信，无需配置 HTTP 服务、监听 IP、端口或 API 密钥。`data/cli-control.json` 仅记录当前实例的连接信息和每次启动生成的临时认证令牌，不承载配置请求，也不包含账号 token 或渠道 API key。
 
-统一前缀为 `/codexia/api`，当前提供一个接入模式资源：
-
-- `GET /codexia/api/access-mode`：返回 `ok: true` 和 `result`，包含 `current`（当前模式、目标 ID、代理及重启选项；未配置时为 `null`）、`choices`（各模式可选账号/渠道）、`defaults`（各模式偏好）、`gatewayRunning` 和可读摘要 `show`。不返回账号 token 或上游 API key。
-- `POST /codexia/api/access-mode`：使用 `Content-Type: application/json` 提交以下正文，应用配置并更新桌面界面：
+通信协议使用通用信封，协议版本与应用版本分别校验：
 
 ```json
 {
-  "mode": "third_party",
-  "targetId": "渠道 ID",
-  "proxy": true,
-  "restart": false
+  "version": 1,
+  "appVersion": "2.0.0",
+  "id": "每次请求生成的 UUID",
+  "method": "access-mode.apply",
+  "params": {
+    "mode": "third_party",
+    "targetId": "渠道 ID",
+    "proxy": true,
+    "restart": false
+  }
 }
 ```
 
-`mode` 为 `account`、`openai`、`third_party` 或 `gateway`；`targetId` 为账号/渠道 ID，网关模式固定为空且 `proxy` 为 `false`。成功返回 `{ "ok": true, "result": { "gatewayRunning": false, "warning": "需要手动启动网关的提示，或空字符串" } }`。网关停止时也会写入配置；接口和 CLI 都不会替用户启动 Codexia 或网关。`restart` 仅控制应用后是否重启 Codex daemon app-server。
+CLI 自动附加实例目录和临时令牌。响应包含同一 `id`、`version`、`appVersion`、`ok`，以及成功的 `result` 或失败的 `error: { code, message }`。当前方法为 `access-mode.get` 和 `access-mode.apply`；后续功能通过注册新方法及参数校验扩展，无需改动传输协议。未知方法、协议版本或应用版本不一致时不会执行修改。
 
-错误统一返回 `{ "ok": false, "error": { "code": "错误码", "message": "说明" } }`。认证失败为 HTTP 401，参数或 JSON 错误为 400，正文超过 16 KiB 为 413，执行失败为 500。若 daemon 重启失败，配置可能已经应用，请根据错误信息核对后再操作。
-
-CLI 与运行中的 Codexia 只通过 HTTP 交换业务数据，不再监听 `inbox` 或读写请求 JSON。`control-api.json` 和单实例登记仅用于定位本机实例，不承载配置同步请求；无需手动编辑。
+CLI 不会把请求转给其他目录的实例；即使另一目录运行着同版本单实例 Codexia，也仍按本目录实例未启动处理。已选中的实例退出或重启后，请求不会自动转发到新进程。旧的 `inbox` 请求文件和 HTTP API 不再使用；启动时清理已废弃的外部 API 配置项。

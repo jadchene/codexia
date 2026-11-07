@@ -1,6 +1,5 @@
 import { app, safeStorage } from "electron";
 import fs from "node:fs";
-import { readSingleInstanceSetting } from "./single-instance.ts";
 import { connectCliControl } from "./cli-control.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +25,7 @@ export async function startCli(args: string[]): Promise<void> {
     const backend = async () => {
       const profile = createRuntimeProfile({ argv: process.argv, isPackaged: app.isPackaged, projectRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..") });
       const activeDataDir = profile.paths?.dataDir || dataDir();
-      const discovery = {
-        singleInstance: profile.useSingleInstance && readSingleInstanceSetting(path.join(activeDataDir, "codex-gateway.sqlite")),
-        globalFile: profile.isolated ? path.join(profile.paths!.runtimeRoot, "cli-single-instance.json")
-          : path.join(app.getPath("appData"), "Codexia", "cli-single-instance.json")
-      };
+      const discovery = { appVersion: version };
       const remote = await connectCliControl(activeDataDir, discovery);
       if (remote) return remote;
       const userData = profile.paths?.browserDataDir || browserDataDir();
@@ -41,7 +36,7 @@ export async function startCli(args: string[]): Promise<void> {
       if (!app.requestSingleInstanceLock({ cli: true })) {
         const running = await connectCliControl(activeDataDir, discovery);
         if (running) return running;
-        throw new Error("Codexia 已运行，但外部 API 未就绪。请检查 API 设置及运行日志后重试。");
+        throw new Error("Codexia 已运行，但进程通信尚未就绪。请检查版本及运行日志后重试。");
       }
       ownsLock = true;
       await app.whenReady();

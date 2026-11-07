@@ -32,7 +32,7 @@ export const CLI_HELP = `Codexia 命令行
 模式：account / openai / third_party / gateway
 无交互终端时必须提供完整参数。--proxy、--restart 取值 true / false。
 CLI 不会自动启动 Codexia 或网关。网关模式或代理监控在服务未启动时仍保存配置，并提示手动启动。
-跟随单实例设置：开启时全局复用，关闭时仅复用同目录实例。Ctrl+C 或输入流结束会取消尚未应用的修改。`;
+仅关联同目录 Codexia，并要求版本一致；不受桌面单实例设置影响。Ctrl+C 或输入流结束会取消尚未应用的修改。`;
 
 export function parseCliArgs(args: string[]) {
   if (args.length === 1 && ["--version", "-v", "version"].includes(args[0]!)) return { action: "version" as const };

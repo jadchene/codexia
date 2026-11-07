@@ -28,8 +28,6 @@ test("isolated development profile separates runtime state and service ports", (
   assert.equal(profile.paths.browserDataDir, path.join(projectRoot, ".runtime", "v1-dev", "browser"));
   assert.equal(profile.paths.dbPath, path.join(projectRoot, ".runtime", "v1-dev", "codex-gateway.sqlite"));
   assert.deepEqual(profile.settingsOverrides, {
-    control_api_host: "127.0.0.1",
-    control_api_port: "18437",
     gateway_host: "127.0.0.1",
     gateway_port: "18436",
     mcp_gateway_host: "127.0.0.1",

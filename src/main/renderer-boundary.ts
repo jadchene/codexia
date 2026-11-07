@@ -10,7 +10,6 @@ const EDITABLE_SETTING_KEYS = new Set([
   ...Object.keys(QUOTA_NORMALIZATION_DEFAULT_SETTINGS),
   ...Object.keys(SERVICE_TIER_DEFAULT_SETTINGS),
   "gateway_host", "gateway_port", "gateway_api_key", "upstream_base_url",
-  "control_api_host", "control_api_port", "control_api_key",
   "gateway_connect_timeout_ms", "gateway_stream_idle_timeout_ms", "gateway_unary_timeout_ms",
   "gateway_shutdown_grace_ms", "gateway_request_body_limit_bytes", "gateway_error_body_limit_bytes",
   "gateway_compaction_response_limit_bytes",
@@ -29,7 +28,6 @@ const EDITABLE_SETTING_KEYS = new Set([
 ]);
 
 const INTEGER_SETTINGS: Record<string, readonly [number, number]> = {
-  control_api_port: [1, 65535],
   gateway_port: [1, 65535],
   gateway_connect_timeout_ms: [1000, 600000],
   gateway_stream_idle_timeout_ms: [1000, 3600000],
@@ -91,7 +89,7 @@ export function publicSettings(settings: Settings): Settings {
   const gatewayApiKey = String(settings.gateway_api_key || "");
   const {
     gateway_api_key: _gatewayApiKey,
-    control_api_key: _controlApiKey,
+    control_api_key: _obsoleteControlApiKey,
     codex_bundled_override_enabled: _bundledOverrideEnabled,
     codex_bundled_override_json: _bundledOverrideJson,
     model_management_json: _modelManagementJson,
@@ -99,7 +97,6 @@ export function publicSettings(settings: Settings): Settings {
   } = settings;
   return {
     ...safe,
-    control_api_key_configured: settings.control_api_key ? "true" : "false",
     gateway_api_key_configured: gatewayApiKey ? "true" : "false",
     gateway_api_key_fingerprint: gatewayApiKey
       ? createHash("sha256").update(gatewayApiKey).digest("hex").slice(0, 12)
@@ -127,12 +124,8 @@ export function editableSettingsPatch(patch: unknown): Settings {
     if (key === "appearance_font_family" && (text.length > 200 || /[\u0000-\u001f\u007f]/.test(text))) {
       throw new Error("字体名称格式无效。");
     }
-    if (key === "control_api_key" && text && (text.length < 32 || /[^\x21-\x7e]/.test(text))) {
-      throw new Error("外部 API 密钥至少需要 32 个可打印 ASCII 字符，且不能包含空格。");
-    }
     result[key] = text;
   }
-  validateHost("control_api_host", result.control_api_host);
   validateHost("gateway_host", result.gateway_host);
   validateHost("mcp_gateway_host", result.mcp_gateway_host);
   if (result.upstream_base_url) validateHttpUrl(result.upstream_base_url);
