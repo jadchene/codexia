@@ -29,7 +29,7 @@ describe("audit fixes", () => {
 
   it("only asks to restart the service whose startup-bound setting changed", () => {
     expect(settingsRestartReminder({ gateway_port: "8436" }, { gateway_port: "8437" }, true, false))
-      .toContain("API 服务");
+      .toContain("网关服务");
     expect(settingsRestartReminder({ ignore_five_hour_limit: "false" }, { ignore_five_hour_limit: "true" }, true, true))
       .toBe("");
     expect(settingsRestartReminder({ mcp_gateway_path: "/mcp" }, { mcp_gateway_path: "/next" }, false, true))

@@ -392,7 +392,7 @@ export const UpstreamsPage = () => {
   ];
 
   return <section className="v1-page-card v1-page-fill v1-upstreams-page">
-    <Typography.Paragraph type="secondary">渠道开关作用于 API 模式，同名模型优先使用账号池。账号模式仍使用选定账号。</Typography.Paragraph>
+    <Typography.Paragraph type="secondary">渠道开关作用于网关模式，同名模型优先使用账号池。账号模式仍使用选定账号。</Typography.Paragraph>
     <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
       <Button aria-label="模型管理" icon={<ControlOutlined />} loading={modelManagementLoading} onClick={() => void openModelManagement()}>模型管理</Button>
       <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增渠道</Button>
@@ -526,7 +526,7 @@ export const UpstreamsPage = () => {
         </Form.Item>
         {isOfficial && <Alert showIcon type="info" style={{ marginBottom: 16 }}
           title="填写 OpenAI API Key 即可使用，无需配置地址和模型 JSON。"
-          description="自动使用内置模型目录。API 模式下，同名模型优先使用已启用的账号池；停用账号池后使用已启用的官方 API。账号模式仍使用选定账号。模型调用权限以 API Key 为准。"
+          description="自动使用内置模型目录。网关模式下，同名模型优先使用已启用的账号池；停用账号池后使用已启用的官方 API。账号模式仍使用选定账号。模型调用权限以 API Key 为准。"
         />}
         <Typography.Title level={5}>连接信息</Typography.Title>
         <Flex gap={12} wrap>

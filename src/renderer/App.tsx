@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { QUOTA_NORMALIZATION_DEFAULT_SETTINGS } from "../shared/quota-normalization";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "./app/layout/AppShell";
 import { applyAppearancePreferences, appearanceFromSettings } from "./app/appearance";
@@ -26,11 +26,11 @@ const pages = [
   { id: "overview", label: "运行概览", description: "快速查看服务状态、可用额度和调用概况。" },
   { id: "accounts", label: "订阅账号", description: "添加和管理用于 Codex 的 ChatGPT 订阅账号。" },
   { id: "upstreams", label: "模型渠道", description: "管理订阅账号池和第三方模型，并设置连接方式与模型费率。" },
-  { id: "services", label: "服务管理", description: "启动、停止或重启本地 API 与 MCP 服务。" },
-  { id: "codexIntegration", label: "接入模式", description: "选择 Codex 使用本地 API 服务，或直接使用一个订阅账号。" },
+  { id: "services", label: "服务管理", description: "启动、停止或重启本地网关与 MCP 服务。" },
+  { id: "codexIntegration", label: "接入模式", description: "选择账号、OpenAI 官方 API、第三方 API 或网关模式。" },
   { id: "analytics", label: "调用分析", description: "按渠道、模型和账号查看调用量、Token、耗时与费用。" },
   { id: "runtimeLogs", label: "运行日志", description: "查看服务运行记录和错误信息。" },
-  { id: "settings", label: "设置中心", description: "调整应用、API 服务、MCP 服务、额度、日志和外观设置。" }
+  { id: "settings", label: "设置中心", description: "调整应用、网关服务、MCP 服务、额度、日志和外观设置。" }
 ];
 
 type BrowserLoginPhase = "idle" | "starting" | "waiting" | "success" | "failed";
@@ -45,6 +45,7 @@ function App() {
   const [settings, setSettings] = useState<Settings>({});
   const pageDisabled = !pages.some(({ id }) => id === requestedPage);
   const page = pageDisabled ? "overview" : requestedPage;
+  const upstreamQuery = useQuery({ queryKey: ["upstreams"], queryFn: () => api.listUpstreams(), enabled: page === "codexIntegration" });
   const [accounts, setAccounts] = useState<PublicAccount[]>([]);
   const [tokenLogs, setTokenLogs] = useState<RequestLogPage>({ items: [], total: 0, page: 1, pageSize: 10 });
   const [tokenSummary, setTokenSummary] = useState<TokenSummary>({ total: {}, byAccount: [] });
@@ -405,9 +406,9 @@ function App() {
     try {
       const next = gateway.running ? await api.stopGateway() : await api.startGateway();
       setGateway(next);
-      setMessage(next.running ? "API 服务已启动" : "API 服务已停止");
+      setMessage(next.running ? "网关服务已启动" : "网关服务已停止");
     } catch (error) {
-      setMessage(`API 服务操作失败：${errorMessage(error)}`);
+      setMessage(`网关服务操作失败：${errorMessage(error)}`);
     }
   }
 
@@ -426,9 +427,9 @@ function App() {
       await api.stopGateway();
       const next = await api.startGateway();
       setGateway(next);
-      setMessage("API 服务已重启");
+      setMessage("网关服务已重启");
     } catch (error) {
-      setMessage(`API 服务重启失败：${errorMessage(error)}`);
+      setMessage(`网关服务重启失败：${errorMessage(error)}`);
     }
   }
 
@@ -547,13 +548,19 @@ function App() {
             accounts={accounts}
             gatewayBase={gatewayBase}
             modelCatalogPath={`${paths.dataDir.replace(/[\\/]+$/, "")}/models.json`}
+            upstreams={upstreamQuery.data || []}
+            onApplyApi={async (mode, upstreamId, useApiProxy) => {
+              await api.applyApiAuth(mode, upstreamId, useApiProxy);
+              await reload();
+              setMessage(mode === "openai" ? "已应用 OpenAI 官方 API 模式" : "已应用第三方 API 模式");
+            }}
             accountModelCatalogPath={`${paths.dataDir.replace(/[\\/]+$/, "")}/account-models.json`}
             onMessage={setMessage}
             onSaveSettings={saveSettings}
             onApplyGateway={async () => {
               const result = await api.applyGatewayAuth();
               await reload();
-              setMessage(result.providerChanged ? "已应用 API 模式" : "已更新 API 模式");
+              setMessage(result.providerChanged ? "已应用网关模式" : "已更新网关模式");
             }}
             onApplyAccount={async (accountId, useApiProxy) => {
               const result = await api.applyAccountAuth(accountId, useApiProxy);

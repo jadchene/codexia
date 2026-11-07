@@ -20,7 +20,7 @@ interface AccountRecord extends Record<string, unknown> {
   updated_at?: number;
 }
 interface FileEntry { file: string; content: string }
-type AuthModeResult = { mode: "gateway" | "account" | "unknown"; accountId: string };
+type AuthModeResult = { mode: "gateway" | "account" | "openai" | "third_party" | "unknown"; accountId: string };
 
 export function resolveCodexHome(options: CodexPathOptions = {}): string {
   if (options.codexDir) return path.resolve(options.codexDir);
@@ -83,7 +83,7 @@ export function applyGatewayMode(settings: Settings, options: CodexPathOptions =
     if (readJsonSafe(authPath(options))?.OPENAI_API_KEY !== apiKey
       || !hasGatewayProvider(readText(configPath(options)))
       || !hasManagedModelCatalog(readText(configPath(options)))) {
-      throw new Error("写入后的 Codex API 模式认证校验失败。");
+      throw new Error("写入后的 Codex 网关模式认证校验失败。");
     }
   });
   return {
@@ -145,6 +145,53 @@ export function applyAccountMode(account: AccountRecord | null | undefined, opti
   };
 }
 
+/** The active account is owned by Codex; never redeem its refresh token here. */
+export function readCodexAccountTokens(account: AccountRecord, options: CodexPathOptions = {}) {
+  const auth = readJsonSafe(authPath(options));
+  const tokens = auth?.tokens;
+  const expectedId = account.account_id || account.workspace_id;
+  if (auth?.OPENAI_API_KEY || !tokens?.access_token || !tokens?.refresh_token
+    || (expectedId ? tokens.account_id !== expectedId
+      : tokens.access_token !== account.access_token && tokens.refresh_token !== account.refresh_token)) {
+    throw new Error("Codex auth.json 缺失、无效或已切换账号；请重新导入当前账号，Codexia 不会刷新该账号的 token。");
+  }
+  return {
+    access_token: String(tokens.access_token), refresh_token: String(tokens.refresh_token),
+    id_token: String(tokens.id_token || ""), last_refresh: String(auth.last_refresh || "")
+  };
+}
+
+export function applyApiMode(channel: {
+  id: string; baseUrl: string; apiKey: string; supportsWebSocket: boolean;
+  requestHeaders: Record<string, string>;
+}, options: CodexPathOptions = {}) {
+  if (!channel.apiKey) throw new Error("所选渠道未配置 API Key。");
+  const url = new URL(channel.baseUrl);
+  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error("渠道 Base URL 必须为不含凭据、查询参数和片段的 HTTP(S) 地址。");
+  }
+  ensureCodexDir(options);
+  const current = readText(configPath(options));
+  const clean = withoutGatewayProvider(current).replace(/^\s*model_provider\s*=.*\r?\n?/m, "");
+  const headers = Object.entries(channel.requestHeaders).map(([key, value]) => `${tomlString(key)} = ${tomlString(value)}`).join(", ");
+  const block = [
+    `# codexia_channel = ${tomlString(channel.id)}`,
+    'model_provider = "codexia"',
+    `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`,
+    "", "[model_providers.codexia]", 'name = "OpenAI"',
+    `base_url = ${tomlString(options.accountModeBaseUrl || channel.baseUrl)}`,
+    'wire_api = "responses"', 'requires_openai_auth = true',
+    `supports_websockets = ${channel.supportsWebSocket}`,
+    `http_headers = { ${headers} }`
+  ].join("\n");
+  const next = insertProviderBlockIntoConfig(clean, block);
+  writeFilesTransaction([
+    { file: authPath(options), content: jsonText({ OPENAI_API_KEY: channel.apiKey }) },
+    { file: configPath(options), content: next }
+  ]);
+  return { providerChanged: current !== next };
+}
+
 export function ensureProviderConfig(settings: Settings, options: CodexPathOptions = {}): boolean {
   ensureCodexDir(options);
   const file = configPath(options);
@@ -199,7 +246,7 @@ function gatewayProviderBaseHost(host: unknown): string {
 }
 
 export function replaceGatewayProviderBlock(current: unknown, block: unknown): string {
-  let next = String(current || "");
+  let next = String(current || "").replace(/^# codexia_channel = .*\r?\n?/gm, "");
   if (/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(next)) {
     next = next.replace(/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*\r?\n?/m, "");
   }
@@ -226,7 +273,7 @@ export function insertProviderBlockIntoConfig(current: unknown, block: unknown):
 }
 
 export function withoutGatewayProvider(current: unknown): string {
-  let next = String(current || "");
+  let next = String(current || "").replace(/^# codexia_channel = .*\r?\n?/gm, "");
   if (/^\s*openai_base_url\s*=.*$/m.test(next)) {
     next = next.replace(/^\s*model_provider\s*=\s*"openai"\s*\r?\n?/m, "")
       .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
@@ -272,6 +319,10 @@ export function detectCodexAuthMode(settings: Settings, accounts: AccountRecord[
     return { mode: "gateway", accountId: "" };
   }
 
+  if (authKey && ["openai", "third_party"].includes(settings.codex_auth_mode || "")
+    && config.includes(`codexia_channel = ${tomlString(settings.codex_selected_upstream_id || "")}`)) {
+    return { mode: settings.codex_auth_mode as "openai" | "third_party", accountId: "" };
+  }
   const tokens = auth?.tokens || {};
   const tokenAccountId = String(tokens.account_id || "").trim();
   const refreshToken = String(tokens.refresh_token || "").trim();

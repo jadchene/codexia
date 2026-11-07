@@ -101,7 +101,7 @@ test("账号代理模式透明转发独立搜索并保留账号凭证", async ()
   }
 });
 
-test("账号模式通过 API 服务透明转发 WebSocket 并只观察 Responses", async () => {
+test("账号模式通过 网关服务透明转发 WebSocket 并只观察 Responses", async () => {
   const upstreamServer = http.createServer();
   const upstreamWebSocket = new WebSocketServer({ server: upstreamServer, perMessageDeflate: true });
   const received: Array<{ url: string; authorization: string; message: string }> = [];
@@ -324,6 +324,7 @@ const createHarness = async (upstreamBaseUrl: string, debugEnabled: boolean, fai
   const gateway = createGateway(store, null, {
     accountModeUpstreamBaseUrl: upstreamBaseUrl,
     upstreamService: {
+      getRuntime: () => ({ id: "fixed-channel", name: "Fixed API", kind: "responses_api", baseUrl: upstreamBaseUrl }),
       getModelPricing: () => ({ inputPerMillion: 1, cachedInputPerMillion: 0.5, outputPerMillion: 1 })
     }
   });
@@ -400,3 +401,48 @@ const waitFor = async (condition: () => boolean): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 };
+
+
+test.each(["openai", "third_party"])("%s monitor preserves body, auth, query and error response without pool routing", async (mode) => {
+  const payload = '{ "model": "same-as-pool", "service_tier": "priority", "input": [{"type":"reasoning","text":"keep"}] }';
+  const output = '{ "error": { "message": "original", "code": "rate_limit_exceeded" }, "custom": 7 }';
+  const received: Array<{ url: string; body: string; auth: string | undefined }> = [];
+  const upstream = await listenHttp(async (req, res) => {
+    received.push({ url: req.url || "", body: (await readBody(req)).toString(), auth: req.headers.authorization });
+    res.writeHead(429, { "content-type": "application/json", "retry-after": "17", "x-codex-primary-used-percent": "93" });
+    res.end(output);
+  });
+  const harness = await createHarness(`${upstream.url}/vendor/v1`, false);
+  Object.assign(harness.settings, { codex_auth_mode: mode, [`${mode}_use_api_proxy`]: "true", codex_selected_upstream_id: "fixed-channel", codex_quota_headers_mode: "block" });
+  try {
+    const response = await fetch(`${harness.gateway.status().url}/v1/responses?custom=a%2Fb`, {
+      method: "POST", headers: { authorization: "Bearer selected-api-key", "content-type": "application/json" }, body: payload
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("17");
+    expect(response.headers.get("x-codex-primary-used-percent")).toBe("93");
+    expect(await response.text()).toBe(output);
+    expect(received).toEqual([{ url: "/vendor/v1/responses?custom=a%2Fb", body: payload, auth: "Bearer selected-api-key" }]);
+    expect(harness.tokenLogs[0]).toMatchObject({ account_id: null, upstream_id: "fixed-channel", attempt_count: 1 });
+    expect(harness.quotaUpdates).toEqual([]);
+  } finally { await harness.close(); await upstream.close(); }
+});
+
+test("API monitor preserves rejected WebSocket handshake headers and body", async () => {
+  const body = '{"error":{"detail":"unaltered rejection"}}';
+  const server = http.createServer();
+  server.on("upgrade", (_req, socket) => socket.end(`HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nRetry-After: 19\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`));
+  const upstream = await listenExisting(server);
+  const harness = await createHarness(`${upstream.url}/v1`, false);
+  Object.assign(harness.settings, { codex_auth_mode: "openai", openai_use_api_proxy: "true", codex_selected_upstream_id: "fixed-channel" });
+  try {
+    const result = await new Promise<{ status: number | undefined; retry: string | undefined; body: string }>((resolve, reject) => {
+      const client = new WebSocket(`${harness.gateway.status().url.replace(/^http:/, "ws:")}/v1/responses`);
+      client.once("error", reject);
+      client.once("unexpected-response", (_req, res) => {
+        readBody(res).then((data) => { client.terminate(); resolve({ status: res.statusCode, retry: res.headers["retry-after"], body: data.toString() }); }, reject);
+      });
+    });
+    expect(result).toEqual({ status: 429, retry: "19", body });
+  } finally { await harness.close(); await upstream.close(); }
+});

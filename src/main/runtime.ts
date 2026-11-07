@@ -1,3 +1,5 @@
+import { restartCodexDaemon } from "./codex-daemon.ts";
+import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 
 type Dynamic = any;
@@ -237,7 +239,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   scheduleUsageRefresh("startup");
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
-      store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动 API 服务" });
+      store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动网关服务" });
       updateTrayMenu();
     }).catch((error: Dynamic) => {
       store.addAppLog({ level: "error", scope: "gateway", action: "auto-start", status: "failed", message: error.message });
@@ -554,12 +556,38 @@ function registerIpc() {
   handleIpc("mcpGateway:stop", async () => {
     return stopMcpGateway("manual");
   });
+  handleIpc("codexAuth:applyApiMode", async (_event, mode, upstreamId, useApiProxy) => {
+    const summary = upstreamService.list().find((item) => item.id === upstreamId);
+    if (!summary || summary.kind !== "responses_api" || (summary.provider === "openai") !== (mode === "openai")) {
+      throw new Error("请选择对应类型的 API 渠道。");
+    }
+    const channel = upstreamService.getRuntime(upstreamId);
+    if (!channel) throw new Error("渠道不存在。");
+    const settings = store.getSettings();
+    const models = upstreamService.listModels(upstreamId).filter((model) => model.available);
+    if (!models.length) throw new Error("渠道没有可用模型，请先配置模型目录。");
+    const catalogPath = path.join(store.paths.dataDir, "api-models.json");
+    writeFilesTransaction([{ file: catalogPath, content: JSON.stringify({ models: models.map((model) => ({
+      ...model.metadata, slug: model.modelId, display_name: model.displayName,
+      prefer_websockets: channel.supportsWebSocket, supports_websockets: channel.supportsWebSocket
+    })) }, null, 2) }]);
+    if (useApiProxy) await startGateway("api-proxy");
+    syncLeavingCodexAccount();
+    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath,
+      ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {}) });
+    store.saveSettings({ codex_auth_mode: mode, codex_selected_account_id: "", codex_selected_upstream_id: upstreamId,
+      [`${mode}_selected_upstream_id`]: upstreamId, [`${mode}_use_api_proxy`]: String(useApiProxy) });
+    await restartAppliedDaemon(mode);
+    return result;
+  });
   handleIpc("codexAuth:applyGatewayMode", async () => {
     const settings = store.getSettings();
     modelCatalogService.refresh();
+    syncLeavingCodexAccount();
     const result = applyGatewayMode(settings, gatewayCodexOptions());
     store.saveSettings({ codex_auth_mode: "gateway", codex_selected_account_id: "" });
-    store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex API 模式认证" });
+    store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex 网关模式认证" });
+    await restartAppliedDaemon("gateway");
     return result;
   });
   handleIpc("codexAuth:applyAccountMode", async (_event, accountId, useApiProxy) => {
@@ -568,7 +596,9 @@ function registerIpc() {
     const settings = store.getSettings();
     if (useApiProxy) await startGateway("account-proxy");
     modelCatalogService.refresh();
-    const result = applyAccountMode(account as Parameters<typeof applyAccountMode>[0], {
+    syncLeavingCodexAccount();
+    const currentAccount = syncCodexOwnedAccount(account);
+    const result = applyAccountMode(currentAccount as Parameters<typeof applyAccountMode>[0], {
       ...codexAccessOptions(runtimeProfile),
       modelCatalogPath: modelCatalogService.accountPath,
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {})
@@ -579,6 +609,7 @@ function registerIpc() {
       account_mode_use_api_proxy: useApiProxy ? "true" : "false"
     });
     store.addAppLog({ scope: "auth", action: "apply-account", status: "success", message: `已写入 Codex 账号模式认证：${account.name}` });
+    await restartAppliedDaemon("account");
     return result;
   });
   handleIpc("auth:startLogin", async () => {
@@ -739,7 +770,7 @@ async function startGateway(reason: Dynamic = "manual") {
     scope: "gateway",
     action: reason === "tray" ? "tray-start" : "start",
     status: "success",
-    message: `${reason === "tray" ? "托盘菜单启动 API 服务" : "API 服务已启动"}；模型目录 ${catalog.totalCount} 个`
+    message: `${reason === "tray" ? "托盘菜单启动网关服务" : "网关服务已启动"}；模型目录 ${catalog.totalCount} 个`
   });
   updateTrayMenu();
   notifyGatewayStatus(status);
@@ -757,7 +788,7 @@ async function stopGateway(reason: Dynamic = "manual") {
     scope: "gateway",
     action: reason === "tray" ? "tray-stop" : "stop",
     status: "success",
-    message: reason === "tray" ? "托盘菜单停止 API 服务" : "API 服务已停止"
+    message: reason === "tray" ? "托盘菜单停止网关服务" : "网关服务已停止"
   });
   updateTrayMenu();
   notifyGatewayStatus(status);
@@ -809,7 +840,7 @@ async function importLocalCodexAccount() {
     throw new Error("auth.json 不是有效的 Codex 账号模式认证，缺少 access_token 或 refresh_token。");
   }
   if (auth.OPENAI_API_KEY && !auth.auth_mode && !auth.tokens) {
-    throw new Error("当前 auth.json 是 API 模式，不是 Codex 账号模式。");
+    throw new Error("当前 auth.json 使用 API Key，不是 Codex 账号模式。");
   }
   const account: Dynamic = {
     ...accountFromTokens(tokens),
@@ -908,7 +939,7 @@ function updateTrayMenu() {
   const running = gateway.status().running;
   const menu = Menu.buildFromTemplate([
     {
-      label: running ? "停止 API 服务" : "启动 API 服务",
+      label: running ? "停止网关服务" : "启动网关服务",
       click: () => {
         const task = running ? stopGateway("tray") : startGateway("tray");
         task.catch((error) => {
@@ -959,7 +990,9 @@ function syncDetectedCodexAuthMode() {
   const message = detected.mode === "account"
     ? `启动时识别 Codex 认证模式：账号模式${account ? `（${account.email || account.name}）` : ""}`
     : detected.mode === "gateway"
-      ? "启动时识别 Codex 认证模式：API 模式"
+      ? "启动时识别 Codex 认证模式：网关模式"
+      : detected.mode === "openai" ? "启动时识别 Codex 认证模式：OpenAI 官方 API 模式"
+      : detected.mode === "third_party" ? "启动时识别 Codex 认证模式：第三方 API 模式"
       : "启动时识别 Codex 认证模式：未知";
   store.addAppLog({
     scope: "auth",
@@ -1026,7 +1059,7 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           scope: "gateway",
           action: "stop",
           status: reason,
-          message: `退出时停止 API 服务：${reason}`
+          message: `退出时停止网关服务：${reason}`
         });
       }
     } catch (stopError: Dynamic) {
@@ -1036,7 +1069,7 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           scope: "gateway",
           action: "stop",
           status: "failed",
-          message: `退出时关闭 API 服务失败：${stopError.message}`
+          message: `退出时关闭网关服务失败：${stopError.message}`
         });
       }
     }
@@ -1547,12 +1580,13 @@ async function refreshGatewayAccountToken(accountId: Dynamic) {
     scope: "gateway",
     action: "refresh-token",
     status: "success",
-    message: `API 服务请求前刷新账号 token：${saved.email || saved.name || saved.id}`
+    message: `网关服务请求前刷新账号 token：${saved.email || saved.name || saved.id}`
   });
   return saved;
 }
 
 async function requestJson(endpoint: Dynamic, account: Dynamic) {
+  account = syncCodexOwnedAccount(account);
   const timeoutMs = usageRefreshTimeoutMs();
   const resp = await fetch(endpoint, {
     headers: {
@@ -1575,7 +1609,30 @@ async function requestJson(endpoint: Dynamic, account: Dynamic) {
   return JSON.parse(text);
 }
 
+async function restartAppliedDaemon(mode: string) {
+  if (store.getSettings()[`${mode}_auto_restart_app_server`] === "true") {
+    await restartCodexDaemon(codexAccessOptions(runtimeProfile));
+  }
+}
+
+function syncLeavingCodexAccount() {
+  const settings = store.getSettings();
+  if (settings.codex_auth_mode !== "account") return;
+  const account = store.listAccounts().find((item: Dynamic) => item.id === settings.codex_selected_account_id);
+  if (!account) return;
+  try { syncCodexOwnedAccount(account); }
+  catch (error) { store.addAppLog({ scope: "auth", action: "sync-codex-auth", status: "failed", message: String(error) }); }
+}
+
+function syncCodexOwnedAccount(account: Dynamic) {
+  const settings = store.getSettings();
+  if (settings.codex_auth_mode !== "account" || settings.codex_selected_account_id !== account.id) return account;
+  return store.saveAccount({ ...account, ...readCodexAccountTokens(account, codexAccessOptions(runtimeProfile)) });
+}
+
 async function refreshAccessToken(account: Dynamic, refreshSubscription = false) {
+  const owned = syncCodexOwnedAccount(account);
+  if (owned !== account) return { ...owned, ...(refreshSubscription ? subscriptionFromTokens(owned) : {}) };
   const body = new URLSearchParams({
     client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
     grant_type: "refresh_token",

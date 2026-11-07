@@ -119,7 +119,7 @@ export const AppShell = ({
               </div>
             </Space>
             <Space wrap>
-              <Tag color={gatewayRunning ? "success" : "default"}>API {gatewayRunning ? "运行中" : "已停止"}</Tag>
+              <Tag color={gatewayRunning ? "success" : "default"}>网关{gatewayRunning ? "运行中" : "已停止"}</Tag>
               <Tag color={mcpGatewayRunning ? "success" : "default"}>MCP {mcpGatewayRunning ? "运行中" : "已停止"}</Tag>
             </Space>
           </Flex>

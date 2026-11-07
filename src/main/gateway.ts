@@ -124,6 +124,17 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       apiDebugLogger
     };
     accountModeApiProxy = createAccountModeApiProxy(store, apiDebugLogger, {
+      resolveOptions: () => {
+        const settings = store.getSettings();
+        if (!["openai", "third_party"].includes(settings.codex_auth_mode)) return {
+          upstreamBaseUrl: hooks.accountModeUpstreamBaseUrl,
+          getModelPricing: (modelId: string) => hooks.upstreamService?.getModelPricing?.("builtin-chatgpt-subscription-pool", modelId)
+        };
+        const channel = hooks.upstreamService?.getRuntime?.(settings.codex_selected_upstream_id);
+        if (!channel || channel.kind !== "responses_api") throw new Error("所选 API 渠道不存在。");
+        return { upstreamBaseUrl: channel.baseUrl, apiTarget: { id: channel.id, name: channel.name, kind: channel.kind },
+          getModelPricing: (modelId: string) => hooks.upstreamService?.getModelPricing?.(channel.id, modelId) };
+      },
       upstreamBaseUrl: hooks.accountModeUpstreamBaseUrl,
       getModelPricing: (modelId) => hooks.upstreamService?.getModelPricing?.("builtin-chatgpt-subscription-pool", modelId)
     });
@@ -136,7 +147,8 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
       }
       if (useAccountModeGatewayProxy(store.getSettings(), req.url)) {
         void accountModeApiProxy.handleHttp(req, res).catch((error: Dynamic) => {
-          if (!res.headersSent) sendJson(res, 502, { error: { message: "API 服务暂时无法完成账号模式代理请求。" } });
+          if (!res.headersSent) sendJson(res, 502, { error: { message: "网关服务暂时无法完成透明代理请求。" } });
+          else res.destroy();
           store.addAppLog?.({ level: "error", scope: "gateway", action: "account-proxy", status: "failed", message: gatewayErrorMessage(error) });
         });
         return;
@@ -169,7 +181,8 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
         return;
       }
       if (useAccountModeGatewayProxy(store.getSettings(), request.url)) {
-        accountModeApiProxy.handleUpgrade(request, socket, head);
+        try { accountModeApiProxy.handleUpgrade(request, socket, head); }
+        catch { socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"); }
         return;
       }
       websocketGateway.handleUpgrade(request, socket, head);
@@ -250,7 +263,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
         scope: "gateway",
         action: "stop",
         status: "forced",
-        message: `API 服务停机宽限期结束，强制关闭 ${forcedSocketCount} 个残留连接。`
+        message: `网关服务停机宽限期结束，强制关闭 ${forcedSocketCount} 个残留连接。`
       });
     }
     state = { running: false, url: "", error: "" };
@@ -279,7 +292,9 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
 }
 
 const useAccountModeGatewayProxy = (settings: Dynamic, requestUrl: unknown): boolean => {
-  if (settings.codex_auth_mode !== "account" || settings.account_mode_use_api_proxy !== "true") return false;
+  const mode = settings.codex_auth_mode;
+  if (!["account", "openai", "third_party"].includes(mode)) return false;
+  if (settings[mode === "account" ? "account_mode_use_api_proxy" : `${mode}_use_api_proxy`] !== "true") return false;
   const pathname = new URL(String(requestUrl || "/"), "http://localhost").pathname;
   return pathname.startsWith("/v1/");
 };
@@ -876,7 +891,7 @@ function selectInitialGatewayAccount(store: Dynamic, settings: Dynamic, now = ne
       scope: "gateway",
       action: "daily-rebalance",
       status: "success",
-      message: `当天首次 API 服务请求按 7 天剩余额度选择账号：${account.email || account.name || account.id}`
+      message: `当天首次网关服务请求按 7 天剩余额度选择账号：${account.email || account.name || account.id}`
     });
   }
   return account;

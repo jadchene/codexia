@@ -18,7 +18,7 @@ export const logActionLabels: Record<string, string> = {
   "isolated-profile": "隔离运行配置", "initial-refresh": "初始刷新", "remote-refresh": "远程刷新",
   "auto-start": "自动启动", "startup-refresh-check": "启动时检查额度", "startup-hidden": "启动时隐藏窗口",
   "startup-delay": "延迟启动", "startup-launch": "开机自启", "invocation-test": "调用测试",
-  "clear-token-logs": "清空调用日志", "apply-gateway": "应用接口模式配置", "apply-account": "应用账号模式配置",
+  "clear-token-logs": "清空调用日志", "apply-gateway": "应用网关模式配置", "apply-account": "应用账号模式配置",
   "refresh-account": "刷新账号额度", "refresh-subscription": "刷新订阅信息", "bundled-override-rollback": "回退内置模型覆盖配置",
   "tray-start": "托盘启动", "tray-stop": "托盘停止", "import-local-codex": "导入本地账号",
   "tray-icon": "加载托盘图标", "show-window": "显示窗口", "detect-startup": "检测启动接入模式",
@@ -46,7 +46,7 @@ export const logStatusLabels: Record<string, string> = {
   "gateway-no-usable-account": "无可用账号", shutdown: "正在关闭", tray: "托盘操作",
   "app-before-quit": "应用退出", "tray-quit": "托盘退出", sigint: "中断退出", sigterm: "终止退出",
   "uncaught-exception": "未捕获异常", "unhandled-rejection": "未处理异常",
-  account: "账号模式", api: "接口模式", gateway: "接口模式", unknown: "未知", none: "未配置",
+  account: "账号模式", api: "接口模式", gateway: "网关模式", openai: "OpenAI 官方 API 模式", third_party: "第三方 API 模式", unknown: "未知", none: "未配置",
   ECONNRESET: "连接重置", ECONNREFUSED: "连接被拒绝", ETIMEDOUT: "连接超时", ENOTFOUND: "地址无法解析",
   "1000": "正常关闭", "1001": "连接离开", "1006": "异常断开", "1008": "策略拒绝", "1011": "服务异常"
 };

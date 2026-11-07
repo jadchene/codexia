@@ -23,6 +23,10 @@ type Dynamic = any;
 
 interface AccountModeProxyOptions {
   upstreamBaseUrl?: string;
+  /** Resolve once per connection so an in-flight request cannot change channels. */
+  resolveOptions?: () => AccountModeProxyOptions;
+  apiTarget?: { id: string; name: string; kind: string };
+
   getModelPricing?: ((modelId: string) => ModelPricing | null | undefined) | undefined;
 }
 
@@ -42,7 +46,7 @@ interface WebSocketContext {
 }
 
 /**
- * 将账号模式透明代理挂载到现有 API 服务，不创建额外监听端口。
+ * 将账号模式透明代理挂载到现有网关服务，不创建额外监听端口。
  */
 export const createAccountModeApiProxy = (
   store: ProxyStore,
@@ -60,19 +64,19 @@ export const createAccountModeApiProxy = (
     options
   );
   return {
-    handleHttp: (request: IncomingMessage, response: ServerResponse) => handleHttpRequest(
+    handleHttp: async (request: IncomingMessage, response: ServerResponse) => handleHttpRequest(
       request,
       response,
       store,
       apiDebugLogger,
       activeRequests,
       notifyStatus,
-      options
+      options.resolveOptions?.() || options
     ),
     handleUpgrade: websocket.handleUpgrade,
     close: async () => {
-      for (const request of activeRequests) request.destroy(proxyAbortError("API 服务正在停止。"));
-      for (const context of activeWebSockets) context.controller.abort(proxyAbortError("API 服务正在停止。"));
+      for (const request of activeRequests) request.destroy(proxyAbortError("网关服务正在停止。"));
+      for (const context of activeWebSockets) context.controller.abort(proxyAbortError("网关服务正在停止。"));
       await websocket.close();
     }
   };
@@ -95,7 +99,7 @@ const handleHttpRequest = async (
     return;
   }
   const mappedPath = upstreamRequestPath(parsed, options);
-  const observed = request.method === "POST" && mappedPath.pathname === RESPONSES_PATH;
+  const observed = request.method === "POST" && (options.apiTarget ? parsed.pathname === PUBLIC_RESPONSES_PATH : mappedPath.pathname === RESPONSES_PATH);
   const settings = store.getSettings();
   const debugEnabled = observed && settings.debug_api_logging === "true" && apiDebugLogger.isEnabled();
   const requestId = debugEnabled ? randomUUID() : "";
@@ -103,7 +107,7 @@ const handleHttpRequest = async (
   // 计费字段按网关请求体上限采集，避免较小的调试日志上限截断模型和优先级。
   const metadataCapture = observed ? createBodyCapture(positiveInteger(settings.gateway_request_body_limit_bytes, DEFAULT_REQUEST_METADATA_LIMIT_BYTES)) : null;
   const responseCapture = debugEnabled ? createBodyCapture(apiDebugLogger.bodyLimitBytes || DEFAULT_BODY_LIMIT_BYTES) : null;
-  const quotaAccount = resolveProxyAccount(request, store);
+  const quotaAccount = options.apiTarget ? null : resolveProxyAccount(request, store);
   const usageParser = observed ? createSseUsageParser((event) => syncAccountUsageFromEvent(quotaAccount, event, store)) : null;
   const upstreamUrl = new URL(`${mappedPath.pathname}${mappedPath.search}`, upstreamBaseUrl(options));
   const outgoingHeaders = transparentRequestHeaders(request.headers);
@@ -118,7 +122,8 @@ const handleHttpRequest = async (
     const model = modelFromBody(requestBody);
     try {
       store.addTokenLog(buildResponsesRequestLog({
-        account: quotaAccount || selectedAccount(settings),
+        account: options.apiTarget ? null : quotaAccount || selectedAccount(settings),
+        target: options.apiTarget || null,
         method: request.method || "POST",
         requestPath: PUBLIC_RESPONSES_PATH,
         upstreamPath: `${mappedPath.pathname}${mappedPath.search}`,
@@ -146,12 +151,12 @@ const handleHttpRequest = async (
       if (observed) safelyObserve(store, () => syncAccountUsageFromHeaders(quotaAccount, upstreamResponse.headers, store));
       response.writeHead(upstreamResponse.statusCode || 502, transparentResponseHeaders(upstreamResponse.headers));
       upstreamResponse.on("data", (chunk: Buffer) => {
-        usageParser?.feed(chunk);
+        safelyObserve(store, () => usageParser?.feed(chunk));
         responseCapture?.push(chunk);
       });
       upstreamResponse.once("end", () => {
         finishLog(upstreamResponse.statusCode || 502, null);
-        if (debugEnabled) writeDebugResponse(apiDebugLogger, requestId, upstreamResponse.statusCode || 0, upstreamResponse.headers, responseCapture, startedAt, upstreamUrl);
+        if (debugEnabled) safelyObserve(store, () => writeDebugResponse(apiDebugLogger, requestId, upstreamResponse.statusCode || 0, upstreamResponse.headers, responseCapture, startedAt, upstreamUrl));
         resolve();
       });
       upstreamResponse.once("error", reject);
@@ -166,7 +171,7 @@ const handleHttpRequest = async (
     });
     request.once("end", () => {
       if (!debugEnabled) return;
-      apiDebugLogger.write({
+      safelyObserve(store, () => apiDebugLogger.write({
         ts: new Date().toISOString(),
         id: requestId,
         kind: "request",
@@ -176,7 +181,7 @@ const handleHttpRequest = async (
         path: `${parsed.pathname}${parsed.search}`,
         headers: sanitizeHeaders(request.headers),
         ...requestCapture?.snapshot()
-      });
+      }));
     });
     response.once("close", () => {
       if (response.writableEnded) return;
@@ -187,7 +192,7 @@ const handleHttpRequest = async (
   }).catch((error) => {
     const cancelled = response.destroyed || request.destroyed;
     finishLog(cancelled ? 499 : 502, error instanceof Error ? error.message : String(error));
-    if (debugEnabled) writeDebugResponse(apiDebugLogger, requestId, cancelled ? 499 : 502, response.getHeaders(), responseCapture, startedAt, upstreamUrl);
+    if (debugEnabled) safelyObserve(store, () => writeDebugResponse(apiDebugLogger, requestId, cancelled ? 499 : 502, response.getHeaders(), responseCapture, startedAt, upstreamUrl));
     throw error;
   }).finally(() => {
     if (clientRequest) activeRequests.delete(clientRequest);
@@ -209,7 +214,7 @@ const createAccountProxyWebSocketServer = (
   apiDebugLogger: ApiDebugLogger,
   activeWebSockets: Set<WebSocketContext>,
   notifyStatus: () => void,
-  options: AccountModeProxyOptions
+  baseOptions: AccountModeProxyOptions
 ) => {
   const server = new WebSocketServer({
     noServer: true,
@@ -223,18 +228,19 @@ const createAccountProxyWebSocketServer = (
   });
 
   const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    const options = baseOptions.resolveOptions?.() || baseOptions;
     const parsed = new URL(request.url || "/", "http://localhost");
     if (!isSupportedProxyPath(parsed.pathname, options)) {
       rejectUpgrade(socket, 404, "Unrecognized request URL.");
       return;
     }
     const mappedPath = upstreamRequestPath(parsed, options);
-    const observed = mappedPath.pathname === RESPONSES_PATH;
+    const observed = (options.apiTarget ? parsed.pathname === PUBLIC_RESPONSES_PATH : mappedPath.pathname === RESPONSES_PATH);
     const startedAt = Date.now();
     const settings = store.getSettings();
     const debugEnabled = observed && settings.debug_api_logging === "true" && apiDebugLogger.isEnabled();
     const connectionId = randomUUID();
-    if (debugEnabled) writeWebSocketDebug(apiDebugLogger, connectionId, {
+    if (debugEnabled) safelyObserve(store, () => writeWebSocketDebug(apiDebugLogger, connectionId, {
       kind: "request",
       method: "GET",
       path: `${parsed.pathname}${parsed.search}`,
@@ -242,7 +248,7 @@ const createAccountProxyWebSocketServer = (
       body: "",
       bodyBytes: 0,
       truncated: false
-    });
+    }));
     const upstreamUrl = new URL(`${mappedPath.pathname}${mappedPath.search}`, webSocketBaseUrl(options));
     const protocols = parseProtocols(request.headers["sec-websocket-protocol"]);
     const upstream = new WebSocket(upstreamUrl, protocols, {
@@ -257,18 +263,27 @@ const createAccountProxyWebSocketServer = (
     });
     upstream.once("upgrade", (upstreamResponse) => {
       responseHeaders = transparentWebSocketResponseHeaders(upstreamResponse.rawHeaders);
-      if (observed) safelyObserve(store, () => syncAccountUsageFromHeaders(resolveProxyAccount(request, store), upstreamResponse.headers, store));
+      if (observed && !options.apiTarget) safelyObserve(store, () => syncAccountUsageFromHeaders(resolveProxyAccount(request, store), upstreamResponse.headers, store));
     });
     upstream.once("unexpected-response", (_client, upstreamResponse) => {
       rejected = true;
-      upstreamResponse.resume();
-      rejectUpgrade(socket, upstreamResponse.statusCode || 502, upstreamResponse.statusMessage || "Upstream rejected the WebSocket request.");
-      if (debugEnabled) writeWebSocketDebug(apiDebugLogger, connectionId, {
+      // Preserve failed handshake status, business headers, and body (including non-JSON errors).
+      const headers = transparentResponseHeaders(upstreamResponse.headers);
+      socket.write(`HTTP/1.1 ${upstreamResponse.statusCode || 502} ${upstreamResponse.statusMessage || "Error"}\r\n`);
+      for (const [name, values] of Object.entries(headers)) {
+        for (const value of Array.isArray(values) ? values : [values]) {
+          if (value !== undefined) socket.write(`${name}: ${value}\r\n`);
+        }
+      }
+      socket.write("Connection: close\r\n\r\n");
+      upstreamResponse.once("error", () => socket.destroy());
+      upstreamResponse.pipe(socket);
+      if (debugEnabled) safelyObserve(store, () => writeWebSocketDebug(apiDebugLogger, connectionId, {
         kind: "response",
         status: upstreamResponse.statusCode || 502,
         message: upstreamResponse.statusMessage || "",
         durationMs: Date.now() - startedAt
-      });
+      }));
     });
     upstream.once("error", (error) => {
       if (!accepted && !rejected && !socket.destroyed) rejectUpgrade(socket, 502, "Unable to connect to the upstream WebSocket.");
@@ -288,22 +303,23 @@ const createAccountProxyWebSocketServer = (
         notifyStatus();
         const observer = observed ? createAccountModeResponsesObserver({
           store,
-          accountId: resolveProxyAccount(request, store)?.id || String(settings.codex_selected_account_id || ""),
-          quotaAccount: resolveProxyAccount(request, store),
+          accountId: options.apiTarget ? "" : resolveProxyAccount(request, store)?.id || String(settings.codex_selected_account_id || ""),
+          target: options.apiTarget || null,
+          quotaAccount: options.apiTarget ? null : resolveProxyAccount(request, store),
           request,
           requestPath: PUBLIC_RESPONSES_PATH,
           upstreamPath: `${mappedPath.pathname}${mappedPath.search}`,
           settings,
           getModelPricing: options.getModelPricing,
-          onIdleTimeout: () => controller.abort(proxyAbortError("WebSocket 响应等待超时。"))
+          onIdleTimeout: () => {}
         }) : null;
-        if (debugEnabled) writeWebSocketDebug(apiDebugLogger, connectionId, {
+        if (debugEnabled) safelyObserve(store, () => writeWebSocketDebug(apiDebugLogger, connectionId, {
           kind: "response",
           status: 101,
           headers: sanitizeHeaders(Object.fromEntries(responseHeaders.map((header) => splitHeader(header)))),
           durationMs: Date.now() - startedAt,
           upstreamUrl: upstreamUrl.toString()
-        });
+        }));
         bridgeWebSockets({
           downstream,
           upstream,
@@ -311,12 +327,12 @@ const createAccountProxyWebSocketServer = (
           bufferHighWaterBytes: positiveInteger(settings.gateway_websocket_buffer_high_water_bytes, 2 * 1024 * 1024),
           onDownstreamMessage: (data, isBinary) => {
             safelyObserve(store, () => observer?.onDownstreamMessage(data, isBinary));
-            if (debugEnabled) writeWebSocketMessage(apiDebugLogger, connectionId, "request", data, isBinary);
+            if (debugEnabled) safelyObserve(store, () => writeWebSocketMessage(apiDebugLogger, connectionId, "request", data, isBinary));
             return data;
           },
           onUpstreamMessage: (data, isBinary) => {
             safelyObserve(store, () => observer?.onUpstreamMessage(data, isBinary));
-            if (debugEnabled) writeWebSocketMessage(apiDebugLogger, connectionId, "response", data, isBinary);
+            if (debugEnabled) safelyObserve(store, () => writeWebSocketMessage(apiDebugLogger, connectionId, "response", data, isBinary));
             return data;
           }
         });
@@ -428,8 +444,10 @@ const rejectUpgrade = (socket: Duplex, status: number, message: string): void =>
 
 const isSupportedProxyPath = (pathname: string, _options: AccountModeProxyOptions): boolean => pathname.startsWith("/v1/");
 
-const upstreamRequestPath = (parsed: URL, _options: AccountModeProxyOptions): { pathname: string; search: string } => ({
-  pathname: `/backend-api/codex${parsed.pathname.slice(3)}`,
+const upstreamRequestPath = (parsed: URL, options: AccountModeProxyOptions): { pathname: string; search: string } => ({
+  pathname: options.apiTarget
+    ? `${new URL(upstreamBaseUrl(options)).pathname.replace(/\/+$/, "")}${parsed.pathname.slice(3)}`
+    : `/backend-api/codex${parsed.pathname.slice(3)}`,
   search: parsed.search
 });
 

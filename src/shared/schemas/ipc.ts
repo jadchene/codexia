@@ -66,6 +66,7 @@ export const ipcArgumentSchemas = {
   "gateway:stop": empty,
   "mcpGateway:start": empty,
   "mcpGateway:stop": empty,
+  "codexAuth:applyApiMode": z.tuple([z.enum(["openai", "third_party"]), id, z.boolean()]),
   "codexAuth:applyGatewayMode": empty,
   "codexAuth:applyAccountMode": z.tuple([id, z.boolean()]),
   "auth:startLogin": empty,

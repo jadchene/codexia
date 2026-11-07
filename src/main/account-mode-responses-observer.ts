@@ -19,6 +19,7 @@ interface ResponsesObserverStore {
 interface ResponsesObserverOptions {
   store: ResponsesObserverStore;
   accountId: string;
+  target?: { id: string; name: string; kind: string } | null;
   quotaAccount?: GatewayAccountQuota | null;
   request: IncomingMessage;
   requestPath: string;
@@ -62,7 +63,7 @@ export const createAccountModeResponsesObserver = (options: ResponsesObserverOpt
     clearIdleTimer();
     options.store.addTokenLog(buildResponsesRequestLog({
       account: options.accountId ? { id: options.accountId } : null,
-      target: null,
+      target: options.target || null,
       method: "WS",
       requestPath: options.requestPath,
       upstreamPath: options.upstreamPath,

@@ -25,7 +25,7 @@ export function settingsRestartReminder(
   const gateway = gatewayRunning && intersects(changed, GATEWAY_RESTART_KEYS);
   const mcp = mcpRunning && intersects(changed, MCP_RESTART_KEYS);
   if (gateway && mcp) return "，API 与 MCP 服务需要重启后生效";
-  if (gateway) return "，API 服务需要重启后生效";
+  if (gateway) return "，网关服务需要重启后生效";
   if (mcp) return "，MCP 服务需要重启后生效";
   return "";
 }

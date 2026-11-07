@@ -46,7 +46,7 @@ describe("Ant Design pages", () => {
     expect(screen.getAllByText("模型渠道")).toHaveLength(2);
     expect(screen.getByText("管理模型渠道。")).toBeTruthy();
     expect(screen.getByText("接入模式")).toBeTruthy();
-    expect(screen.getByText("API 已停止")).toBeTruthy();
+    expect(screen.getByText("网关已停止")).toBeTruthy();
     expect(screen.getByText("MCP 已停止")).toBeTruthy();
   });
 
@@ -61,8 +61,8 @@ describe("Ant Design pages", () => {
       quotaSummary={{ capacity_percent: 200, primary: { remaining_percent: 115 }, secondary: { remaining_percent: 150 } }}
       settings={{}}
     />);
-    expect(screen.queryByRole("button", { name: /刷新额度|启动 API 服务|停止 API 服务/ })).toBeNull();
-    expect(screen.getByText("API 服务")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /刷新额度|启动网关服务|停止网关服务/ })).toBeNull();
+    expect(screen.getByText("网关服务")).toBeTruthy();
     expect(screen.getByText("MCP 服务")).toBeTruthy();
     await waitFor(() => expect(window.codexGateway.listUpstreams).toHaveBeenCalled());
     expect(await screen.findByText("可选模型")).toBeTruthy();
@@ -481,7 +481,7 @@ describe("Ant Design pages", () => {
       onToggleGateway={onToggleGateway}
       onToggleMcpGateway={vi.fn()} onRestartGateway={vi.fn()}
       onRestartMcpGateway={vi.fn()} />);
-    expect(screen.getByText("API 服务")).toBeTruthy();
+    expect(screen.getByText("网关服务")).toBeTruthy();
     expect(screen.getByText("MCP 服务")).toBeTruthy();
     expect(screen.queryByText("HTTP 请求")).toBeNull();
     expect(screen.queryByText("WebSocket 连接")).toBeNull();
@@ -649,7 +649,7 @@ describe("Ant Design pages", () => {
       ...emptyLogPage,
       total: 2,
       items: [
-        { id: 1, created_at: Date.now(), level: "info", scope: "gateway", action: "start", status: "success", message: "API 服务已启动" },
+        { id: 1, created_at: Date.now(), level: "info", scope: "gateway", action: "start", status: "success", message: "网关服务已启动" },
         { id: 2, created_at: Date.now(), level: "info", scope: "gateway-websocket", action: "connect", status: "success", message: "WebSocket 已连接" }
       ]
     };
@@ -697,6 +697,33 @@ describe("Ant Design pages", () => {
     });
   });
 
+  it("filters independent API channels and saves mode-specific restart before applying", async () => {
+    const user = userEvent.setup();
+    const order: string[] = [];
+    const onSaveSettings = vi.fn(async () => { order.push("save"); });
+    const onApplyApi = vi.fn(async () => { order.push("apply"); });
+    const channels = [
+      { id: "official", name: "Official only", kind: "responses_api", provider: "openai", hasApiKey: true },
+      { id: "custom", name: "Custom only", kind: "responses_api", provider: "custom", hasApiKey: true }
+    ] as UpstreamSummary[];
+    render(<CodexIntegrationPage settings={{ codex_auth_mode: "", openai_selected_upstream_id: "official", third_party_selected_upstream_id: "custom" }}
+      accounts={[]} upstreams={channels} gatewayBase="http://localhost:8436/v1" modelCatalogPath="models.json" accountModelCatalogPath="account-models.json"
+      onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={vi.fn()} onApplyAccount={vi.fn()} onApplyApi={onApplyApi} />);
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI 官方 API 模式" }));
+    await user.click(screen.getByRole("combobox"));
+    expect(screen.queryByText("Custom only")).toBeNull();
+    await user.click(screen.getByRole("switch", { name: "自动重启 appserver" }));
+    await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
+    await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
+    expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ openai_auto_restart_app_server: "true" }));
+    expect(onApplyApi).toHaveBeenCalledWith("openai", "official", true);
+    expect(order).toEqual(["save", "apply"]);
+    fireEvent.click(screen.getByRole("radio", { name: "第三方 API 模式" }));
+    expect(screen.getByRole("switch", { name: "自动重启 appserver" }).getAttribute("aria-checked")).toBe("false");
+    await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
+    await waitFor(() => expect(onApplyApi).toHaveBeenLastCalledWith("third_party", "custom", false));
+  });
+
   it("applies Codex API mode", async () => {
     const user = userEvent.setup();
     const onApplyGateway = vi.fn().mockResolvedValue(undefined);
@@ -704,8 +731,8 @@ describe("Ant Design pages", () => {
     render(<CodexIntegrationPage settings={{ codex_auth_mode: "" }} accounts={[]}
       gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json" accountModelCatalogPath="D:/data/account-models.json"
       onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
-    expect(screen.getByRole("radio", { name: /API 模式/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: /API 模式/ }));
+    expect(screen.getByRole("radio", { name: /网关模式/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /网关模式/ }));
     expect(screen.getByText(/model_catalog_json = "D:\/data\/models\.json"/)).toBeTruthy();
     expect(screen.getByText(/openai_base_url = "http:\/\/localhost:8436\/v1"/)).toBeTruthy();
     expect(screen.queryByText(/model_provider = "openai"/)).toBeNull();
@@ -743,16 +770,16 @@ describe("Ant Design pages", () => {
     expect(await screen.findByText("测试账号", { selector: ".ant-select-item-option-content" })).toBeTruthy();
     expect(screen.queryByText(/account@example\.com/, { selector: ".ant-select-item-option-content" })).toBeNull();
     await user.click(screen.getByText("测试账号", { selector: ".ant-select-item-option-content" }));
-    expect(screen.getByText("通过现有 API 服务透明转发，仅记录请求日志")).toBeTruthy();
+    expect(screen.getByText("通过现有网关服务透明转发，仅记录请求日志")).toBeTruthy();
     expect(screen.queryByText("config.toml")).toBeNull();
-    await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
+    await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
     const preview = screen.getByText("config.toml").closest(".ant-card")!;
     expect(preview.textContent).toContain('model_catalog_json = "D:/data/account-models.json"');
     expect(preview.textContent).toContain('openai_base_url = "http://localhost:8436/v1"');
     expect(preview.textContent).not.toContain('model_provider');
-    await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
+    await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
     expect(screen.queryByText("config.toml")).toBeNull();
-    await user.click(screen.getByRole("switch", { name: "通过 API 服务代理" }));
+    await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onApplyAccount).toHaveBeenCalledWith("account-1", true);
   });

@@ -145,7 +145,7 @@ const ServiceAddressCard = ({ gatewayBase, mcpGatewayUrl }: { gatewayBase: strin
     <Typography.Text type="secondary">服务地址</Typography.Text>
     <div className="v1-overview-addresses">
       <div className="v1-overview-address-row">
-        <Typography.Text type="secondary">API 服务</Typography.Text>
+        <Typography.Text type="secondary">网关服务</Typography.Text>
         <Typography.Text
           className="v1-overview-address-value v1-mono"
           ellipsis={{ tooltip: gatewayBase }}

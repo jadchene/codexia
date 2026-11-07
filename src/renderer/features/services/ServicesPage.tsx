@@ -58,7 +58,7 @@ export const ServicesPage = ({
     <div className="v1-page-card">
       <div className="v1-service-grid">
         <ServiceCard
-          title="API 服务"
+          title="网关服务"
           running={gateway.running}
           loading={busyService === "gateway"}
           onToggle={() => toggle("gateway")}

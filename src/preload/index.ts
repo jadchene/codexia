@@ -78,6 +78,7 @@ const api = {
   stopGateway: (): Promise<ServiceStatus> => invoke("gateway:stop"),
   startMcpGateway: (): Promise<ServiceStatus> => invoke("mcpGateway:start"),
   stopMcpGateway: (): Promise<ServiceStatus> => invoke("mcpGateway:stop"),
+  applyApiAuth: (mode: "openai" | "third_party", upstreamId: string, useApiProxy: boolean): Promise<ApplyAuthResult> => invoke("codexAuth:applyApiMode", mode, upstreamId, useApiProxy),
   applyGatewayAuth: (): Promise<ApplyAuthResult> => invoke("codexAuth:applyGatewayMode"),
   applyAccountAuth: (accountId: string, useApiProxy: boolean): Promise<ApplyAuthResult> => invoke("codexAuth:applyAccountMode", accountId, useApiProxy),
   startLogin: (): Promise<LoginStartResult> => invoke("auth:startLogin"),

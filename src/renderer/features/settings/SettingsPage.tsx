@@ -232,7 +232,7 @@ export const SettingsPage = ({
   );
 
   const gatewayTab = (
-    <SettingsSection title="服务监听" description="设置 API 服务的监听地址和访问密钥。">
+    <SettingsSection title="服务监听" description="设置网关服务的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="gateway_host" label="监听地址" rules={[{ required: true }]}>
             <Input placeholder="127.0.0.1" />
@@ -270,7 +270,7 @@ export const SettingsPage = ({
         </Form.Item>
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
-            <Typography.Text strong>自动启动 API 服务</Typography.Text>
+            <Typography.Text strong>自动启动网关服务</Typography.Text>
             <Typography.Text type="secondary" className="v1-block">打开应用时自动启动服务。</Typography.Text>
           </div>
           <Form.Item name="auto_start_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
@@ -278,7 +278,7 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
             <Typography.Text strong>API 调试日志</Typography.Text>
-            <Typography.Text type="secondary" className="v1-block">记录 API 服务中的 HTTP 与 WebSocket 请求，最多开启 10 分钟；关闭后自动清空。</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">记录网关服务中的 HTTP 与 WebSocket 请求，最多开启 10 分钟；关闭后自动清空。</Typography.Text>
           </div>
           <Form.Item name="debug_api_logging_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>
@@ -335,7 +335,7 @@ export const SettingsPage = ({
             </Form.Item>
           ))}
         </div>
-        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响 API 模式下的订阅账号池：隐藏额度响应头和 WebSocket 额度事件，或改写为账号池汇总额度。第三方渠道始终显示可用；账号模式直连或通过代理均保留官方额度。">
+        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响网关模式下的订阅账号池：隐藏额度响应头和 WebSocket 额度事件，或改写为账号池汇总额度。网关模式中的第三方渠道显示可用；账号、官方 API 和第三方 API 模式直连或通过代理均保留上游响应。">
           <Segmented options={[
             { label: "隐藏账号额度", value: "block" },
             { label: "显示账号池汇总", value: "rewrite" }
@@ -524,7 +524,7 @@ export const SettingsPage = ({
 
 const SETTINGS_SECTIONS = [
   { key: "general", label: "常规" },
-  { key: "gateway", label: "API 服务" },
+  { key: "gateway", label: "网关服务" },
   { key: "mcp", label: "MCP 服务" },
   { key: "quota", label: "账号与额度" },
   { key: "logs", label: "日志与计费" },

@@ -66,6 +66,7 @@ export type IpcContract = {
   "gateway:stop": IpcSpec<[], ServiceStatus>;
   "mcpGateway:start": IpcSpec<[], ServiceStatus>;
   "mcpGateway:stop": IpcSpec<[], ServiceStatus>;
+  "codexAuth:applyApiMode": IpcSpec<[mode: "openai" | "third_party", upstreamId: string, useApiProxy: boolean], ApplyAuthResult>;
   "codexAuth:applyGatewayMode": IpcSpec<[], ApplyAuthResult>;
   "codexAuth:applyAccountMode": IpcSpec<[accountId: string, useApiProxy: boolean], ApplyAuthResult>;
   "auth:startLogin": IpcSpec<[], LoginStartResult>;

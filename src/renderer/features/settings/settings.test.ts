@@ -252,7 +252,7 @@ describe("settings appearance and display units", () => {
       }));
 
     expect(screen.getByRole("menuitem", { name: "常规" })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "API 服务" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "网关服务" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "MCP 服务" })).toBeTruthy();
     expect(screen.getByText("应用行为")).toBeTruthy();
     expect(screen.getByText("外观")).toBeTruthy();
