@@ -132,8 +132,8 @@ export const SettingsPage = ({
     }
   };
 
-  const copyGatewayKey = async (): Promise<void> => {
-    const value = String(form.getFieldValue("gateway_api_key") || "");
+  const copyKey = async (field: string): Promise<void> => {
+    const value = String(form.getFieldValue(field) || "");
     if (!value) {
       onMessage("如需复制，请先生成一个新密钥。");
       return;
@@ -231,6 +231,26 @@ export const SettingsPage = ({
     </Space>
   );
 
+  const controlApiTab = (
+    <SettingsSection title="外部 API" description="供 CLI 和外部程序调用。随应用启动，修改并保存后重启应用生效。">
+      <div className="v1-settings-grid v1-settings-grid-2">
+        <Form.Item name="control_api_host" label="监听地址" rules={[{ required: true }]}><Input placeholder="127.0.0.1" /></Form.Item>
+        <Form.Item name="control_api_port" label="端口" rules={[{ required: true }]}>
+          <InputNumber min={1} max={65535} precision={0} style={{ width: "100%" }} />
+        </Form.Item>
+      </div>
+      <Form.Item label="更换 API 密钥" extra={settings.control_api_key_configured === "true" ? "已设置。留空保留现有密钥；外部调用使用 Bearer 认证。" : "请生成或输入至少 32 位密钥。"}>
+        <Space.Compact block>
+          <Form.Item name="control_api_key" noStyle><Input.Password autoComplete="new-password" placeholder="留空保留现有密钥" /></Form.Item>
+          <Button aria-label="生成外部 API 密钥" icon={<ReloadOutlined />} onClick={() => { form.setFieldValue("control_api_key", generateApiKey()); setDirty(true); }} />
+          <Button aria-label="复制外部 API 密钥" icon={<CopyOutlined />} onClick={() => copyKey("control_api_key")} />
+        </Space.Compact>
+      </Form.Item>
+      <Typography.Paragraph>接口前缀：<Typography.Text code>/codexia/api</Typography.Text></Typography.Paragraph>
+      <Typography.Paragraph type="secondary">接入模式：GET /codexia/api/access-mode 读取配置与选项；POST 同一路径应用配置。网关未启动时仍保存配置，并返回手动启动提示。</Typography.Paragraph>
+    </SettingsSection>
+  );
+
   const gatewayTab = (
     <SettingsSection title="服务监听" description="设置网关服务的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
@@ -265,7 +285,7 @@ export const SettingsPage = ({
               icon={<ReloadOutlined />}
               onClick={() => form.setFieldValue("gateway_api_key", generateApiKey())}
             />
-            <Button aria-label="复制访问密钥" icon={<CopyOutlined />} onClick={copyGatewayKey} />
+            <Button aria-label="复制访问密钥" icon={<CopyOutlined />} onClick={() => copyKey("gateway_api_key")} />
           </Space.Compact>
         </Form.Item>
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
@@ -503,6 +523,7 @@ export const SettingsPage = ({
             {{
               general: generalTab,
               gateway: gatewayTab,
+              controlApi: controlApiTab,
               quota: quotaTab,
               logs: logsBillingTab,
               mcp: mcpTab,
@@ -525,6 +546,7 @@ export const SettingsPage = ({
 const SETTINGS_SECTIONS = [
   { key: "general", label: "常规" },
   { key: "gateway", label: "网关服务" },
+  { key: "controlApi", label: "外部 API" },
   { key: "mcp", label: "MCP 服务" },
   { key: "quota", label: "账号与额度" },
   { key: "logs", label: "日志与计费" },
@@ -582,6 +604,9 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
     values[key] = Number(settings[key] ?? QUOTA_NORMALIZATION_DEFAULT_SETTINGS[key]);
   }
   values.gateway_api_key = "";
+  values.control_api_key = "";
+  values.control_api_host = settings.control_api_host || "127.0.0.1";
+  values.control_api_port = settings.control_api_port || "8437";
   values.appearance_font_family = settings.appearance_font_family || "system";
   values.gateway_session_affinity_ttl_hours = settings.gateway_session_affinity_ttl_hours || "168";
   for (const [formKey, settingKey] of Object.entries(SECOND_FIELDS)) {
@@ -604,7 +629,7 @@ export const formToSettings = (current: SettingsRecord, values: Partial<Settings
   for (const [key, value] of Object.entries(values)) {
     if (key === "gpt_quota_normalization_enabled") continue;
     if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled")) continue;
-    if (key === "gateway_api_key" && !String(value || "").trim()) continue;
+    if (["gateway_api_key", "control_api_key"].includes(key) && !String(value || "").trim()) continue;
     next[key] = String(value ?? "").trim();
   }
   for (const [formKey, settingKey] of Object.entries(SECOND_FIELDS)) {

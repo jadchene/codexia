@@ -1,4 +1,4 @@
-import { startCliControl } from "./cli-control.ts";
+import { startControlApi } from "./control-api.ts";
 import { createCliAccess } from "./cli-access.ts";
 import { createMonitorLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
@@ -87,7 +87,7 @@ let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 let singleInstanceServer: Server | null = null;
-let closeCliControl: Awaited<ReturnType<typeof startCliControl>> | undefined;
+let closeControlApi: Awaited<ReturnType<typeof startControlApi>> | undefined;
 const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
 const usageResetRefreshAttempts = new Map<string, { resetAt: number; count: number }>();
 let shuttingDown = false;
@@ -247,26 +247,22 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
-  if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) closeCliControl = await startCliControl(store.paths.dataDir, createCliAccess({
+  if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) closeControlApi = await startControlApi(store.paths.dataDir, { ...createCliAccess({
     store, upstreams: upstreamService, catalog: modelCatalogService,
     codexOptions: codexAccessOptions(runtimeProfile),
-    ensureGateway: async () => {
-      await startGateway("cli");
-      for (let attempt = 0; attempt < 100; attempt++) {
-        const status = gateway.status();
-        if (status.running) return;
-        if (status.error) throw new Error(status.error);
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      throw new Error("网关未就绪，接入配置尚未应用。");
-    },
     onApplied: () => { notifyDataChanged(["settings", "accounts", "upstreams", "upstreamModels"]); updateTrayMenu(); },
     restart: async (options) => { await restartCodexDaemon(options); }
-  }), {
+  }), gatewayRunning: () => gateway.status().running }, {
+    host: store.getSettings().control_api_host || "127.0.0.1",
+    port: Number(store.getSettings().control_api_port || "8437"),
+    apiKey: store.getSettings().control_api_key || "",
     singleInstance: useSingleInstance,
     globalFile: runtimeProfile.isolated
       ? path.join(runtimeProfile.paths!.runtimeRoot, "cli-single-instance.json")
       : path.join(app.getPath("appData"), "Codexia", "cli-single-instance.json")
+  }).catch((error: Error) => {
+    store.addAppLog({ level: "error", scope: "control-api", action: "start", status: "failed", message: `外部 API 启动失败：${error.message}` });
+    return undefined;
   });
   scheduleUsageRefresh("startup");
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
@@ -316,11 +312,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 function createObservableStore(baseStore: Dynamic) {
   return {
     ...baseStore,
-    saveSettings(patch: Dynamic) {
-      const result = baseStore.saveSettings(patch);
-      try { closeCliControl?.refresh(); } catch (error) { console.warn("更新 CLI 配置快照失败", error); }
-      return result;
-    },
     saveAccount(account: Dynamic) {
       const result = baseStore.saveAccount(account);
       notifyDataChanged(["accounts"]);
@@ -480,6 +471,7 @@ function registerIpc() {
   handleIpc("settings:save", async (_event, patch) => {
     const editablePatch = editableSettingsPatch(patch);
     if (!editablePatch.gateway_api_key) delete editablePatch.gateway_api_key;
+    if (!editablePatch.control_api_key) delete editablePatch.control_api_key;
     const requestedDebugLogging = editablePatch.debug_api_logging;
     delete editablePatch.debug_api_logging;
     let settings = store.saveSettings({
@@ -928,9 +920,6 @@ function notifyMcpGatewayStatus(status: Dynamic = mcpGateway?.status()) {
 }
 
 function notifyDataChanged(types: Dynamic) {
-  if (types.some((type: string) => ["settings", "accounts", "upstreams", "upstreamModels"].includes(type))) {
-    try { closeCliControl?.refresh(); } catch (error) { console.warn("更新 CLI 配置快照失败", error); }
-  }
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("app:data-changed", Array.from(new Set(types)));
 }
@@ -1046,8 +1035,8 @@ function syncDetectedCodexAuthMode() {
 async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
   if (shuttingDown) return;
   shuttingDown = true;
-  await closeCliControl?.();
-  closeCliControl = undefined;
+  await closeControlApi?.();
+  closeControlApi = undefined;
   if (usageRefreshTimer) {
     clearInterval(usageRefreshTimer);
     usageRefreshTimer = null;

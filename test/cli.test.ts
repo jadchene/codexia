@@ -118,16 +118,13 @@ describe("real isolated config application", () => {
   });
 });
 
-it("gateway preparation failures leave auth/config unchanged and never restart", async () => {
+it("CLI writes gateway configuration while stopped and only prints a manual-start reminder", async () => {
   const f = fixture();
-  await f.access.apply({ mode: "third_party", targetId: f.third.id, proxy: false, restart: false });
-  const original = f.config();
-  const fail = createCliAccess({ store: f.store, upstreams: f.upstreams,
-    catalog: createCodexModelCatalogService({ db: f.store.db, dataDir: f.root }), codexOptions: { codexDir: f.codexDir },
-    ensureGateway: async () => { throw Error("port busy"); }, restart: f.restart });
-  await expect(fail.apply({ mode: "third_party", targetId: f.third.id, proxy: true, restart: true })).rejects.toThrow("port busy");
-  expect(f.config()).toBe(original);
-  expect(f.store.getSettings().third_party_use_api_proxy).toBe("false");
+  const write = vi.fn();
+  await runCli(["mode", "switch", "--mode", "gateway", "--restart", "false"], "2", async () => f.access, { write });
+  expect(f.store.getSettings().codex_auth_mode).toBe("gateway");
+  expect(f.config()).toContain("http://localhost:8436/v1");
+  expect(write).toHaveBeenCalledWith(expect.stringContaining("请手动启动"));
   expect(f.restart).not.toHaveBeenCalled();
 });
 

@@ -9,6 +9,8 @@ export interface AccessSelection {
   restart: boolean;
 }
 export interface CliBackend {
+  current?: () => AccessSelection | null;
+  gatewayRunning?: () => boolean;
   show: () => string;
   choices: (mode: AccessMode) => Array<{ id: string; label: string }>;
   defaults: (mode: AccessMode) => { targetId: string; proxy: boolean; restart: boolean };
@@ -29,7 +31,7 @@ export const CLI_HELP = `Codexia 命令行
 
 模式：account / openai / third_party / gateway
 无交互终端时必须提供完整参数。--proxy、--restart 取值 true / false。
-直连切换不会启动桌面应用。网关模式或代理监控会自动启动 Codexia 和网关。
+CLI 不会自动启动 Codexia 或网关。网关模式或代理监控在服务未启动时仍保存配置，并提示手动启动。
 跟随单实例设置：开启时全局复用，关闭时仅复用同目录实例。Ctrl+C 或输入流结束会取消尚未应用的修改。`;
 
 export function parseCliArgs(args: string[]) {
@@ -99,8 +101,15 @@ export async function runCli(args: string[], version: string, backend: () => Pro
   };
   const proxy = mode !== "gateway" && await booleanOption("--proxy", "是否通过网关代理监控请求", defaults.proxy);
   const restart = await booleanOption("--restart", "应用后是否自动重启 Codex app-server", defaults.restart);
-  if (mode === "gateway" || proxy) io.write("此配置需要网关服务，正在连接或启动 Codexia…");
-  await service.apply({ mode, targetId, proxy, restart });
+  const selection = { mode, targetId, proxy, restart };
+  await service.apply(selection);
+  const reminder = gatewayStartReminder(selection, service.gatewayRunning?.() ?? false);
+  if (reminder) io.write(reminder);
   io.write(`已应用：${ACCESS_MODES[mode]}${targetId ? ` [${targetId}]` : ""}；${proxy ? "已配置网关代理" : mode === "gateway" ? "使用网关" : "直连"}。`);
   io.write(restart ? "Codex app-server 已重启。" : "未重启 app-server；已有进程可能仍使用旧配置，请在需要时重启。");
+}
+
+export function gatewayStartReminder(selection: AccessSelection, gatewayRunning: boolean): string {
+  return (selection.mode === "gateway" || selection.proxy) && !gatewayRunning
+    ? "提示：配置已保存，但网关服务未启动。请手动启动 Codexia 和网关服务后再使用 Codex。" : "";
 }

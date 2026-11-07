@@ -68,6 +68,8 @@ export function createRuntimeProfile(options: {
       codexDir
     } : null,
     settingsOverrides: isolated ? {
+      control_api_host: "127.0.0.1",
+      control_api_port: "18437",
       gateway_host: "127.0.0.1",
       gateway_port: "18436",
       mcp_gateway_host: "127.0.0.1",

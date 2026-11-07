@@ -13,7 +13,6 @@ export function createCliAccess(options: {
   catalog: ReturnType<typeof createCodexModelCatalogService>;
   codexOptions: { codexDir?: string };
   restart?: typeof restartCodexDaemon;
-  ensureGateway?: () => Promise<unknown>;
   onApplied?: () => void;
 }): CliBackend {
   const { store, upstreams, catalog, codexOptions } = options;
@@ -32,6 +31,14 @@ export function createCliAccess(options: {
       .map((u) => ({ id: u.id, label: u.name }));
   return {
     defaults, choices,
+    current: () => {
+      const settings = store.getSettings();
+      const mode = settings.codex_auth_mode as AccessMode;
+      if (!Object.hasOwn(ACCESS_MODES, mode)) return null;
+      return { mode, ...defaults(mode),
+        targetId: String(mode === "gateway" ? "" : mode === "account" ? settings.codex_selected_account_id || "" : settings.codex_selected_upstream_id || ""),
+        proxy: mode === "gateway" ? false : defaults(mode).proxy };
+    },
     show: () => {
       const settings = store.getSettings();
       const detected = detectCodexAuthMode(settings, store.listAccounts() as Parameters<typeof detectCodexAuthMode>[1], codexOptions);
@@ -54,7 +61,6 @@ export function createCliAccess(options: {
     },
     apply: async ({ mode, targetId, proxy, restart }) => {
       if (mode !== "gateway" && !choices(mode).some((item) => item.id === targetId)) throw new Error("所选账号/渠道不可用。");
-      if (mode === "gateway" || proxy) await options.ensureGateway?.();
       const settings = store.getSettings();
       // Detect the actual auth owner, so direct Codex refreshes and external account switches are respected.
       const accounts = store.listAccounts();

@@ -1,6 +1,5 @@
 import { app, safeStorage } from "electron";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
 import { readSingleInstanceSetting } from "./single-instance.ts";
 import { connectCliControl } from "./cli-control.ts";
 import path from "node:path";
@@ -34,20 +33,16 @@ export async function startCli(args: string[]): Promise<void> {
       };
       const remote = await connectCliControl(activeDataDir, discovery);
       if (remote) return remote;
-      const waitForDesktop = async () => {
-        for (let attempt = 0; attempt < 150; attempt++) {
-          const service = await connectCliControl(activeDataDir, discovery);
-          if (service) return service;
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        }
-        throw new Error("Codexia 未在 30 秒内就绪；配置未由本命令应用，请检查桌面应用启动情况。");
-      };
       const userData = profile.paths?.browserDataDir || browserDataDir();
       fs.mkdirSync(userData, { recursive: true });
       app.setPath("userData", userData);
       app.setName(profile.appName);
       // Avoid configuring a running desktop instance with stale in-memory settings.
-      if (!app.requestSingleInstanceLock({ cli: true })) return await waitForDesktop();
+      if (!app.requestSingleInstanceLock({ cli: true })) {
+        const running = await connectCliControl(activeDataDir, discovery);
+        if (running) return running;
+        throw new Error("Codexia 已运行，但外部 API 未就绪。请检查 API 设置及运行日志后重试。");
+      }
       ownsLock = true;
       await app.whenReady();
       const secretCodec = createSecretCodec(safeStorage);
@@ -63,24 +58,7 @@ export async function startCli(args: string[]): Promise<void> {
           } catch { return []; }
         }
       });
-      const local = createCliAccess({ store, upstreams, catalog, codexOptions: codexAccessOptions(profile) });
-      return { ...local, apply: async (selection: Parameters<typeof local.apply>[0]) => {
-        if (selection.mode !== "gateway" && !selection.proxy) { await local.apply(selection); return; }
-        // Release the database and native single-instance lock before starting the desktop owner.
-        release();
-        const running = await connectCliControl(activeDataDir, discovery);
-        if (running) { await running.apply(selection); return; }
-        const launchArgs = [
-          ...(!app.isPackaged ? [app.getAppPath()] : []),
-          ...process.argv.filter((arg) => arg === "--isolated-dev" || arg.startsWith("--codex-test-dir=") || arg === "--no-sandbox" || arg.startsWith("--ozone-platform=") || arg.startsWith("--password-store=")),
-          "--startup-hidden", "--cli-service-start"
-        ];
-        const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-        const child = spawn(process.execPath, launchArgs, { detached: true, stdio: "ignore", env });
-        await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
-        child.unref();
-        await (await waitForDesktop()).apply(selection);
-      } };
+      return createCliAccess({ store, upstreams, catalog, codexOptions: codexAccessOptions(profile) });
     };
     let ask: ((question: string) => Promise<string>) | undefined;
     if (process.stdin.isTTY || process.argv.includes("--cli-interactive")) {

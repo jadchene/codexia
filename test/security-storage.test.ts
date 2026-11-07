@@ -807,3 +807,14 @@ test("request outcome filters match list and summary across HTTP status boundari
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("external API settings validate addresses, ports and keys without exposing the key", () => {
+  const key = "control-key-".repeat(5);
+  assert.equal(publicSettings({ control_api_key: key }).control_api_key, undefined);
+  assert.equal(publicSettings({ control_api_key: key }).control_api_key_configured, "true");
+  assert.deepEqual(editableSettingsPatch({ control_api_host: "127.0.0.1", control_api_port: "8437", control_api_key: key }),
+    { control_api_host: "127.0.0.1", control_api_port: "8437", control_api_key: key });
+  for (const patch of [{ control_api_host: "http://localhost" }, { control_api_port: "65536" }, { control_api_key: "short" }]) {
+    assert.throws(() => editableSettingsPatch(patch));
+  }
+});

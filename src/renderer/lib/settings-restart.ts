@@ -24,10 +24,12 @@ export function settingsRestartReminder(
     .map(([key]) => key));
   const gateway = gatewayRunning && intersects(changed, GATEWAY_RESTART_KEYS);
   const mcp = mcpRunning && intersects(changed, MCP_RESTART_KEYS);
-  if (gateway && mcp) return "，API 与 MCP 服务需要重启后生效";
-  if (gateway) return "，网关服务需要重启后生效";
-  if (mcp) return "，MCP 服务需要重启后生效";
-  return "";
+  const services = [gateway ? "网关服务" : "", mcp ? "MCP 服务" : ""].filter(Boolean);
+  const reminders = services.length ? [`${services.join("与")}需要重启后生效`] : [];
+  if (["control_api_host", "control_api_port", "control_api_key"].some((key) => changed.has(key))) {
+    reminders.push("外部 API 设置需要重启应用后生效");
+  }
+  return reminders.length ? `，${reminders.join("；")}` : "";
 }
 
 function intersects(left: Set<string>, right: Set<string>): boolean {

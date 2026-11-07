@@ -144,6 +144,19 @@ describe("settings appearance and display units", () => {
     expect(saved.auto_start_gateway).toBe("true");
   });
 
+  it("configures external API listening independently and keeps the key write-only", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(createElement(SettingsPage, { settings: { control_api_host: "127.0.0.1", control_api_port: "8437", control_api_key_configured: "true" },
+      paths: {}, onSave, onMessage: vi.fn(), onClearTokenLogs: vi.fn(), onClearAppLogs: vi.fn() }));
+    await user.click(screen.getByRole("menuitem", { name: "外部 API" }));
+    const port = screen.getByRole("spinbutton", { name: "端口" });
+    await user.clear(port); await user.type(port, "9437");
+    await user.click(screen.getByRole("button", { name: /保存设置/ }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ control_api_host: "127.0.0.1", control_api_port: "9437" })));
+    expect(onSave.mock.calls[0]![0].control_api_key).toBeUndefined();
+  });
+
   it("treats the gateway key as write-only", () => {
     const settings = {
       gateway_api_key_configured: "true",
@@ -259,7 +272,7 @@ describe("settings appearance and display units", () => {
     expect(screen.getByText("延迟启动")).toBeTruthy();
     expect(screen.getByText("最小化到托盘")).toBeTruthy();
     expect(screen.queryByText("忽略 5 小时限制")).toBeNull();
-    expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /保存设置/ })).toBeNull();
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
     expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
     expect(screen.queryByRole("switch", { name: "按 Plus 基准折算额度" })).toBeNull();
@@ -274,7 +287,7 @@ describe("settings appearance and display units", () => {
     expect(screen.getByText("会话亲和有效期")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));
     expect(screen.getByText("超时与并发")).toBeTruthy();
-    expect(screen.getAllByRole("menuitem")).toHaveLength(7);
+    expect(screen.getAllByRole("menuitem")).toHaveLength(8);
     await user.click(screen.getByRole("menuitem", { name: "日志与计费" }));
     expect(screen.getByText("设置费用统计和界面展示使用的币种。")).toBeTruthy();
     await user.click(screen.getByRole("combobox", { name: "全局币种" }));
