@@ -1,6 +1,6 @@
 import { startCliControl } from "./cli-control.ts";
 import { createCliAccess } from "./cli-access.ts";
-import { createRequestLogWriter } from "./request-log-writer.ts";
+import { createMonitorLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
 import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
@@ -75,7 +75,7 @@ if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
 let store!: ReturnType<typeof createStore>;
-let monitorLogWriter: ReturnType<typeof createRequestLogWriter> | undefined;
+let monitorLogWriter: ReturnType<typeof createMonitorLogWriter> | undefined;
 let gateway!: ReturnType<typeof createGateway>;
 let mcpGateway!: ReturnType<typeof createMcpGatewayService>;
 let authService!: ReturnType<typeof createAuthService>;
@@ -231,7 +231,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   gateway = createGateway(store, authService, {
     addMonitorTokenLog: (entry: Record<string, unknown>) => {
-      monitorLogWriter ??= createRequestLogWriter(store.paths.dbPath);
+      monitorLogWriter ??= createMonitorLogWriter(store.paths.dbPath, () => notifyDataChanged(["tokenLogs", "tokenSummary"]));
       return monitorLogWriter.enqueue(entry);
     },
     refreshAllUsage,

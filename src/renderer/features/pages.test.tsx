@@ -725,6 +725,27 @@ describe("Ant Design pages", () => {
     await waitFor(() => expect(onApplyApi).toHaveBeenLastCalledWith("third_party", "custom", false));
   });
 
+  it("synchronizes API channel and switches after CLI changes settings", async () => {
+    const onApplyApi = vi.fn();
+    const onSaveSettings = vi.fn();
+    const props = {
+      accounts: [], upstreams: [
+        { id: "old", name: "Old channel", kind: "responses_api", provider: "openai", hasApiKey: true },
+        { id: "new", name: "New channel", kind: "responses_api", provider: "openai", hasApiKey: true }
+      ] as UpstreamSummary[],
+      gatewayBase: "http://localhost:8436/v1", modelCatalogPath: "models.json", accountModelCatalogPath: "accounts.json",
+      onMessage: vi.fn(), onSaveSettings, onApplyGateway: vi.fn(), onApplyAccount: vi.fn(), onApplyApi
+    };
+    const view = render(<CodexIntegrationPage {...props} settings={{ codex_auth_mode: "openai", openai_selected_upstream_id: "old" }} />);
+    view.rerender(<CodexIntegrationPage {...props} settings={{ codex_auth_mode: "openai", openai_selected_upstream_id: "new", openai_use_api_proxy: "true", openai_auto_restart_app_server: "true" }} />);
+    expect(screen.getByText("New channel")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "通过网关服务代理" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: "自动重启 appserver" }).getAttribute("aria-checked")).toBe("true");
+    await userEvent.setup().click(screen.getByRole("button", { name: /应用到 Codex/ }));
+    expect(onApplyApi).toHaveBeenCalledWith("openai", "new", true);
+    expect(onSaveSettings).not.toHaveBeenCalled();
+  });
+
   it("applies Codex API mode", async () => {
     const user = userEvent.setup();
     const onApplyGateway = vi.fn().mockResolvedValue(undefined);
