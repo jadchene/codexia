@@ -1,39 +1,93 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import net from "node:net";
 import { expect, it, vi } from "vitest";
 import { connectCliControl, startCliControl } from "../src/main/cli-control.ts";
 import { acquireSingleInstanceChannel, closeSingleInstanceChannel, singleInstanceEndpoint } from "../src/main/single-instance.ts";
 import type { CliBackend } from "../src/main/cli.ts";
 
-it("local control authenticates, validates and serializes mode changes without exposing credentials", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-control-"));
-  let active = 0; let maximum = 0;
-  const backend: CliBackend = { show: () => "current", choices: () => [{ id: "api", label: "API" }], defaults: () => ({ targetId: "api", proxy: false, restart: false }),
-    apply: vi.fn(async () => { active++; maximum = Math.max(active, maximum); await new Promise((r) => setTimeout(r, 20)); active--; }) };
+it("directory sync applies once, deletes successful requests and refreshes the snapshot", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-sync-"));
+  let current = "before";
+  const apply = vi.fn(async () => { current = "after"; });
+  const backend: CliBackend = { show: () => current, choices: () => [{ id: "api", label: "API" }],
+    defaults: () => ({ targetId: "api", proxy: false, restart: false }), apply };
   expect(await connectCliControl(dir)).toBeNull();
   const close = await startCliControl(dir, backend);
   try {
     const remote = (await connectCliControl(dir))!;
-    expect(remote.show()).toBe("current");
-    expect(remote.choices("openai")).toEqual([{ id: "api", label: "API" }]);
+    expect(remote.show()).toBe("before");
     const selection = { mode: "openai" as const, targetId: "api", proxy: true, restart: false };
-    await Promise.all([remote.apply(selection), remote.apply(selection)]);
-    expect(maximum).toBe(1); expect(backend.apply).toHaveBeenCalledTimes(2);
-    const meta = JSON.parse(fs.readFileSync(path.join(dir, "cli-control.json"), "utf8"));
-    const raw = (message: object) => new Promise<string>((resolve, reject) => {
-      const socket = net.createConnection(meta.endpoint); let text = "";
-      socket.on("error", reject); socket.on("data", (c) => text += c);
-      socket.on("end", () => resolve(text)); socket.on("connect", () => socket.end(JSON.stringify({ instanceDirectory: meta.instanceDirectory, ...message }) + "\n"));
-    });
-    expect(await raw({ token: "wrong", action: "apply", selection })).toContain("认证失败");
-    expect(await raw({ token: meta.token, action: "apply", selection: { ...selection, proxy: "true" } })).toContain("参数无效");
-    expect(backend.apply).toHaveBeenCalledTimes(2);
-    if (process.platform !== "win32") expect(fs.statSync(path.join(dir, "cli-control.json")).mode & 0o777).toBe(0o600);
+    await remote.apply(selection);
+    expect(apply).toHaveBeenCalledExactlyOnceWith(selection);
+    expect(fs.existsSync(path.join(dir, "sync/request.json"))).toBe(false);
+    expect((await connectCliControl(dir))!.show()).toBe("after");
+    current = "desktop change"; close.refresh();
+    expect((await connectCliControl(dir))!.show()).toBe("desktop change");
+    const metadata = JSON.parse(fs.readFileSync(path.join(dir, "sync/instance.json"), "utf8"));
+    expect(metadata.token).toBeUndefined(); expect(metadata.endpoint).toBeUndefined();
+    if (process.platform !== "win32") expect(fs.statSync(path.join(dir, "sync/instance.json")).mode & 0o777).toBe(0o600);
   } finally { await close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+it("generic envelopes reject unsupported versions, message types, stale requests and invalid payloads", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-sync-format-"));
+  const apply = vi.fn(async () => {});
+  const backend: CliBackend = { show: () => "current", choices: () => [], defaults: () => ({ targetId: "", proxy: false, restart: false }), apply };
+  const close = await startCliControl(dir, backend);
+  try {
+    const metadata = JSON.parse(fs.readFileSync(path.join(dir, "sync/instance.json"), "utf8"));
+    const message = { version: 1, id: "test", type: "access-mode.apply", targetInstanceId: metadata.instanceId,
+      createdAt: Date.now(), expiresAt: Date.now() + 90000, status: "pending", payload: { mode: "gateway", targetId: "", proxy: false, restart: false } };
+    const file = path.join(dir, "sync/request.json");
+    for (const patch of [{ version: 2 }, { type: "future.action" }, { expiresAt: 1 }, { payload: { ...message.payload, proxy: "false" } }]) {
+      fs.writeFileSync(file, JSON.stringify({ ...message, ...patch }));
+      await vi.waitFor(() => expect(JSON.parse(fs.readFileSync(file, "utf8")).status).toBe("failed"));
+      expect(JSON.parse(fs.readFileSync(file, "utf8")).error).toMatchObject({ code: "SYNC_FAILED" });
+      fs.unlinkSync(file);
+    }
+    expect(apply).not.toHaveBeenCalled();
+  } finally { await close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("concurrent CLI requests cannot overwrite an active selection, and errors reach the caller", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-sync-busy-"));
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const apply = vi.fn(async () => { await blocked; });
+  const backend: CliBackend = { show: () => "current", choices: () => [], defaults: () => ({ targetId: "", proxy: false, restart: false }), apply };
+  const close = await startCliControl(dir, backend);
+  try {
+    const remote = (await connectCliControl(dir))!;
+    const selection = { mode: "gateway" as const, targetId: "", proxy: false, restart: false };
+    const first = remote.apply(selection);
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
+    const message = JSON.parse(fs.readFileSync(path.join(dir, "sync/request.json"), "utf8"));
+    expect(message).toMatchObject({ version: 1, type: "access-mode.apply", payload: selection, status: "applying" });
+    await expect(remote.apply(selection)).rejects.toThrow(/正在进行/);
+    release(); await first;
+    apply.mockRejectedValueOnce(new Error("配置已应用，但重启失败"));
+    await expect(remote.apply(selection)).rejects.toThrow("配置已应用，但重启失败");
+    expect(fs.existsSync(path.join(dir, "sync/request.json"))).toBe(false);
+  } finally { release(); await close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("restart does not replay a request from the previous instance", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-sync-restart-"));
+  const apply = vi.fn(async () => {});
+  const backend: CliBackend = { show: () => "current", choices: () => [], defaults: () => ({ targetId: "", proxy: false, restart: false }), apply };
+  const close = await startCliControl(dir, backend);
+  const file = path.join(dir, "sync/request.json");
+  await close();
+  fs.writeFileSync(file, JSON.stringify({ version: 1, id: "old", type: "access-mode.apply", status: "applying" }));
+  const closeNew = await startCliControl(dir, backend);
+  try {
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({ status: "failed", error: { code: "INSTANCE_CHANGED" } });
+    expect(apply).not.toHaveBeenCalled();
+    await (await connectCliControl(dir))!.apply({ mode: "gateway", targetId: "", proxy: false, restart: false });
+    expect(apply).toHaveBeenCalledOnce();
+  } finally { await closeNew(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 it("separate installation directories never reuse control metadata or single-instance channels", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-installations-"));
@@ -51,7 +105,8 @@ it("separate installation directories never reuse control metadata or single-ins
   const notified = vi.fn();
   try {
     // Portable copies can include a live instance's old control file.
-    fs.copyFileSync(path.join(first, "cli-control.json"), path.join(second, "cli-control.json"));
+    fs.mkdirSync(path.join(second, "sync"));
+    fs.copyFileSync(path.join(first, "sync/instance.json"), path.join(second, "sync/instance.json"));
     expect(await connectCliControl(second)).toBeNull();
     closeSecond = await startCliControl(second, backend("second", secondApply));
     const a = (await connectCliControl(first))!; const b = (await connectCliControl(second))!;

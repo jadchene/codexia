@@ -87,7 +87,7 @@ let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 let singleInstanceServer: Server | null = null;
-let closeCliControl: (() => Promise<void>) | undefined;
+let closeCliControl: Awaited<ReturnType<typeof startCliControl>> | undefined;
 const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
 const usageResetRefreshAttempts = new Map<string, { resetAt: number; count: number }>();
 let shuttingDown = false;
@@ -316,6 +316,11 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 function createObservableStore(baseStore: Dynamic) {
   return {
     ...baseStore,
+    saveSettings(patch: Dynamic) {
+      const result = baseStore.saveSettings(patch);
+      try { closeCliControl?.refresh(); } catch (error) { console.warn("更新 CLI 配置快照失败", error); }
+      return result;
+    },
     saveAccount(account: Dynamic) {
       const result = baseStore.saveAccount(account);
       notifyDataChanged(["accounts"]);
@@ -923,6 +928,9 @@ function notifyMcpGatewayStatus(status: Dynamic = mcpGateway?.status()) {
 }
 
 function notifyDataChanged(types: Dynamic) {
+  if (types.some((type: string) => ["settings", "accounts", "upstreams", "upstreamModels"].includes(type))) {
+    try { closeCliControl?.refresh(); } catch (error) { console.warn("更新 CLI 配置快照失败", error); }
+  }
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("app:data-changed", Array.from(new Set(types)));
 }

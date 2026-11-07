@@ -81,3 +81,32 @@ Windows 解压包内的 `codexia-cli.cmd` 是独立命令行入口，不需要�
 - 四种模式分别保存自动重启偏好。重启失败会明确提示配置已应用；未选择重启时，已有 Codex 进程可能仍使用旧配置。
 - 开发环境先运行 `npm run build:main`，再使用 `npm run cli -- --version`、`npm run cli -- mode` 或 `npm run cli -- mode switch`。需要隔离测试时，增加 `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex`。
 - CLI 复用桌面应用的数据目录和系统安全存储；它不是无界面服务器版 Electron。Windows 是打包支持平台，其他系统仍需 Electron 可用的运行环境及系统安全存储。
+
+
+### 目录同步消息
+
+运行中的 Codexia 默认监听对应数据目录的 `sync/`，CLI 通过写入 `sync/request.json` 提交接入修改，不再建立专用命令管道或 HTTP API。`sync/instance.json` 保存实例信息及不含密钥的账号/渠道选项快照，单实例模式保留当前用户范围的实例目录登记。
+
+消息使用通用封装，后续功能通过新增 `type` 扩展，业务参数统一放入 `payload`：
+
+```json
+{
+  "version": 1,
+  "id": "每次请求生成的 UUID",
+  "type": "access-mode.apply",
+  "targetInstanceId": "从 sync/instance.json 读取的 instanceId",
+  "createdAt": 1794052800000,
+  "expiresAt": 1794052890000,
+  "status": "pending",
+  "payload": {
+    "mode": "third_party",
+    "targetId": "渠道 ID",
+    "proxy": true,
+    "restart": false
+  }
+}
+```
+
+时间戳为 Unix 毫秒，示例时间需替换为当前时间及有效截止时间。当前仅支持 `access-mode.apply`；`mode` 为 `account`、`openai`、`third_party` 或 `gateway`，`targetId` 为账号/渠道 ID（网关模式为空），网关模式的 `proxy` 固定为 `false`。
+
+Codexia 将状态改为 `applying` 后执行，成功后删除请求文件；失败时写入 `status: "failed"` 和 `error: { "code": "SYNC_FAILED", "message": "错误说明" }`，CLI 读取错误后清理。正在处理的请求不能被覆盖；重启后不自动重放旧请求，避免重复执行 daemon 重启。目录事件为主要触发方式，每秒检查一次请求文件用于补偿丢失的文件事件。发布请求时应先写临时文件，再以不覆盖已有文件的方式发布为 `request.json`；文件中不需要账号 token 或 API key。
