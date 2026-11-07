@@ -3,6 +3,9 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { rcedit } from "rcedit";
+import { buildCli } from "./build-cli.mjs";
+
+if (process.platform !== "win32") throw new Error("Windows packages must be built on Windows with Node.js matching the Electron architecture.");
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -66,11 +69,18 @@ fs.writeFileSync(path.join(appDir, "package.json"), `${JSON.stringify({
   dependencies: { ws: manifest.dependencies.ws }
 }, null, 2)}\n`, "utf8");
 
-fs.copyFileSync(path.join(projectRoot, "scripts", "cli-launcher.cjs"), path.join(outputDir, "codexia-cli.cjs"));
-fs.writeFileSync(path.join(outputDir, "codexia-cli.cmd"), [
-  "@echo off", "setlocal", "set ELECTRON_RUN_AS_NODE=1",
-  '"%~dp0Codexia.exe" "%~dp0codexia-cli.cjs" %*',
-  "exit /b %errorlevel%", ""
-].join("\r\n"), "utf8");
+const cliExecutable = await buildCli(path.join(outputDir, "codexia-cli.exe"));
+await rcedit(cliExecutable, {
+  icon: iconPath,
+  "file-version": manifest.version,
+  "product-version": manifest.version,
+  "version-string": {
+    CompanyName: manifest.author,
+    FileDescription: "Codexia CLI",
+    InternalName: "codexia-cli",
+    OriginalFilename: "codexia-cli.exe",
+    ProductName: "Codexia"
+  }
+});
 
 console.log(`Unpacked application created: ${outputDir}`);

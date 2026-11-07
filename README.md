@@ -59,18 +59,16 @@ Each mode has its own automatic app-server restart switch. After applying config
 
 ### CLI: version and access modes
 
-The Windows unpacked build includes a Node.js entry point, `codexia-cli.cjs`: run `node codexia-cli.cjs --version`, `node codexia-cli.cjs mode`, or `node codexia-cli.cjs mode switch`. No running desktop is required. The entry resolves its real file path, so symlinks still target the original installation, including with `--preserve-symlinks-main`.
-
-The optional `codexia-cli.cmd` shortcut uses Electron’s Node mode and requires no separate Node.js installation. For symlinks, link the `.cjs` file and run it with Node; do not link the `.cmd` shortcut.
+The Windows unpacked build includes `codexia-cli.exe`, a Node.js single executable. Run it directly without installing Node.js or opening the desktop app. Symlinks resolve to the original installation directory; CLI never selects an installation based on the current working directory.
 
 ```powershell
-.\codexia-cli.cmd --version
-.\codexia-cli.cmd mode
-.\codexia-cli.cmd mode switch
-.\codexia-cli.cmd mode switch --mode account --account <account-id> --proxy false --restart true
-.\codexia-cli.cmd mode switch --mode openai --channel <channel-id> --proxy false --restart true
-.\codexia-cli.cmd mode switch --mode third_party --channel <channel-id> --proxy true --restart false
-.\codexia-cli.cmd mode switch --mode gateway --restart true
+.\codexia-cli.exe --version
+.\codexia-cli.exe mode
+.\codexia-cli.exe mode switch
+.\codexia-cli.exe mode switch --mode account --account <account-id> --proxy false --restart true
+.\codexia-cli.exe mode switch --mode openai --channel <channel-id> --proxy false --restart true
+.\codexia-cli.exe mode switch --mode third_party --channel <channel-id> --proxy true --restart false
+.\codexia-cli.exe mode switch --mode gateway --restart true
 ```
 
 `mode` shows the saved mode, detected Codex authentication, proxy/restart preferences and available account/channel IDs. Interactive switching offers accounts or channels of the selected type. Import accounts and configure channels/models in the desktop app first. Tokens and API keys are never printed.
@@ -89,3 +87,5 @@ The extensible request envelope contains `version: 1`, `appVersion: "2.0.0"`, a 
 Currently `access-mode.get` reads the current mode, choices, preferences and gateway state. `access-mode.apply` accepts `{ "mode": "third_party", "targetId": "channel-id", "proxy": true, "restart": false }`. Gateway mode uses an empty target ID and `proxy: false`. Future features register additional methods with their own parameter validation without changing the transport. Unknown methods and incompatible versions never execute writes.
 
 Other installations are ignored even when they run the same version in single-instance mode. Requests remain pinned to the chosen process and are never redirected after it exits or restarts. Inbox request files and the HTTP control service are no longer used; obsolete HTTP configuration keys are removed on startup.
+
+CLI executable packaging uses Node.js SEA and the build-only `postject` dependency. Build Windows releases on Windows with Node.js 24+ matching the Electron architecture. `npm run build:cli` builds only the CLI executable; `npm run test:cli-executable` validates the actual executable. `npm run pack:unpacked` includes it automatically. Linux builds are for executable integration tests only.

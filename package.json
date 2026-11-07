@@ -38,7 +38,9 @@
     "smoke:unpacked:upgrade": "node scripts/prepare-unpacked-legacy-fixture.mjs && node scripts/smoke-unpacked.mjs --expect-legacy-upgrade",
     "check": "node scripts/check-source.mjs",
     "test": "vitest run",
-    "verify": "npm run check && npm run typecheck && npm run test && npm run build"
+    "verify": "npm run check && npm run typecheck && npm run test && npm run build && npm run test:cli-executable",
+    "build:cli": "node scripts/build-cli.mjs",
+    "test:cli-executable": "node scripts/test-cli-executable.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.2",
@@ -60,6 +62,7 @@
     "@vitejs/plugin-react": "6.0.4",
     "electron": "43.8.4",
     "happy-dom": "21.0.4",
+    "postject": "1.0.0-alpha.6",
     "rcedit": "5.0.2",
     "tsup": "8.5.1",
     "typescript": "7.0.2",

@@ -35,23 +35,36 @@ const sandboxReadAccess = spawnSync("icacls.exe", [unpackedRoot, "/grant", "*S-1
 if (sandboxReadAccess.status !== 0) {
   throw new Error(`Cannot grant sandbox read access to the isolated test copy: ${sandboxReadAccess.stderr || sandboxReadAccess.stdout}`);
 }
-const cliLauncher = path.join(unpackedRoot, "codexia-cli.cjs");
-if (!fs.existsSync(path.join(unpackedRoot, "codexia-cli.cmd")) || !fs.existsSync(cliLauncher)) {
+const cliLauncher = path.join(unpackedRoot, "codexia-cli.exe");
+if (!fs.existsSync(cliLauncher)) {
   throw new Error("Packaged CLI launcher is missing.");
 }
-const cliVersion = spawnSync(executable, [cliLauncher, "--version"], {
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8", windowsHide: true, timeout: 15_000
+const cliVersion = spawnSync(cliLauncher, ["--version"], {
+  env: { ...process.env }, encoding: "utf8", windowsHide: true, timeout: 15_000
 });
 const packagedVersion = JSON.parse(fs.readFileSync(path.join(unpackedRoot, "resources", "app", "package.json"), "utf8")).version;
 if (cliVersion.status !== 0 || cliVersion.stdout.trim() !== `Codexia ${packagedVersion}`) {
   throw new Error(`Packaged CLI version failed: ${cliVersion.stderr || cliVersion.stdout}`);
 }
 
-const nodeCliHelp = spawnSync(process.execPath, [cliLauncher, "--help"], {
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: "" }, encoding: "utf8", windowsHide: true, timeout: 15_000
-});
-if (nodeCliHelp.status !== 0 || !nodeCliHelp.stdout.includes("mode")) {
-  throw new Error(`Node CLI help failed: ${nodeCliHelp.stderr || nodeCliHelp.stdout}`);
+// Junctions do not require Windows Developer Mode and exercise real installation resolution.
+const linkedInstallation = path.join(smokeRoot, "cli-linked-installation");
+fs.symlinkSync(unpackedRoot, linkedInstallation, "junction");
+for (const entry of [cliLauncher, path.join(linkedInstallation, "codexia-cli.exe")]) {
+  const cliHelp = spawnSync(entry, ["--help"], {
+    cwd: smokeHome, env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
+    encoding: "utf8", windowsHide: true, timeout: 15_000
+  });
+  if (cliHelp.status !== 0 || !cliHelp.stdout.includes("mode")) {
+    throw new Error(`Executable CLI help failed: ${cliHelp.stderr || cliHelp.stdout}`);
+  }
+  const invalid = spawnSync(entry, ["unknown-command"], {
+    cwd: smokeHome, env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
+    encoding: "utf8", windowsHide: true, timeout: 15_000
+  });
+  if (invalid.status !== 1 || !invalid.stderr.includes("codexia-cli --help")) {
+    throw new Error(`Executable CLI error forwarding failed: ${invalid.stderr || invalid.stdout}`);
+  }
 }
 
 const debuggingPort = await freePort();

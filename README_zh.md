@@ -57,14 +57,12 @@ MIT. See [LICENSE](LICENSE).
 
 ### 命令行：版本与接入模式
 
-Windows 解压包提供 Node.js 入口 `codexia-cli.cjs`，可直接执行 `node codexia-cli.cjs --version`、`node codexia-cli.cjs mode` 或 `node codexia-cli.cjs mode switch`，无需先打开桌面应用。入口解析自身真实路径，因此软链接到其他目录后仍操作原安装目录的实例；即使使用 `--preserve-symlinks-main` 也一样。
-
-同时保留 `codexia-cli.cmd` 作为 Windows 快捷入口，借用 Electron 的 Node 模式，不需要额外安装 Node.js。需要软链接时请链接 `.cjs` 文件并用 Node 执行，不要链接 `.cmd`。
+Windows 解压包提供 `codexia-cli.exe`，将 Node.js 运行时与 CLI 入口打包成独立可执行文件，直接运行，无需安装 Node.js 或先打开桌面应用。软链接执行时会解析回原安装目录，不会根据当前工作目录选择实例。
 
 ```powershell
-.\codexia-cli.cmd --version
-.\codexia-cli.cmd mode
-.\codexia-cli.cmd mode switch
+.\codexia-cli.exe --version
+.\codexia-cli.exe mode
+.\codexia-cli.exe mode switch
 ```
 
 `mode` 显示已保存的接入模式、Codex 认证识别结果、代理和重启选项，以及可选账号／渠道的 ID。`mode switch` 依次选择四种接入模式、账号或对应类型的 API 渠道、是否启用网关代理、是否在应用后重启 Codex daemon app-server。账号和渠道需先在桌面应用中导入／配置，命令不会输出 Token 或 API Key。
@@ -72,10 +70,10 @@ Windows 解压包提供 Node.js 入口 `codexia-cli.cjs`，可直接执行 `node
 也可以提供完整参数，无需交互：
 
 ```powershell
-.\codexia-cli.cmd mode switch --mode account --account <账号ID> --proxy false --restart true
-.\codexia-cli.cmd mode switch --mode openai --channel <官方渠道ID> --proxy false --restart true
-.\codexia-cli.cmd mode switch --mode third_party --channel <第三方渠道ID> --proxy true --restart false
-.\codexia-cli.cmd mode switch --mode gateway --restart true
+.\codexia-cli.exe mode switch --mode account --account <账号ID> --proxy false --restart true
+.\codexia-cli.exe mode switch --mode openai --channel <官方渠道ID> --proxy false --restart true
+.\codexia-cli.exe mode switch --mode third_party --channel <第三方渠道ID> --proxy true --restart false
+.\codexia-cli.exe mode switch --mode gateway --restart true
 ```
 
 - 直连切换不会启动桌面应用；命令结束仅退出命令行进程，已经运行的 Codexia 保持运行。
@@ -109,3 +107,5 @@ CLI 与同目录 Codexia 使用 Windows 命名管道或 Unix Socket 通信，无
 CLI 自动附加实例目录和临时令牌。响应包含同一 `id`、`version`、`appVersion`、`ok`，以及成功的 `result` 或失败的 `error: { code, message }`。当前方法为 `access-mode.get` 和 `access-mode.apply`；后续功能通过注册新方法及参数校验扩展，无需改动传输协议。未知方法、协议版本或应用版本不一致时不会执行修改。
 
 CLI 不会把请求转给其他目录的实例；即使另一目录运行着同版本单实例 Codexia，也仍按本目录实例未启动处理。已选中的实例退出或重启后，请求不会自动转发到新进程。旧的 `inbox` 请求文件和 HTTP API 不再使用；启动时清理已废弃的外部 API 配置项。
+
+CLI 可执行文件使用 Node.js SEA 与仅构建时依赖 `postject` 生成。Windows 发布包须在 Windows 上使用与 Electron 架构一致的 Node.js 24+ 构建。`npm run build:cli` 单独构建 CLI，`npm run test:cli-executable` 验证实际可执行文件，`npm run pack:unpacked` 会自动包含 EXE。Linux 构建仅用于可执行文件集成测试。

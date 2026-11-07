@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// Also runs with Electron's Node mode when launched by the optional Windows shim.
+// Shared by the development launcher and the packaged Node single executable.
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 // Resolve the entry file itself, including --preserve-symlinks-main invocations.
-const launcher = fs.realpathSync(__filename);
-const packaged = path.basename(launcher) === 'codexia-cli.cjs';
+const sea = require('node:sea');
+const standalone = sea.isSea();
+const launcher = fs.realpathSync(standalone ? process.execPath : __filename);
+const packaged = standalone || path.basename(launcher) === 'codexia-cli.cjs';
 const installation = path.dirname(launcher);
 const root = packaged ? path.join(installation, 'resources', 'app') : path.resolve(installation, '..');
-const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const manifest = JSON.parse(standalone ? sea.getAsset('manifest', 'utf8') : fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const args = process.argv.slice(2);
 if (args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) {
   console.log(`Codexia ${manifest.version}`);
