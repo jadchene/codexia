@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { createStore } from "../src/main/store.ts";
-import { createRequestLogWriter } from "../src/main/request-log-writer.ts";
+import { createRequestLogWriter, createMonitorLogWriter } from "../src/main/request-log-writer.ts";
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 function fixture() {
@@ -49,5 +49,42 @@ test("worker write failures reject flush without failing enqueue", async () => {
   store.db.exec("DROP TABLE request_logs");
   expect(writer.enqueue({ method: "POST" })).toBe(true);
   await expect(writer.flush()).rejects.toThrow(/写入失败/);
+  expect(writer.enqueue({ method: "POST" })).toBe(false);
+});
+
+test("commit notifications observe persisted rows and cannot break the writer", async () => {
+  const { store } = fixture();
+  const counts: number[] = [];
+  const writer = createRequestLogWriter(store.paths.dbPath, vi.fn(), () => {
+    counts.push(Number(store.db.prepare("SELECT COUNT(*) AS n FROM request_logs").get()!.n));
+    throw new Error("UI notification failure");
+  });
+  try {
+    writer.enqueue({ method: "POST" });
+    await writer.flush();
+    writer.enqueue({ method: "POST" });
+    await writer.flush();
+    expect(counts).toEqual([1, 2]);
+  } finally { await writer.close(); }
+});
+
+test("monitor recovers after a write failure without blocking historical reads", async () => {
+  const { store } = fixture();
+  const committed = vi.fn();
+  const writer = createMonitorLogWriter(store.paths.dbPath, committed, vi.fn());
+  try {
+    writer.enqueue({ method: "POST", total_tokens: 3 });
+    await writer.flush();
+    store.db.exec("ALTER TABLE request_logs RENAME TO saved_request_logs");
+    writer.enqueue({ method: "POST", total_tokens: 5 });
+    await expect(writer.flush()).resolves.toBeUndefined();
+    expect(committed).toHaveBeenCalledTimes(1);
+    store.db.exec("ALTER TABLE saved_request_logs RENAME TO request_logs");
+    expect(store.db.prepare("SELECT total_tokens FROM request_logs").get()).toMatchObject({ total_tokens: 3 });
+    expect(writer.enqueue({ method: "POST", total_tokens: 7 })).toBe(true);
+    await writer.flush();
+    expect(committed).toHaveBeenCalledTimes(2);
+    expect(store.db.prepare("SELECT SUM(total_tokens) AS n FROM request_logs").get()).toMatchObject({ n: 10 });
+  } finally { await writer.close(); }
   expect(writer.enqueue({ method: "POST" })).toBe(false);
 });

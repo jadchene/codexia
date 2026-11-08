@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 import type { Settings } from "../shared/contracts/settings";
 
 interface CodexPathOptions {
@@ -161,10 +162,28 @@ export function readCodexAccountTokens(account: AccountRecord, options: CodexPat
   };
 }
 
+/** Auth on disk determines ownership even after switching accounts outside Codexia. */
+export function readCodexOwnedAccountTokens(account: AccountRecord, settings: Settings, accounts: AccountRecord[], options: CodexPathOptions = {}) {
+  const detected = detectCodexAuthMode(settings, accounts, options);
+  if (detected.mode === "unknown") {
+    const tokens = readJsonSafe(authPath(options))?.tokens;
+    const workspace = tokens?.account_id;
+    if ((tokens?.access_token || tokens?.refresh_token) && workspace
+      && (account.account_id === workspace || account.workspace_id === workspace)
+      && accounts.filter((item) => item.account_id === workspace || item.workspace_id === workspace).length > 1) {
+      throw new Error("同一工作区存在多个账号，无法确认 Codex token 归属；请重新导入当前账号，Codexia 不会刷新这些账号的 token。");
+    }
+  }
+  const owner = detected.mode === "account" ? detected.accountId
+    : detected.mode === "unknown" && settings.codex_auth_mode === "account" ? settings.codex_selected_account_id : "";
+  // If the configured owner's auth is unreadable, fail closed instead of redeeming its stale refresh token.
+  return owner === account.id ? readCodexAccountTokens(account, options) : null;
+}
+
 export function applyApiMode(channel: {
   id: string; baseUrl: string; apiKey: string; supportsWebSocket: boolean;
   requestHeaders: Record<string, string>;
-}, options: CodexPathOptions = {}) {
+}, options: CodexPathOptions & { modelCatalogContent?: string } = {}) {
   if (!channel.apiKey) throw new Error("所选渠道未配置 API Key。");
   const url = new URL(channel.baseUrl);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
@@ -186,6 +205,7 @@ export function applyApiMode(channel: {
   ].join("\n");
   const next = insertProviderBlockIntoConfig(clean, block);
   writeFilesTransaction([
+    ...(options.modelCatalogContent === undefined ? [] : [{ file: managedModelCatalogPath(options), content: options.modelCatalogContent }]),
     { file: authPath(options), content: jsonText({ OPENAI_API_KEY: channel.apiKey }) },
     { file: configPath(options), content: next }
   ]);
@@ -215,9 +235,7 @@ export function nextGatewayConfig(current: unknown, settings: Settings, options:
 }
 
 export function gatewayProviderBlock(settings: Settings, options: CodexPathOptions = {}): string {
-  const host = gatewayProviderBaseHost(settings.gateway_host);
-  const port = settings.gateway_port || "8436";
-  const baseUrl = `http://${host}:${port}/v1`;
+  const baseUrl = accountModeGatewayBaseUrl(settings);
   const catalog = `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`;
   if (useOpenaiBaseUrl(settings)) {
     return [
@@ -237,12 +255,6 @@ export function gatewayProviderBlock(settings: Settings, options: CodexPathOptio
     "supports_websockets = true",
     ""
   ].join("\n");
-}
-
-function gatewayProviderBaseHost(host: unknown): string {
-  const value = String(host || "").trim();
-  if (!value || value === "0.0.0.0") return "localhost";
-  return value;
 }
 
 export function replaceGatewayProviderBlock(current: unknown, block: unknown): string {
@@ -328,11 +340,11 @@ export function detectCodexAuthMode(settings: Settings, accounts: AccountRecord[
   const refreshToken = String(tokens.refresh_token || "").trim();
   const accessToken = String(tokens.access_token || "").trim();
   if (auth?.auth_mode === "chatgpt" || refreshToken || accessToken || tokenAccountId) {
-    const account = accounts.find((item) => {
-      return (refreshToken && item.refresh_token === refreshToken)
-        || (accessToken && item.access_token === accessToken)
-        || (tokenAccountId && (item.account_id === tokenAccountId || item.workspace_id === tokenAccountId));
-    });
+    // A workspace may contain several users; exact credentials take precedence over its shared ID.
+    const exact = accounts.find((item) => (refreshToken && item.refresh_token === refreshToken)
+      || (accessToken && item.access_token === accessToken));
+    const workspaceMatches = accounts.filter((item) => tokenAccountId && (item.account_id === tokenAccountId || item.workspace_id === tokenAccountId));
+    const account = exact || (workspaceMatches.length === 1 ? workspaceMatches[0] : undefined);
     if (account) return { mode: "account", accountId: account.id };
   }
 

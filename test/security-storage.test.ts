@@ -807,3 +807,18 @@ test("request outcome filters match list and summary across HTTP status boundari
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("all four restart switches survive the renderer settings boundary and SQLite persistence", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-restart-settings-"));
+  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
+  try {
+    const patch = Object.fromEntries(["gateway", "account", "openai", "third_party"].map((mode) => [`${mode}_auto_restart_app_server`, "true"]));
+    store.saveSettings(editableSettingsPatch(patch));
+    for (const key of Object.keys(patch)) {
+      assert.equal(store.getSettings()[key], "true");
+      assert.throws(() => editableSettingsPatch({ [key]: "invalid" }));
+    }
+    store.saveSettings(editableSettingsPatch(Object.fromEntries(Object.keys(patch).map((key) => [key, "false"]))));
+    for (const key of Object.keys(patch)) assert.equal(store.getSettings()[key], "false");
+  } finally { store.db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});

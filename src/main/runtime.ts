@@ -1,6 +1,6 @@
-import { createRequestLogWriter } from "./request-log-writer.ts";
+import { createMonitorLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
-import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
+import { applyApiMode, readCodexOwnedAccountTokens } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 
 type Dynamic = any;
@@ -73,7 +73,7 @@ if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
 let store!: ReturnType<typeof createStore>;
-let monitorLogWriter: ReturnType<typeof createRequestLogWriter> | undefined;
+let monitorLogWriter: ReturnType<typeof createMonitorLogWriter> | undefined;
 let gateway!: ReturnType<typeof createGateway>;
 let mcpGateway!: ReturnType<typeof createMcpGatewayService>;
 let authService!: ReturnType<typeof createAuthService>;
@@ -226,7 +226,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   gateway = createGateway(store, authService, {
     addMonitorTokenLog: (entry: Record<string, unknown>) => {
-      monitorLogWriter ??= createRequestLogWriter(store.paths.dbPath);
+      monitorLogWriter ??= createMonitorLogWriter(store.paths.dbPath, () => notifyDataChanged(["tokenLogs", "tokenSummary"]));
       return monitorLogWriter.enqueue(entry);
     },
     refreshAllUsage,
@@ -574,13 +574,13 @@ function registerIpc() {
     const models = upstreamService.listModels(upstreamId).filter((model) => model.available);
     if (!models.length) throw new Error("渠道没有可用模型，请先配置模型目录。");
     const catalogPath = path.join(store.paths.dataDir, "api-models.json");
-    writeFilesTransaction([{ file: catalogPath, content: JSON.stringify({ models: models.map((model) => ({
+    const modelCatalogContent = JSON.stringify({ models: models.map((model) => ({
       ...model.metadata, slug: model.modelId, display_name: model.displayName,
       prefer_websockets: channel.supportsWebSocket, supports_websockets: channel.supportsWebSocket
-    })) }, null, 2) }]);
+    })) }, null, 2);
     if (useApiProxy) await startGateway("api-proxy");
     syncLeavingCodexAccount();
-    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath,
+    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath, modelCatalogContent,
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {}) });
     store.saveSettings({ codex_auth_mode: mode, codex_selected_account_id: "", codex_selected_upstream_id: upstreamId,
       [`${mode}_selected_upstream_id`]: upstreamId, [`${mode}_use_api_proxy`]: String(useApiProxy) });
@@ -1628,17 +1628,18 @@ async function restartAppliedDaemon(mode: string) {
 
 function syncLeavingCodexAccount() {
   const settings = store.getSettings();
-  if (settings.codex_auth_mode !== "account") return;
-  const account = store.listAccounts().find((item: Dynamic) => item.id === settings.codex_selected_account_id);
+  const accounts = store.listAccounts();
+  const detected = detectCodexAuthMode(settings, accounts as Parameters<typeof detectCodexAuthMode>[1], codexAccessOptions(runtimeProfile));
+  const ownerId = detected.mode === "account" ? detected.accountId : settings.codex_auth_mode === "account" ? settings.codex_selected_account_id : "";
+  const account = accounts.find((item: Dynamic) => item.id === ownerId);
   if (!account) return;
   try { syncCodexOwnedAccount(account); }
   catch (error) { store.addAppLog({ scope: "auth", action: "sync-codex-auth", status: "failed", message: String(error) }); }
 }
 
 function syncCodexOwnedAccount(account: Dynamic) {
-  const settings = store.getSettings();
-  if (settings.codex_auth_mode !== "account" || settings.codex_selected_account_id !== account.id) return account;
-  return store.saveAccount({ ...account, ...readCodexAccountTokens(account, codexAccessOptions(runtimeProfile)) });
+  const tokens = readCodexOwnedAccountTokens(account, store.getSettings(), store.listAccounts() as Parameters<typeof readCodexOwnedAccountTokens>[2], codexAccessOptions(runtimeProfile));
+  return tokens ? store.saveAccount({ ...account, ...tokens }) : account;
 }
 
 async function refreshAccessToken(account: Dynamic, refreshSubscription = false) {

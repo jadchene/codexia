@@ -4,7 +4,7 @@ import { Worker } from "node:worker_threads";
 type Entry = Record<string, unknown>;
 
 /** One bounded queue and one in-flight batch: disk stalls never block forwarding. */
-export function createRequestLogWriter(dbPath: string, onError: (message: string) => void = console.warn) {
+export function createRequestLogWriter(dbPath: string, onError: (message: string) => void = console.warn, onCommitted: () => void = () => {}) {
   const bundled = new URL("./request-log-worker.mjs", import.meta.url);
   const worker = new Worker(existsSync(bundled) ? bundled : new URL("./request-log-worker.ts", import.meta.url), { workerData: { dbPath } });
   const queue: { entry: Entry; bytes: number; sequence: number }[] = [];
@@ -44,6 +44,7 @@ export function createRequestLogWriter(dbPath: string, onError: (message: string
     clearTimeout(deadline);
     if (!message.ok) { fail("监控日志批量写入失败，待写日志未确认；请求转发不受影响。"); return; }
     acknowledged = inFlight; inFlight = 0;
+    try { onCommitted(); } catch {}
     for (let i = waiters.length - 1; i >= 0; i--) {
       if (waiters[i]!.sequence <= acknowledged) waiters.splice(i, 1)[0]!.resolve();
     }
@@ -60,6 +61,7 @@ export function createRequestLogWriter(dbPath: string, onError: (message: string
     return result;
   };
   return {
+    get failed() { return Boolean(failed); },
     enqueue(entry: Entry): boolean {
       if (closed || failed) return false;
       const snapshot = { ...entry, created_at: entry.created_at ?? Math.floor(Date.now() / 1000) };
@@ -77,6 +79,29 @@ export function createRequestLogWriter(dbPath: string, onError: (message: string
       closed = true;
       try { await flush(); }
       finally { clearTimeout(timer); clearTimeout(deadline); await worker.terminate(); }
+    }
+  };
+}
+
+/** Recover on subsequent requests; a failed write must not hide historical logs. */
+export function createMonitorLogWriter(dbPath: string, onCommitted: () => void, onError: (message: string) => void = console.warn) {
+  let writer: ReturnType<typeof createRequestLogWriter> | undefined;
+  let closed = false;
+  return {
+    enqueue(entry: Entry): boolean {
+      if (closed) return false;
+      if (writer?.failed) writer = undefined;
+      writer ??= createRequestLogWriter(dbPath, onError, onCommitted);
+      return writer.enqueue(entry);
+    },
+    async flush() {
+      const current = writer;
+      try { await current?.flush(); }
+      catch { if (writer === current) writer = undefined; }
+    },
+    async close() {
+      closed = true;
+      await writer?.close();
     }
   };
 }
