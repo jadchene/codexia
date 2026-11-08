@@ -807,35 +807,3 @@ test("request outcome filters match list and summary across HTTP status boundari
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
-
-test("retiring the control HTTP service removes only its obsolete settings", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-retire-control-api-"));
-  const options = { secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") };
-  let store = createStore(options);
-  try {
-    const gatewayKey = store.getSettings().gateway_api_key;
-    store.saveSettings({ control_api_host: "0.0.0.0", control_api_port: "8437", control_api_key: "obsolete-key", codex_auth_mode: "gateway" });
-    assert.equal(publicSettings(store.getSettings()).control_api_key, undefined);
-    store.db.close(); store = createStore(options);
-    assert.equal(store.getSettings().control_api_key, undefined);
-    assert.equal(store.getSettings().control_api_host, undefined);
-    assert.equal(store.getSettings().control_api_port, undefined);
-    assert.equal(store.getSettings().gateway_api_key, gatewayKey);
-    assert.equal(store.getSettings().codex_auth_mode, "gateway");
-  } finally { store.db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
-});
-
-test("all four restart switches survive the renderer settings boundary and SQLite persistence", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-restart-settings-"));
-  const store = createStore({ secretCodec: testSecretCodec(), dataDir: directory, dbPath: path.join(directory, "test.sqlite") });
-  try {
-    const patch = Object.fromEntries(["gateway", "account", "openai", "third_party"].map((mode) => [`${mode}_auto_restart_app_server`, "true"]));
-    store.saveSettings(editableSettingsPatch(patch));
-    for (const key of Object.keys(patch)) {
-      assert.equal(store.getSettings()[key], "true");
-      assert.throws(() => editableSettingsPatch({ [key]: "invalid" }));
-    }
-    store.saveSettings(editableSettingsPatch(Object.fromEntries(Object.keys(patch).map((key) => [key, "false"]))));
-    for (const key of Object.keys(patch)) assert.equal(store.getSettings()[key], "false");
-  } finally { store.db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
-});

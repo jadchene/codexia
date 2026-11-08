@@ -1,9 +1,6 @@
-import { createAccountRefreshService } from "./account-refresh.ts";
-import { startCliControl } from "./cli-control.ts";
-import { createCliAccess } from "./cli-access.ts";
-import { createMonitorLogWriter } from "./request-log-writer.ts";
+import { createRequestLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
-import { applyApiMode } from "./codex-cli-auth.ts";
+import { applyApiMode, readCodexAccountTokens, writeFilesTransaction } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 
 type Dynamic = any;
@@ -31,7 +28,8 @@ import { createSubscriptionTests } from "./upstreams/subscription-tests.ts";
 import type { GatewayAccount } from "./selection.ts";
 import { createCodexModelCatalogService, parseBundledOverrideCatalog } from "./codex-model-catalog.ts";
 import { createSubscriptionModelFetcher, type ModelAccount } from "./subscription-models.ts";
-import { createAuthService, accountFromTokens } from "./auth.ts";
+import { createAuthService, accountFromTokens, subscriptionFromTokens } from "./auth.ts";
+import { normalizeUsagePayload, normalizeResetCreditsPayload } from "./quota.ts";
 import {
   buildConsumeRequestBody,
   isConsumeSuccess,
@@ -75,10 +73,9 @@ if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
 let store!: ReturnType<typeof createStore>;
-let monitorLogWriter: ReturnType<typeof createMonitorLogWriter> | undefined;
+let monitorLogWriter: ReturnType<typeof createRequestLogWriter> | undefined;
 let gateway!: ReturnType<typeof createGateway>;
 let mcpGateway!: ReturnType<typeof createMcpGatewayService>;
-let accountRefreshService!: ReturnType<typeof createAccountRefreshService>;
 let authService!: ReturnType<typeof createAuthService>;
 let upstreamService!: ReturnType<typeof createUpstreamService>;
 let modelCatalogService!: ReturnType<typeof createCodexModelCatalogService>;
@@ -88,7 +85,6 @@ let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshCoordinator: ReturnType<typeof createUsageRefreshCoordinator> | null = null;
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
 let singleInstanceServer: Server | null = null;
-let closeCliControl: Awaited<ReturnType<typeof startCliControl>> | undefined;
 const usageResetTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; resetAt: number }>();
 const usageResetRefreshAttempts = new Map<string, { resetAt: number; count: number }>();
 let shuttingDown = false;
@@ -104,12 +100,10 @@ function handleSecondInstance() {
   showMainWindow();
 }
 
-app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
-  if (!(additionalData as { cli?: boolean })?.cli) handleSecondInstance();
-});
+app.on("second-instance", handleSecondInstance);
 
 const singleInstanceChannel = useSingleInstance && hasSingleInstanceLock
-  ? acquireSingleInstanceChannel({ ...(runtimeProfile.isolated ? { instanceDirectory: runtimeProfile.paths!.dataDir } : {}), onSecondInstance: handleSecondInstance })
+  ? acquireSingleInstanceChannel({ onSecondInstance: handleSecondInstance })
   : Promise.resolve({ primary: true, endpoint: null, server: null });
 
 async function createWindow() {
@@ -160,8 +154,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     ? { secretCodec, dataDir: runtimeProfile.paths.dataDir, dbPath: runtimeProfile.paths.dbPath }
     : { secretCodec };
   store = createObservableStore(createStore(storeOptions));
-  accountRefreshService = createAccountRefreshService({ store, codexOptions: codexAccessOptions(runtimeProfile),
-    onUsageRefreshed: (account) => scheduleUsageResetRefresh(account, "usage-refresh") });
   if (runtimeProfile.isolated) {
     const isolatedPaths = runtimeProfile.paths;
     if (!isolatedPaths) throw new Error("隔离开发配置缺少专用运行目录。");
@@ -234,7 +226,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   gateway = createGateway(store, authService, {
     addMonitorTokenLog: (entry: Record<string, unknown>) => {
-      monitorLogWriter ??= createMonitorLogWriter(store.paths.dbPath, () => notifyDataChanged(["tokenLogs", "tokenSummary"]));
+      monitorLogWriter ??= createRequestLogWriter(store.paths.dbPath);
       return monitorLogWriter.enqueue(entry);
     },
     refreshAllUsage,
@@ -250,17 +242,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
-  if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) closeCliControl = await startCliControl(store.paths.dataDir, { ...createCliAccess({
-    store, upstreams: upstreamService, catalog: modelCatalogService, accountRefresh: accountRefreshService,
-    codexOptions: codexAccessOptions(runtimeProfile),
-    onApplied: () => { notifyDataChanged(["settings", "accounts", "upstreams", "upstreamModels"]); updateTrayMenu(); },
-    restart: async (options) => { await restartCodexDaemon(options); }
-  }), gatewayRunning: () => gateway.status().running }, {
-    appVersion: app.getVersion()
-  }).catch((error: Error) => {
-    store.addAppLog({ level: "error", scope: "cli", action: "start", status: "failed", message: `进程通信服务启动失败：${error.message}` });
-    return undefined;
-  });
   scheduleUsageRefresh("startup");
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
@@ -593,13 +574,13 @@ function registerIpc() {
     const models = upstreamService.listModels(upstreamId).filter((model) => model.available);
     if (!models.length) throw new Error("渠道没有可用模型，请先配置模型目录。");
     const catalogPath = path.join(store.paths.dataDir, "api-models.json");
-    const modelCatalogContent = JSON.stringify({ models: models.map((model) => ({
+    writeFilesTransaction([{ file: catalogPath, content: JSON.stringify({ models: models.map((model) => ({
       ...model.metadata, slug: model.modelId, display_name: model.displayName,
       prefer_websockets: channel.supportsWebSocket, supports_websockets: channel.supportsWebSocket
-    })) }, null, 2);
+    })) }, null, 2) }]);
     if (useApiProxy) await startGateway("api-proxy");
     syncLeavingCodexAccount();
-    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath, modelCatalogContent,
+    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath,
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {}) });
     store.saveSettings({ codex_auth_mode: mode, codex_selected_account_id: "", codex_selected_upstream_id: upstreamId,
       [`${mode}_selected_upstream_id`]: upstreamId, [`${mode}_use_api_proxy`]: String(useApiProxy) });
@@ -1031,8 +1012,6 @@ function syncDetectedCodexAuthMode() {
 async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
   if (shuttingDown) return;
   shuttingDown = true;
-  await closeCliControl?.();
-  closeCliControl = undefined;
   if (usageRefreshTimer) {
     clearInterval(usageRefreshTimer);
     usageRefreshTimer = null;
@@ -1352,7 +1331,43 @@ async function checkStaleQuotasOnStartup() {
 }
 
 async function refreshUsage(id: Dynamic) {
-  return accountRefreshService.refreshUsage(id);
+  let account = store.listAccounts().find((item: Dynamic) => item.id === id);
+  if (!account) throw new Error("Account not found.");
+  const endpoints = [
+    "https://chatgpt.com/backend-api/wham/usage"
+    // "https://chatgpt.com/backend-api/codex/usage" currently returns 403 HTML for account tokens.
+  ];
+  const resetCreditsEndpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (const endpoint of endpoints) {
+      try {
+        const [usagePayload, resetCreditsPayload] = await Promise.all([
+          requestJson(endpoint, account),
+          requestJson(resetCreditsEndpoint, account)
+        ]);
+        const usage = {
+          ...normalizeUsagePayload(usagePayload),
+          ...normalizeResetCreditsPayload(resetCreditsPayload)
+        };
+        store.updateUsage(id, usage);
+        const refreshed = store.listAccounts().find((item: Dynamic) => item.id === id);
+        if (!refreshed) throw new Error("Account disappeared after refreshing usage.");
+        scheduleUsageResetRefresh(refreshed, "usage-refresh");
+        return refreshed;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!shouldRefreshForUsageError(lastError) || !account.refresh_token) break;
+    try {
+      const refreshed = await refreshAccessToken(account);
+      account = store.saveAccount({ ...account, ...refreshed });
+    } catch (refreshError: Dynamic) {
+      throw new Error(`刷新 token 失败：${refreshError.message}`);
+    }
+  }
+  throw lastError || new Error("Usage refresh failed.");
 }
 
 const pendingResetCreditConsumes = new Set<string>();
@@ -1581,6 +1596,29 @@ async function refreshGatewayAccountToken(accountId: Dynamic) {
   return saved;
 }
 
+async function requestJson(endpoint: Dynamic, account: Dynamic) {
+  account = syncCodexOwnedAccount(account);
+  const timeoutMs = usageRefreshTimeoutMs();
+  const resp = await fetch(endpoint, {
+    headers: {
+      authorization: `Bearer ${account.access_token}`,
+      "ChatGPT-Account-Id": account.account_id || account.workspace_id || "",
+      accept: "application/json",
+      "user-agent": "codex_cli_rs/0.136.0",
+      origin: "https://chatgpt.com",
+      referer: "https://chatgpt.com/"
+    },
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  const text = await resp.text();
+  if (!resp.ok) {
+    const hint = looksLikeHtml(text) ? "HTML response, possible Cloudflare/auth challenge" : text.slice(0, 240);
+    const error: Dynamic = new Error(`${resp.status} ${hint}`);
+    error.status = resp.status;
+    throw error;
+  }
+  return JSON.parse(text);
+}
 
 async function restartAppliedDaemon(mode: string) {
   if (store.getSettings()[`${mode}_auto_restart_app_server`] === "true") {
@@ -1590,21 +1628,43 @@ async function restartAppliedDaemon(mode: string) {
 
 function syncLeavingCodexAccount() {
   const settings = store.getSettings();
-  const accounts = store.listAccounts();
-  const detected = detectCodexAuthMode(settings, accounts as Parameters<typeof detectCodexAuthMode>[1], codexAccessOptions(runtimeProfile));
-  const ownerId = detected.mode === "account" ? detected.accountId : settings.codex_auth_mode === "account" ? settings.codex_selected_account_id : "";
-  const account = accounts.find((item: Dynamic) => item.id === ownerId);
+  if (settings.codex_auth_mode !== "account") return;
+  const account = store.listAccounts().find((item: Dynamic) => item.id === settings.codex_selected_account_id);
   if (!account) return;
   try { syncCodexOwnedAccount(account); }
   catch (error) { store.addAppLog({ scope: "auth", action: "sync-codex-auth", status: "failed", message: String(error) }); }
 }
 
 function syncCodexOwnedAccount(account: Dynamic) {
-  return accountRefreshService.syncAccount(account);
+  const settings = store.getSettings();
+  if (settings.codex_auth_mode !== "account" || settings.codex_selected_account_id !== account.id) return account;
+  return store.saveAccount({ ...account, ...readCodexAccountTokens(account, codexAccessOptions(runtimeProfile)) });
 }
 
 async function refreshAccessToken(account: Dynamic, refreshSubscription = false) {
-  return accountRefreshService.refreshToken(account.id, refreshSubscription);
+  const owned = syncCodexOwnedAccount(account);
+  if (owned !== account) return { ...owned, ...(refreshSubscription ? subscriptionFromTokens(owned) : {}) };
+  const body = new URLSearchParams({
+    client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+    grant_type: "refresh_token",
+    refresh_token: account.refresh_token
+  });
+  const resp = await fetch("https://auth.openai.com/oauth/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+    signal: AbortSignal.timeout(usageRefreshTimeoutMs())
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`${resp.status} ${text.slice(0, 240)}`);
+  const data = JSON.parse(text);
+  return {
+    access_token: data.access_token || account.access_token,
+    refresh_token: data.refresh_token || account.refresh_token,
+    id_token: data.id_token || account.id_token,
+    ...(refreshSubscription ? subscriptionFromTokens(data) : {}),
+    last_refresh: new Date().toISOString()
+  };
 }
 
 function usageRefreshTimeoutMs() {
@@ -1614,4 +1674,8 @@ function usageRefreshTimeoutMs() {
 
 function shouldRefreshForUsageError(error: Dynamic) {
   return error?.status === 401 || error?.status === 403 || /^(401|403)\b/.test(String(error?.message || ""));
+}
+
+function looksLikeHtml(value: Dynamic) {
+  return /^\s*<!doctype html|^\s*<html/i.test(String(value || ""));
 }

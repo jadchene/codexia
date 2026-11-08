@@ -23,7 +23,6 @@ export function readSingleInstanceSetting(dbPath: string): boolean {
 
 interface SingleInstanceOptions {
   userIdentity?: string;
-  instanceDirectory?: string;
   platform?: NodeJS.Platform;
   tempDir?: string;
   endpoint?: string;
@@ -38,17 +37,9 @@ interface SingleInstanceChannel {
   server: Server | null;
 }
 
-/** Canonical installation data directory: aliases share an owner, separate copies do not. */
-export function canonicalInstanceDirectory(directory: string): string {
-  let resolved = path.resolve(directory);
-  try { resolved = fs.realpathSync.native(resolved); } catch { /* Directory may not exist yet. */ }
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}
-
 export function singleInstanceEndpoint(options: SingleInstanceOptions = {}): string {
   const identity = String(options.userIdentity || `${os.homedir()}\0${os.userInfo().username}`);
-  const scope = options.instanceDirectory ? `${identity}\0${canonicalInstanceDirectory(options.instanceDirectory)}` : identity;
-  const suffix = createHash("sha256").update(scope).digest("hex").slice(0, 16);
+  const suffix = createHash("sha256").update(identity).digest("hex").slice(0, 16);
   if ((options.platform || process.platform) === "win32") return `\\\\.\\pipe\\codex-gateway-${suffix}`;
   return path.join(options.tempDir || os.tmpdir(), `codex-gateway-${suffix}.sock`);
 }

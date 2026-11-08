@@ -69,9 +69,6 @@ export const CodexIntegrationPage = ({
     setAccountId(settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "");
     setGatewayConfigMode(gatewayConfigModeFromSettings(settings));
     setUseApiProxy(settings.account_mode_use_api_proxy === "true");
-    setApiChannel({ openai: settings.openai_selected_upstream_id || "", third_party: settings.third_party_selected_upstream_id || "" });
-    setApiProxy({ openai: settings.openai_use_api_proxy === "true", third_party: settings.third_party_use_api_proxy === "true" });
-    setAutoRestart(Object.fromEntries(Object.keys(modeLabels).map((key) => [key, settings[`${key}_auto_restart_app_server`] === "true"])));
   }, [settings]);
 
   const apply = async (): Promise<void> => {

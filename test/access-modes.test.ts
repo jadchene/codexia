@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { applyAccountMode, applyApiMode, applyGatewayMode, detectCodexAuthMode, readCodexAccountTokens, readCodexOwnedAccountTokens } from "../src/main/codex-cli-auth.ts";
+import { applyAccountMode, applyApiMode, applyGatewayMode, detectCodexAuthMode, readCodexAccountTokens } from "../src/main/codex-cli-auth.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
@@ -50,22 +50,4 @@ test("active account reads rotated tokens from auth.json and rejects another ide
   expect(() => readCodexAccountTokens({ ...account, account_id: "another-account" }, options)).toThrow(/已切换账号/);
   fs.writeFileSync(authFile, "{");
   expect(() => readCodexAccountTokens(account, options)).toThrow(/auth.json/);
-});
-
-test("Codex auth owns the externally selected account even when saved settings select another mode or account", () => {
-  const options = fixture();
-  const other = { id: "account-b", account_id: "workspace-b", access_token: "stored-b", refresh_token: "refresh-b" };
-  applyAccountMode({ ...other, access_token: "rotated-b", refresh_token: "rotated-refresh-b" }, options);
-  for (const settings of [{ codex_auth_mode: "account", codex_selected_account_id: account.id }, { codex_auth_mode: "gateway" }]) {
-    expect(readCodexOwnedAccountTokens(other, settings, [account, other], options)).toMatchObject({ access_token: "rotated-b", refresh_token: "rotated-refresh-b" });
-    expect(readCodexOwnedAccountTokens(account, settings, [account, other], options)).toBeNull();
-  }
-  fs.writeFileSync(path.join(options.codexDir, "auth.json"), "{");
-  expect(() => readCodexOwnedAccountTokens(account, { codex_auth_mode: "account", codex_selected_account_id: account.id }, [account, other], options)).toThrow(/auth.json/);
-});
-
-test.each([[" ", "localhost"], ["::", "localhost"], ["[::]", "localhost"], ["::1", "[::1]"], ["2001:db8::1", "[2001:db8::1]"]])("gateway mode writes a reachable IPv6 address for %s", (host, expected) => {
-  const options = fixture();
-  applyGatewayMode({ gateway_api_key: "key", gateway_host: host, gateway_port: "8436" }, options);
-  expect(fs.readFileSync(path.join(options.codexDir, "config.toml"), "utf8")).toContain(`http://${expected}:8436/v1`);
 });

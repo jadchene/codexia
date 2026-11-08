@@ -446,23 +446,3 @@ test("API monitor preserves rejected WebSocket handshake headers and body", asyn
     expect(result).toEqual({ status: 429, retry: "19", body });
   } finally { await harness.close(); await upstream.close(); }
 });
-
-test("upstream failure after the complete request body is logged as 502, not client cancellation", async () => {
-  const upstream = await listenHttp(async (request) => {
-    await readBody(request);
-    request.socket.destroy();
-  });
-  const harness = await createHarness(upstream.url, false);
-  try {
-    const response = await fetch(`${harness.gateway.status().url}/v1/responses`, {
-      method: "POST", body: JSON.stringify({ model: "test", input: "hello" })
-    });
-    expect(response.status).toBe(502);
-    await response.text();
-    expect(harness.tokenLogs).toHaveLength(1);
-    expect(harness.tokenLogs[0]?.status).toBe(502);
-  } finally {
-    await harness.close();
-    await upstream.close();
-  }
-});

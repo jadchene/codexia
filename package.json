@@ -26,7 +26,6 @@
   "main": "dist/main/main.mjs",
   "scripts": {
     "dev": "node scripts/dev-electron.mjs",
-    "cli": "node scripts/cli-launcher.cjs",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
     "build:main": "tsup --config tsup.main.config.ts && node scripts/check-main-bundle.mjs",
@@ -38,9 +37,7 @@
     "smoke:unpacked:upgrade": "node scripts/prepare-unpacked-legacy-fixture.mjs && node scripts/smoke-unpacked.mjs --expect-legacy-upgrade",
     "check": "node scripts/check-source.mjs",
     "test": "vitest run",
-    "verify": "npm run check && npm run typecheck && npm run test && npm run build && npm run test:cli-executable",
-    "build:cli": "node scripts/build-cli.mjs",
-    "test:cli-executable": "node scripts/test-cli-executable.mjs"
+    "verify": "npm run check && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.2",

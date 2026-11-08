@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 import type { Settings } from "../shared/contracts/settings";
 
 interface CodexPathOptions {
@@ -162,19 +161,10 @@ export function readCodexAccountTokens(account: AccountRecord, options: CodexPat
   };
 }
 
-/** Auth on disk determines ownership even after switching accounts outside Codexia. */
-export function readCodexOwnedAccountTokens(account: AccountRecord, settings: Settings, accounts: AccountRecord[], options: CodexPathOptions = {}) {
-  const detected = detectCodexAuthMode(settings, accounts, options);
-  const owner = detected.mode === "account" ? detected.accountId
-    : detected.mode === "unknown" && settings.codex_auth_mode === "account" ? settings.codex_selected_account_id : "";
-  // If the configured owner's auth is unreadable, fail closed instead of redeeming its stale refresh token.
-  return owner === account.id ? readCodexAccountTokens(account, options) : null;
-}
-
 export function applyApiMode(channel: {
   id: string; baseUrl: string; apiKey: string; supportsWebSocket: boolean;
   requestHeaders: Record<string, string>;
-}, options: CodexPathOptions & { modelCatalogContent?: string } = {}) {
+}, options: CodexPathOptions = {}) {
   if (!channel.apiKey) throw new Error("所选渠道未配置 API Key。");
   const url = new URL(channel.baseUrl);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
@@ -196,7 +186,6 @@ export function applyApiMode(channel: {
   ].join("\n");
   const next = insertProviderBlockIntoConfig(clean, block);
   writeFilesTransaction([
-    ...(options.modelCatalogContent === undefined ? [] : [{ file: managedModelCatalogPath(options), content: options.modelCatalogContent }]),
     { file: authPath(options), content: jsonText({ OPENAI_API_KEY: channel.apiKey }) },
     { file: configPath(options), content: next }
   ]);
@@ -226,7 +215,9 @@ export function nextGatewayConfig(current: unknown, settings: Settings, options:
 }
 
 export function gatewayProviderBlock(settings: Settings, options: CodexPathOptions = {}): string {
-  const baseUrl = accountModeGatewayBaseUrl(settings);
+  const host = gatewayProviderBaseHost(settings.gateway_host);
+  const port = settings.gateway_port || "8436";
+  const baseUrl = `http://${host}:${port}/v1`;
   const catalog = `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`;
   if (useOpenaiBaseUrl(settings)) {
     return [
@@ -246,6 +237,12 @@ export function gatewayProviderBlock(settings: Settings, options: CodexPathOptio
     "supports_websockets = true",
     ""
   ].join("\n");
+}
+
+function gatewayProviderBaseHost(host: unknown): string {
+  const value = String(host || "").trim();
+  if (!value || value === "0.0.0.0") return "localhost";
+  return value;
 }
 
 export function replaceGatewayProviderBlock(current: unknown, block: unknown): string {

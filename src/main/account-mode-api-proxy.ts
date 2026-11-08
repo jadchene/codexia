@@ -189,7 +189,7 @@ const handleHttpRequest = async (
     });
     request.pipe(clientRequest);
   }).catch((error) => {
-    const cancelled = response.destroyed || request.aborted;
+    const cancelled = response.destroyed || request.destroyed;
     finishLog(cancelled ? 499 : 502, error instanceof Error ? error.message : String(error));
     if (debugEnabled) safelyObserve(store, () => writeDebugResponse(apiDebugLogger, requestId, cancelled ? 499 : 502, response.getHeaders(), responseCapture, startedAt, upstreamUrl));
     throw error;

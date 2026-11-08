@@ -22,8 +22,6 @@ const EDITABLE_SETTING_KEYS = new Set([
   "startup_launch", "single_instance", "close_behavior", "codex_quota_headers_mode",
   "ignore_five_hour_limit", "codex_config_use_openai_base_url",
   "debug_api_logging",
-  "gateway_auto_restart_app_server", "account_auto_restart_app_server",
-  "openai_auto_restart_app_server", "third_party_auto_restart_app_server",
   "auto_review_upstream_model",
   "billing_currency", "request_log_retention_days", "app_log_retention_days", "login_session_retention_days",
   "appearance_theme", "appearance_density", "appearance_font_family", "navigation_collapsed"
@@ -55,10 +53,6 @@ const INTEGER_SETTINGS: Record<string, readonly [number, number]> = {
 };
 
 const ENUM_SETTINGS = {
-  gateway_auto_restart_app_server: ["true", "false"],
-  account_auto_restart_app_server: ["true", "false"],
-  openai_auto_restart_app_server: ["true", "false"],
-  third_party_auto_restart_app_server: ["true", "false"],
   auto_start_gateway: ["true", "false"],
   auto_start_mcp_gateway: ["true", "false"],
   startup_launch: ["disabled", "auto", "delayed"],
@@ -95,7 +89,6 @@ export function publicSettings(settings: Settings): Settings {
   const gatewayApiKey = String(settings.gateway_api_key || "");
   const {
     gateway_api_key: _gatewayApiKey,
-    control_api_key: _obsoleteControlApiKey,
     codex_bundled_override_enabled: _bundledOverrideEnabled,
     codex_bundled_override_json: _bundledOverrideJson,
     model_management_json: _modelManagementJson,

@@ -35,52 +35,6 @@ const sandboxReadAccess = spawnSync("icacls.exe", [unpackedRoot, "/grant", "*S-1
 if (sandboxReadAccess.status !== 0) {
   throw new Error(`Cannot grant sandbox read access to the isolated test copy: ${sandboxReadAccess.stderr || sandboxReadAccess.stdout}`);
 }
-const cliLauncher = path.join(unpackedRoot, "codexia-cli.exe");
-if (!fs.existsSync(cliLauncher)) {
-  throw new Error("Packaged CLI launcher is missing.");
-}
-const cliVersion = spawnSync(cliLauncher, ["--version"], {
-  env: { ...process.env }, encoding: "utf8", windowsHide: true, timeout: 15_000
-});
-const packagedVersion = JSON.parse(fs.readFileSync(path.join(unpackedRoot, "resources", "app", "package.json"), "utf8")).version;
-if (cliVersion.status !== 0 || cliVersion.stdout.trim() !== `Codexia ${packagedVersion}`) {
-  throw new Error(`Packaged CLI version failed: ${cliVersion.stderr || cliVersion.stdout}`);
-}
-
-// Junctions do not require Windows Developer Mode and exercise real installation resolution.
-const linkedInstallation = path.join(smokeRoot, "cli-linked-installation");
-fs.symlinkSync(unpackedRoot, linkedInstallation, "junction");
-for (const entry of [cliLauncher, path.join(linkedInstallation, "codexia-cli.exe")]) {
-  const cliHelp = spawnSync(entry, ["--help"], {
-    cwd: smokeHome, env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
-    encoding: "utf8", windowsHide: true, timeout: 15_000
-  });
-  if (cliHelp.status !== 0 || !cliHelp.stdout.includes("mode")) {
-    throw new Error(`Executable CLI help failed: ${cliHelp.stderr || cliHelp.stdout}`);
-  }
-  const invalid = spawnSync(entry, ["unknown-command"], {
-    cwd: smokeHome, env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
-    encoding: "utf8", windowsHide: true, timeout: 15_000
-  });
-  if (invalid.status !== 1 || !invalid.stderr.includes("codexia-cli --help")) {
-    throw new Error(`Executable CLI error forwarding failed: ${invalid.stderr || invalid.stdout}`);
-  }
-}
-
-// A replaced/older launcher must be rejected before opening SQLite or touching Codex files.
-const manifestFile = path.join(unpackedRoot, "resources", "app", "package.json");
-const originalManifest = fs.readFileSync(manifestFile, "utf8");
-try {
-  fs.writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(originalManifest), version: "0.0.0-mismatch" }));
-  const mismatch = spawnSync(cliLauncher, ["mode"], {
-    cwd: smokeHome, env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
-    encoding: "utf8", windowsHide: true, timeout: 15_000
-  });
-  if (mismatch.status !== 1 || !mismatch.stderr.includes("版本不一致")) {
-    throw new Error(`CLI launcher version mismatch was not rejected: ${mismatch.stderr || mismatch.stdout}`);
-  }
-} finally { fs.writeFileSync(manifestFile, originalManifest); }
-
 const debuggingPort = await freePort();
 const child = spawn(executable, [
   "--no-sandbox",

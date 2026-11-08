@@ -282,7 +282,6 @@ function migrate(db: Db): void {
   fillBlankSetting(db, "mcp_gateway_host", "127.0.0.1");
   fillBlankSetting(db, "mcp_gateway_port", "3000");
   fillBlankSetting(db, "mcp_gateway_path", "/mcp");
-  db.exec("DELETE FROM settings WHERE key IN ('control_api_host', 'control_api_port', 'control_api_key')");
   repairLastRefreshAllUsageAt(db);
 }
 
