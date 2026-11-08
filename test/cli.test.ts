@@ -164,3 +164,58 @@ it("checks the launcher version independently of the backend's IPC version", () 
   expect(() => assertCliLauncherVersion("2.0.0", "2.0.0")).not.toThrow();
   expect(() => assertCliLauncherVersion(undefined, "2.0.0")).not.toThrow();
 });
+
+it("account list prints quota and credit counts without tokens", async () => {
+  const f = fixture();
+  f.store.updateUsage(f.account.id, { reset_credits_available_count: 4, quota_5h_used_percent: 12 });
+  const output: string[] = [];
+  await runCli(["accounts"], "2.0.0", async () => f.access, { write: (line) => output.push(line) });
+  expect(output.join()).toContain("剩余重置次数：4");
+  expect(output.join()).not.toContain("old-access");
+  expect(output.join()).not.toContain("old-refresh");
+});
+
+it("batch account refresh continues after failures and excludes disabled accounts", async () => {
+  const refreshAccount = vi.fn().mockRejectedValueOnce(new Error("failed")).mockResolvedValue({ id: "b", name: "B", enabled: true });
+  const service = { ...fake(), accounts: () => [
+    { id: "a", name: "A", enabled: true }, { id: "b", name: "B", enabled: true }, { id: "disabled", enabled: false }
+  ] as ReturnType<NonNullable<CliBackend["accounts"]>>, refreshAccount };
+  const write = vi.fn();
+  await expect(runCli(["accounts", "refresh", "--all", "--type", "usage"], "2.0.0", async () => service, { write })).rejects.toThrow("1 成功，1 失败");
+  expect(refreshAccount.mock.calls).toEqual([["a", "usage"], ["b", "usage"]]);
+  expect(write).toHaveBeenCalledWith(expect.stringContaining("刷新成功"));
+});
+
+it("interactive account refresh selects a target and noninteractive mode requires a selector", async () => {
+  const refreshAccount = vi.fn().mockResolvedValue({ id: "a", enabled: true });
+  const service = { ...fake(), accounts: () => [{ id: "a", name: "A", enabled: true }] as ReturnType<NonNullable<CliBackend["accounts"]>>, refreshAccount };
+  await expect(runCli(["accounts", "refresh"], "2", async () => service, { write: vi.fn() })).rejects.toThrow(/--account/);
+  await runCli(["accounts", "refresh", "--type", "token"], "2", async () => service, { write: vi.fn(), ask: async () => "1" });
+  expect(refreshAccount).toHaveBeenCalledExactlyOnceWith("a", "token");
+});
+
+it.each([
+  ["refresh", "--all", "--account", "one"], ["refresh", "--type", "bad"], ["refresh", "--account"],
+  ["refresh", "--all", "--all"], ["refresh", "--force"], ["list", "--all"]
+])("rejects invalid account command %j before opening services", async (...args) => {
+  const backend = vi.fn();
+  await expect(runCli(["accounts", ...args], "2", backend, { write: vi.fn() })).rejects.toThrow();
+  expect(backend).not.toHaveBeenCalled();
+});
+
+it("offline CLI token refresh syncs the direct account without exposing credentials or changing Codex config", async () => {
+  const f = fixture();
+  await f.access.apply({ mode: "account", targetId: f.account.id, proxy: false, restart: false });
+  const auth = f.auth();
+  auth.tokens.access_token = "direct-rotated-access";
+  auth.tokens.refresh_token = "direct-rotated-refresh";
+  fs.writeFileSync(path.join(f.codexDir, "auth.json"), JSON.stringify(auth));
+  const before = f.config();
+  const output: string[] = [];
+  await runCli(["accounts", "refresh", "--account", f.account.id, "--type", "token"], "2.0.0", async () => f.access, { write: (line) => output.push(line) });
+  expect(f.store.listAccounts()[0].refresh_token).toBe("direct-rotated-refresh");
+  expect(output.join()).toContain("刷新成功");
+  expect(output.join()).not.toContain("direct-rotated");
+  expect(f.config()).toBe(before);
+  expect(f.auth()).toEqual(auth);
+});

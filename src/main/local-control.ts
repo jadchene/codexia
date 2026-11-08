@@ -75,6 +75,8 @@ export async function startLocalControl(dataDir: string, handlers: ControlHandle
         if (stopping) throw new ControlError("STOPPING", "Codexia 正在退出。");
         if (pending >= 16) throw new ControlError("BUSY", "待处理命令过多，请稍后重试。");
       } catch (error) { fail(error); return; }
+      // Up to four bounded network calls at the configured 300-second maximum.
+      if (request.method === "account.refresh") socket.setTimeout(1_260_000);
       pending++;
       queue = queue.then(async () => {
         if (socket.destroyed) return;
@@ -117,7 +119,7 @@ export async function requestLocalControl<T>(connection: ControlMetadata, appVer
       if (complete) return; complete = true; clearTimeout(deadline); socket.destroy();
       if (error) reject(error); else resolve(result!);
     };
-    const deadline = setTimeout(() => finish(new Error("Codexia 命令超时，请检查配置是否已应用，勿盲目重试。")), method === "access-mode.get" ? 3000 : 90000);
+    const deadline = setTimeout(() => finish(new Error("Codexia 命令超时，请检查配置是否已应用，勿盲目重试。")), method === "access-mode.get" ? 3000 : method === "account.refresh" ? 1_260_000 : 90000);
     socket.setEncoding("utf8");
     socket.once("connect", () => {
       connected = true;

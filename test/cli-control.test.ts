@@ -130,3 +130,19 @@ it("corrupt instance metadata stops the CLI instead of enabling local writes", a
     await expect(connectCliControl(dir, options)).rejects.toMatchObject({ code: "DISCOVERY_FAILED" });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+it("account refresh uses the same-directory IPC method with validated parameters", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-ipc-accounts-"));
+  const account = { id: "one", name: "One", enabled: true, status: "active", has_access_token: true, has_refresh_token: true };
+  const refreshAccount = vi.fn(async () => ({ ...account, reset_credits_available_count: 2 }));
+  const close = await startCliControl(dir, { ...backend("one"), accounts: () => [account], refreshAccount }, options);
+  try {
+    const remote = (await connectCliControl(dir, options))!;
+    expect(remote.accounts!()).toEqual([account]);
+    expect(await remote.refreshAccount!("one", "all")).toMatchObject({ reset_credits_available_count: 2 });
+    expect(refreshAccount).toHaveBeenCalledExactlyOnceWith("one", "all");
+    const metadata = readControlMetadata(controlFile(dir))!;
+    await expect(requestLocalControl(metadata, options.appVersion, "account.refresh", { id: "one", kind: "consume" })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(refreshAccount).toHaveBeenCalledTimes(1);
+  } finally { await close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

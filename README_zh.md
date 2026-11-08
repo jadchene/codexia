@@ -83,6 +83,20 @@ Windows 解压包提供 `codexia-cli.exe`，使用轻量 C# 启动器复用应�
 - CLI 复用桌面应用的数据目录和系统安全存储；它不是无界面服务器版 Electron。Windows 是打包支持平台，其他系统仍需 Electron 可用的运行环境及系统安全存储。
 
 
+### 命令行刷新账号
+
+```powershell
+.\codexia-cli.exe accounts
+.\codexia-cli.exe accounts refresh --account <账号ID>
+.\codexia-cli.exe accounts refresh --account <账号ID> --type usage
+.\codexia-cli.exe accounts refresh --account <账号ID> --type token
+.\codexia-cli.exe accounts refresh --all
+```
+
+不指定账号时，`accounts refresh` 会交互选择账号。默认 `--type all` 刷新 token、订阅、额度及剩余重置次数；`usage` 仅查询额度和重置次数，`token` 仅刷新 token 与订阅。`--all` 逐个处理所有已启用账号，单个失败后继续，存在失败时返回非零退出码。重置次数刷新只查询重置卡，不消耗重置卡。输出包括额度重置时间、订阅及重置卡到期时间，不输出 token。
+
+Codex 当前使用的账号（包括账号模式直连）仍只从 `auth.json` 同步 token，不调用 OAuth 刷新；该账号认证文件缺失或损坏时停止刷新。同目录桌面已运行时通过 IPC 更新，否则直接更新本地 SQLite，不启动桌面或网关。
+
 ### 本机进程间通信
 
 CLI 与同目录 Codexia 使用 Windows 命名管道或 Unix Socket 通信，无需配置 HTTP 服务、监听 IP、端口或 API 密钥。`data/cli-control.json` 仅记录当前实例的连接信息和每次启动生成的临时认证令牌，不承载配置请求，也不包含账号 token 或渠道 API key。
@@ -104,7 +118,7 @@ CLI 与同目录 Codexia 使用 Windows 命名管道或 Unix Socket 通信，无
 }
 ```
 
-CLI 自动附加实例目录和临时令牌。响应包含同一 `id`、`version`、`appVersion`、`ok`，以及成功的 `result` 或失败的 `error: { code, message }`。当前方法为 `access-mode.get` 和 `access-mode.apply`；后续功能通过注册新方法及参数校验扩展，无需改动传输协议。未知方法、协议版本或应用版本不一致时不会执行修改。
+CLI 自动附加实例目录和临时令牌。响应包含同一 `id`、`version`、`appVersion`、`ok`，以及成功的 `result` 或失败的 `error: { code, message }`。当前方法为 `access-mode.get`、`access-mode.apply` 和 `account.refresh`；后续功能通过注册新方法及参数校验扩展，无需改动传输协议。未知方法、协议版本或应用版本不一致时不会执行修改。
 
 CLI 不会把请求转给其他目录的实例；即使另一目录运行着同版本单实例 Codexia，也仍按本目录实例未启动处理。已选中的实例退出或重启后，请求不会自动转发到新进程。旧的 `inbox` 请求文件和 HTTP API 不再使用；启动时清理已废弃的外部 API 配置项。
 

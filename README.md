@@ -78,13 +78,27 @@ CLI only associates with the desktop in its own installation directory, independ
 For development, build with `npm run build:main`, then use `npm run cli -- --version`, `npm run cli -- mode`, or `npm run cli -- mode switch`. Add `--isolated-dev --codex-test-dir=.runtime/v1-dev/codex` for isolated development data. The CLI uses the same system secret storage as the desktop app; it is not a server/headless Electron distribution. Windows is the packaged target; other systems still need a working Electron environment and system secret storage.
 
 
+### Account refresh from CLI
+
+```powershell
+.\codexia-cli.exe accounts
+.\codexia-cli.exe accounts refresh --account <ID>
+.\codexia-cli.exe accounts refresh --account <ID> --type usage
+.\codexia-cli.exe accounts refresh --account <ID> --type token
+.\codexia-cli.exe accounts refresh --all
+```
+
+Without a selector, `accounts refresh` prompts for an account. The default `--type all` refreshes tokens, subscription, usage and available reset credits; `usage` queries usage and reset credits, and `token` refreshes tokens and subscription. `--all` processes enabled accounts sequentially, continues after individual failures and exits nonzero if any failed. Credit refresh only queries availability; it never consumes a reset credit. Output includes reset times and expiry information but no tokens.
+
+For the account currently owned by Codex, token refresh still only reads `auth.json` (including direct mode), and never redeems its refresh token. A missing or corrupt auth file fails closed. Updates use the same-directory desktop over IPC if running, or local SQLite otherwise, without launching the desktop or gateway.
+
 ### Local process communication
 
 CLI talks to its own installation's desktop over a Windows named pipe or Unix Socket. No HTTP listener, IP/port settings, or API key configuration is needed. `data/cli-control.json` only records the current endpoint, instance directory, application version and a temporary authentication token generated on every launch; it carries no configuration requests or upstream credentials.
 
 The extensible request envelope contains `version: 1`, `appVersion: "2.0.0"`, a unique `id`, `method` and `params`. CLI attaches the target instance directory and temporary token. Responses echo the ID and versions, with `ok` and either `result` or `error: { code, message }`. Application and protocol versions are checked separately.
 
-Currently `access-mode.get` reads the current mode, choices, preferences and gateway state. `access-mode.apply` accepts `{ "mode": "third_party", "targetId": "channel-id", "proxy": true, "restart": false }`. Gateway mode uses an empty target ID and `proxy: false`. Future features register additional methods with their own parameter validation without changing the transport. Unknown methods and incompatible versions never execute writes.
+Currently `access-mode.get` reads the current mode, choices, preferences and gateway state. `access-mode.apply` accepts `{ "mode": "third_party", "targetId": "channel-id", "proxy": true, "restart": false }`. Gateway mode uses an empty target ID and `proxy: false`. `account.refresh` accepts `{ "id": "account-id", "kind": "all" }` (`all`, `usage` or `token`) and returns account details without credentials. Future features register additional methods with their own parameter validation without changing the transport. Unknown methods and incompatible versions never execute writes.
 
 Other installations are ignored even when they run the same version in single-instance mode. Requests remain pinned to the chosen process and are never redirected after it exits or restarts. Inbox request files and the HTTP control service are no longer used; obsolete HTTP configuration keys are removed on startup.
 

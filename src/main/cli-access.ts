@@ -1,3 +1,5 @@
+import { createAccountRefreshService } from "./account-refresh.ts";
+import { publicAccount } from "./renderer-boundary.ts";
 import path from "node:path";
 import { applyAccountMode, applyApiMode, applyGatewayMode, detectCodexAuthMode, readCodexAccountTokens } from "./codex-cli-auth.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
@@ -14,8 +16,10 @@ export function createCliAccess(options: {
   codexOptions: { codexDir?: string };
   restart?: typeof restartCodexDaemon;
   onApplied?: () => void;
+  accountRefresh?: ReturnType<typeof createAccountRefreshService>;
 }): CliBackend {
   const { store, upstreams, catalog, codexOptions } = options;
+  const accountRefresh = options.accountRefresh || createAccountRefreshService({ store, codexOptions });
   const proxyKey = (mode: AccessMode) => mode === "account" ? "account_mode_use_api_proxy" : `${mode}_use_api_proxy`;
   const defaults = (mode: AccessMode) => {
     const settings = store.getSettings();
@@ -31,6 +35,13 @@ export function createCliAccess(options: {
       .map((u) => ({ id: u.id, label: u.name }));
   return {
     defaults, choices,
+    accounts: () => store.listAccounts().map((account) => publicAccount(account)!),
+    refreshAccount: async (id, kind) => {
+      const account = await accountRefresh.refresh(id, kind);
+      store.addAppLog({ scope: "cli", action: "refresh-account", status: "success", message: `已刷新账号：${account.name || account.id}（${kind}）` });
+      options.onApplied?.();
+      return publicAccount(account)!;
+    },
     current: () => {
       const settings = store.getSettings();
       const mode = settings.codex_auth_mode as AccessMode;
