@@ -57,7 +57,7 @@ MIT. See [LICENSE](LICENSE).
 
 ### 命令行：版本与接入模式
 
-Windows 解压包提供 `codexia-cli.exe`，使用轻量原生启动器复用应用内置的 Electron 运行时，不重复打包 Node.js，直接运行，无需安装 Node.js 或先打开桌面应用。软链接执行时会解析回原安装目录，不会根据当前工作目录选择实例。
+Windows 解压包提供 `codexia-cli.exe`，使用轻量 C# 启动器复用应用内置的 Electron 运行时，不重复打包 Node.js，直接运行，无需安装 Node.js 或先打开桌面应用。软链接执行时会解析回原安装目录，不会根据当前工作目录选择实例。
 
 ```powershell
 .\codexia-cli.exe --version
@@ -108,4 +108,4 @@ CLI 自动附加实例目录和临时令牌。响应包含同一 `id`、`version
 
 CLI 不会把请求转给其他目录的实例；即使另一目录运行着同版本单实例 Codexia，也仍按本目录实例未启动处理。已选中的实例退出或重启后，请求不会自动转发到新进程。旧的 `inbox` 请求文件和 HTTP API 不再使用；启动时清理已废弃的外部 API 配置项。
 
-CLI 仅构建时需要 Go 1.24+，不依赖第三方 Go 包；Go 不在 PATH 时可设置 `CODEXIA_GO`。`npm run build:cli` 生成 `dist/cli/codexia-cli.exe`，支持在 Linux 上交叉编译；`npm run test:cli-executable` 使用当前系统的原生构建验证进程转发。`npm run pack:unpacked` 在 Windows 上生成发布包并自动包含 EXE。用户无需安装 Go 或 Node.js；CLI 需与 `Codexia.exe` 放在同一目录，可通过软链接调用。
+CLI 使用 Windows 自带的 .NET Framework 4.x 编译器（优先 `Microsoft.NET/Framework64/v4.0.30319/csc.exe`，回退到 `Framework`），不需要安装 Go、.NET SDK、Visual Studio 或 NuGet 包。在 Windows 上运行 `npm run build:cli` 生成 `dist/cli/codexia-cli.exe`，`npm run test:cli-executable` 验证实际 EXE，`npm run pack:unpacked` 自动将它加入发布包。Windows 10/11 自带所需 .NET Framework，精简系统需保留该组件。CLI 与 `Codexia.exe` 放在同一目录，支持软链接调用。非 Windows 环境会明确跳过 Windows 可执行文件测试。

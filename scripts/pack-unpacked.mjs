@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { rcedit } from "rcedit";
 import { buildCli } from "./build-cli.mjs";
 
-if (process.platform !== "win32") throw new Error("Windows packages must be built on Windows with Node.js matching the Electron architecture and Go 1.24+ installed.");
+if (process.platform !== "win32") throw new Error("Windows packages must be built on Windows with Node.js matching the Electron architecture and the built-in .NET Framework compiler available.");
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

@@ -59,7 +59,7 @@ Each mode has its own automatic app-server restart switch. After applying config
 
 ### CLI: version and access modes
 
-The Windows unpacked build includes `codexia-cli.exe`, a small native console launcher that reuses the bundled Electron runtime. Run it directly without installing Node.js or opening the desktop app. Symlinks resolve to the original installation directory; CLI never selects an installation based on the current working directory.
+The Windows unpacked build includes `codexia-cli.exe`, a small C# console launcher that reuses the bundled Electron runtime. Run it directly without installing Node.js or opening the desktop app. Symlinks resolve to the original installation directory; CLI never selects an installation based on the current working directory.
 
 ```powershell
 .\codexia-cli.exe --version
@@ -88,4 +88,4 @@ Currently `access-mode.get` reads the current mode, choices, preferences and gat
 
 Other installations are ignored even when they run the same version in single-instance mode. Requests remain pinned to the chosen process and are never redirected after it exits or restarts. Inbox request files and the HTTP control service are no longer used; obsolete HTTP configuration keys are removed on startup.
 
-CLI packaging requires Go 1.24+ on the build machine only (no third-party Go dependencies). Set `CODEXIA_GO` if Go is not on PATH. `npm run build:cli` produces `dist/cli/codexia-cli.exe`, including when cross-compiling on Linux; `npm run test:cli-executable` checks process forwarding with a native host build. `npm run pack:unpacked` builds the Windows release on Windows and includes the EXE automatically. Users do not need Go or Node.js. Keep the CLI next to `Codexia.exe`; symlinks to the CLI are supported.
+CLI builds use Windows’ built-in .NET Framework 4.x compiler (`Microsoft.NET/Framework64/v4.0.30319/csc.exe`, with `Framework` fallback). No Go, .NET SDK, Visual Studio or NuGet packages are needed. On Windows, `npm run build:cli` produces `dist/cli/codexia-cli.exe`; `npm run test:cli-executable` validates the compiled executable, and `npm run pack:unpacked` includes it automatically. Windows 10/11 provide the required .NET Framework runtime; stripped-down Windows images must retain that component. Keep the CLI next to `Codexia.exe`; symlinks are supported. Non-Windows verification explicitly skips the Windows executable tests.
