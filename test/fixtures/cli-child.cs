@@ -14,6 +14,7 @@ internal static class CliChild
         Line(Console.In.ReadToEnd());
         Line(Environment.CurrentDirectory);
         Line(Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE") ?? "");
+        Line(Environment.GetEnvironmentVariable("CODEXIA_CLI_VERSION") ?? "");
         foreach (string arg in args) Line(arg);
         Console.Error.Write("child stderr");
         return 7;

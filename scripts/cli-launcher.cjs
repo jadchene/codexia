@@ -16,6 +16,7 @@ if (args.length === 1 && ['--version', '-v', 'version'].includes(args[0])) {
   const executable = packaged ? path.join(installation, 'Codexia.exe') : require(path.join(root, 'node_modules', 'electron'));
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.CODEXIA_CLI_VERSION = manifest.version;
   const child = spawn(executable, [...(packaged ? [] : [root]), '--cli', ...(process.stdin.isTTY ? ['--cli-interactive'] : []), ...args], {
     env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true
   });

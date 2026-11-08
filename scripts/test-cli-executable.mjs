@@ -57,7 +57,7 @@ try {
     const result = run(entry, args, "input 中文\n");
     assert.equal(result.status, 7, result.stderr);
     const lines = result.stdout.trimEnd().split(/\r?\n/).map((line) => Buffer.from(line, "base64").toString("utf8"));
-    assert.deepEqual(lines, ["input 中文\n", external, "", "--cli", ...args]);
+    assert.deepEqual(lines, ["input 中文\n", external, "", version, "--cli", ...args]);
     assert.equal(result.stderr, "child stderr");
   }
   const bulk = run(executable, ["--bulk"]);

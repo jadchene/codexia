@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseCliArgs, runCli, type CliBackend } from "../src/main/cli.ts";
+import { assertCliLauncherVersion, parseCliArgs, runCli, type CliBackend } from "../src/main/cli.ts";
 import { createCliAccess } from "../src/main/cli-access.ts";
 import { createStore } from "../src/main/store.ts";
 import { createSecretCodec } from "../src/main/secret-codec.ts";
@@ -156,4 +156,11 @@ it("failed API channel switching rolls back the model catalog together with auth
     expect(f.store.getSettings().codex_auth_mode).toBe("openai");
     expect(f.restart).not.toHaveBeenCalled();
   } finally { fault.mockRestore(); }
+});
+
+it("checks the launcher version independently of the backend's IPC version", () => {
+  expect(() => assertCliLauncherVersion("1.9.9", "2.0.0")).toThrow(/版本不一致/);
+  expect(() => assertCliLauncherVersion("", "2.0.0")).toThrow(/版本不一致/);
+  expect(() => assertCliLauncherVersion("2.0.0", "2.0.0")).not.toThrow();
+  expect(() => assertCliLauncherVersion(undefined, "2.0.0")).not.toThrow();
 });

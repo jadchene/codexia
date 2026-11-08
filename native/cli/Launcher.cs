@@ -106,6 +106,7 @@ internal static class Launcher
             start.RedirectStandardOutput = true;
             start.RedirectStandardError = true;
             start.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
+            start.EnvironmentVariables["CODEXIA_CLI_VERSION"] = BuildInfo.Version;
             // Preserve the caller's working directory; resolve only the executable from this installation.
             using (var child = new Process())
             {

@@ -4,7 +4,7 @@ import { connectCliControl } from "./cli-control.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import { runCli } from "./cli.ts";
+import { assertCliLauncherVersion, runCli } from "./cli.ts";
 import { createCliAccess } from "./cli-access.ts";
 import { createRuntimeProfile, codexAccessOptions } from "./runtime-profile.ts";
 import { browserDataDir, dataDir } from "./paths.ts";
@@ -22,6 +22,7 @@ export async function startCli(args: string[]): Promise<void> {
   const release = () => { store?.db.close(); store = undefined; if (ownsLock) app.releaseSingleInstanceLock(); ownsLock = false; };
   try {
     const version = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), "package.json"), "utf8")).version as string;
+    assertCliLauncherVersion(process.env.CODEXIA_CLI_VERSION, version);
     const backend = async () => {
       const profile = createRuntimeProfile({ argv: process.argv, isPackaged: app.isPackaged, projectRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..") });
       const activeDataDir = profile.paths?.dataDir || dataDir();

@@ -3,9 +3,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { rcedit } from "rcedit";
-import { buildCli } from "./build-cli.mjs";
+import { buildCli, frameworkCompiler } from "./build-cli.mjs";
 
 if (process.platform !== "win32") throw new Error("Windows packages must be built on Windows with Node.js matching the Electron architecture and the built-in .NET Framework compiler available.");
+
+frameworkCompiler(); // Preserve the previous package if the Windows compiler is unavailable.
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

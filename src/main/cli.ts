@@ -113,3 +113,9 @@ export function gatewayStartReminder(selection: AccessSelection, gatewayRunning:
   return (selection.mode === "gateway" || selection.proxy) && !gatewayRunning
     ? "提示：配置已保存，但网关服务未启动。请手动启动 Codexia 和网关服务后再使用 Codex。" : "";
 }
+
+export function assertCliLauncherVersion(launcherVersion: string | undefined, appVersion: string): void {
+  if (launcherVersion !== undefined && launcherVersion !== appVersion) {
+    throw new Error(`CLI 与 Codexia 版本不一致（${launcherVersion} / ${appVersion}），请使用同目录的相同版本 CLI。`);
+  }
+}

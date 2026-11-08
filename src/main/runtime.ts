@@ -2,7 +2,7 @@ import { startCliControl } from "./cli-control.ts";
 import { createCliAccess } from "./cli-access.ts";
 import { createMonitorLogWriter } from "./request-log-writer.ts";
 import { restartCodexDaemon } from "./codex-daemon.ts";
-import { applyApiMode, readCodexAccountTokens } from "./codex-cli-auth.ts";
+import { applyApiMode, readCodexOwnedAccountTokens } from "./codex-cli-auth.ts";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 
 type Dynamic = any;
@@ -1646,17 +1646,18 @@ async function restartAppliedDaemon(mode: string) {
 
 function syncLeavingCodexAccount() {
   const settings = store.getSettings();
-  if (settings.codex_auth_mode !== "account") return;
-  const account = store.listAccounts().find((item: Dynamic) => item.id === settings.codex_selected_account_id);
+  const accounts = store.listAccounts();
+  const detected = detectCodexAuthMode(settings, accounts as Parameters<typeof detectCodexAuthMode>[1], codexAccessOptions(runtimeProfile));
+  const ownerId = detected.mode === "account" ? detected.accountId : settings.codex_auth_mode === "account" ? settings.codex_selected_account_id : "";
+  const account = accounts.find((item: Dynamic) => item.id === ownerId);
   if (!account) return;
   try { syncCodexOwnedAccount(account); }
   catch (error) { store.addAppLog({ scope: "auth", action: "sync-codex-auth", status: "failed", message: String(error) }); }
 }
 
 function syncCodexOwnedAccount(account: Dynamic) {
-  const settings = store.getSettings();
-  if (settings.codex_auth_mode !== "account" || settings.codex_selected_account_id !== account.id) return account;
-  return store.saveAccount({ ...account, ...readCodexAccountTokens(account, codexAccessOptions(runtimeProfile)) });
+  const tokens = readCodexOwnedAccountTokens(account, store.getSettings(), store.listAccounts() as Parameters<typeof readCodexOwnedAccountTokens>[2], codexAccessOptions(runtimeProfile));
+  return tokens ? store.saveAccount({ ...account, ...tokens }) : account;
 }
 
 async function refreshAccessToken(account: Dynamic, refreshSubscription = false) {

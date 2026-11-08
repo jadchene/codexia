@@ -67,6 +67,20 @@ for (const entry of [cliLauncher, path.join(linkedInstallation, "codexia-cli.exe
   }
 }
 
+// A replaced/older launcher must be rejected before opening SQLite or touching Codex files.
+const manifestFile = path.join(unpackedRoot, "resources", "app", "package.json");
+const originalManifest = fs.readFileSync(manifestFile, "utf8");
+try {
+  fs.writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(originalManifest), version: "0.0.0-mismatch" }));
+  const mismatch = spawnSync(cliLauncher, ["mode"], {
+    cwd: smokeHome, env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
+    encoding: "utf8", windowsHide: true, timeout: 15_000
+  });
+  if (mismatch.status !== 1 || !mismatch.stderr.includes("版本不一致")) {
+    throw new Error(`CLI launcher version mismatch was not rejected: ${mismatch.stderr || mismatch.stdout}`);
+  }
+} finally { fs.writeFileSync(manifestFile, originalManifest); }
+
 const debuggingPort = await freePort();
 const child = spawn(executable, [
   "--no-sandbox",
