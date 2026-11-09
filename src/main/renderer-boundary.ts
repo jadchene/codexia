@@ -20,10 +20,11 @@ const EDITABLE_SETTING_KEYS = new Set([
   "usage_refresh_interval_secs", "usage_refresh_timeout_ms", "auto_start_gateway", "auto_start_mcp_gateway",
   "mcp_gateway_config_path", "mcp_gateway_host", "mcp_gateway_port", "mcp_gateway_path",
   "startup_launch", "single_instance", "close_behavior", "codex_quota_headers_mode",
-  "ignore_five_hour_limit", "codex_config_use_openai_base_url",
+  "ignore_five_hour_limit",
   "debug_api_logging",
   "gateway_auto_restart_app_server", "account_auto_restart_app_server",
   "openai_auto_restart_app_server", "third_party_auto_restart_app_server",
+  "gateway_use_model_catalog", "account_use_model_catalog", "openai_use_model_catalog",
   "auto_review_upstream_model",
   "billing_currency", "request_log_retention_days", "app_log_retention_days", "login_session_retention_days",
   "appearance_theme", "appearance_density", "appearance_font_family", "navigation_collapsed"
@@ -55,6 +56,9 @@ const INTEGER_SETTINGS: Record<string, readonly [number, number]> = {
 };
 
 const ENUM_SETTINGS = {
+  gateway_use_model_catalog: ["true", "false"],
+  account_use_model_catalog: ["true", "false"],
+  openai_use_model_catalog: ["true", "false"],
   gateway_auto_restart_app_server: ["true", "false"],
   account_auto_restart_app_server: ["true", "false"],
   openai_auto_restart_app_server: ["true", "false"],
@@ -67,7 +71,6 @@ const ENUM_SETTINGS = {
   codex_quota_headers_mode: ["block", "rewrite"],
   ignore_five_hour_limit: ["true", "false"],
   debug_api_logging: ["true", "false"],
-  codex_config_use_openai_base_url: ["true", "false"],
   gateway_websocket_reject_http_only_model_upgrade: ["true", "false"],
   appearance_theme: ["light", "dark", "system"],
   appearance_density: ["comfortable", "compact"],

@@ -26,6 +26,12 @@ interface AccountModeProxyOptions {
   /** Resolve once per connection so an in-flight request cannot change channels. */
   resolveOptions?: () => AccountModeProxyOptions;
   apiTarget?: { id: string; name: string; kind: string };
+  /** 第三方模式只允许所选渠道目录中的模型。 */
+  allowedModels?: string[];
+  /** 第三方渠道专用请求头在本地网关添加，不写入 Codex 配置。 */
+  requestHeaders?: Record<string, string>;
+  /** 禁止向仅支持 HTTP 的第三方渠道发起 WebSocket。 */
+  supportsWebSocket?: boolean;
 
   getModelPricing?: ((modelId: string) => ModelPricing | null | undefined) | undefined;
 }
@@ -99,6 +105,43 @@ const handleHttpRequest = async (
     return;
   }
   const mappedPath = upstreamRequestPath(parsed, options);
+  if (options.allowedModels && request.method === "GET" && parsed.pathname === "/v1/models") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ object: "list", data: options.allowedModels.map((id) => ({ id, object: "model", owned_by: options.apiTarget?.id })) }));
+    return;
+  }
+  if (options.allowedModels && parsed.pathname.startsWith("/v1/models/")) {
+    const model = decodeURIComponent(parsed.pathname.slice("/v1/models/".length));
+    if (!options.allowedModels.includes(model)) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "model_not_allowed", message: "所选渠道中没有此模型。" } }));
+      return;
+    }
+  }
+  let checkedBody: Buffer | null = null;
+  if (options.allowedModels && request.method === "POST") {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const limit = positiveInteger(store.getSettings().gateway_request_body_limit_bytes, 32 * 1024 * 1024);
+    for await (const chunk of request) {
+      size += chunk.length;
+      if (size > limit) {
+        response.writeHead(413, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "请求正文超过大小限制。" } }));
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    }
+    checkedBody = Buffer.concat(chunks);
+    let payload: Record<string, unknown>;
+    try { payload = JSON.parse(checkedBody.toString("utf8")); }
+    catch { payload = {}; }
+    if (!payload || !options.allowedModels.includes(String(payload.model || ""))) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "model_not_allowed", message: "只能使用所选第三方渠道的可用模型。" } }));
+      return;
+    }
+  }
   const observed = request.method === "POST" && (options.apiTarget ? parsed.pathname === PUBLIC_RESPONSES_PATH : mappedPath.pathname === RESPONSES_PATH);
   const settings = store.getSettings();
   const debugEnabled = observed && settings.debug_api_logging === "true" && apiDebugLogger.isEnabled();
@@ -109,7 +152,7 @@ const handleHttpRequest = async (
   const quotaAccount = options.apiTarget ? null : resolveProxyAccount(request, store);
   const usageParser = observed ? createSseUsageParser((event) => syncAccountUsageFromEvent(quotaAccount, event, store)) : null;
   const upstreamUrl = new URL(`${mappedPath.pathname}${mappedPath.search}`, upstreamBaseUrl(options));
-  const outgoingHeaders = transparentRequestHeaders(request.headers);
+  const outgoingHeaders = { ...transparentRequestHeaders(request.headers), ...options.requestHeaders };
   const transport = upstreamUrl.protocol === "https:" ? https : http;
   let finished = false;
   let clientRequest: http.ClientRequest | null = null;
@@ -171,7 +214,7 @@ const handleHttpRequest = async (
       requestCapture?.push(chunk);
       metadata?.feed(chunk);
     });
-    request.once("end", () => {
+    const logRequest = () => {
       if (!debugEnabled) return;
       safelyObserve(store, () => apiDebugLogger.write({
         ts: new Date().toISOString(),
@@ -184,13 +227,19 @@ const handleHttpRequest = async (
         headers: sanitizeHeaders(request.headers),
         ...requestCapture?.snapshot()
       }));
-    });
+    };
+    request.once("end", logRequest);
     response.once("close", () => {
       if (response.writableEnded) return;
       clientRequest?.destroy(proxyAbortError("客户端已取消请求。"));
       finishLog(499, "Client cancelled the request.");
     });
-    request.pipe(clientRequest);
+    if (checkedBody) {
+      requestCapture?.push(checkedBody);
+      metadata?.feed(checkedBody);
+      logRequest();
+      clientRequest.end(checkedBody);
+    } else request.pipe(clientRequest);
   }).catch((error) => {
     const cancelled = response.destroyed || request.aborted;
     finishLog(cancelled ? 499 : 502, error instanceof Error ? error.message : String(error));
@@ -222,6 +271,10 @@ const createAccountProxyWebSocketServer = (
 
   const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const options = baseOptions.resolveOptions?.() || baseOptions;
+    if (options.supportsWebSocket === false) {
+      rejectUpgrade(socket, 426, "所选第三方渠道仅支持 HTTP 请求。");
+      return;
+    }
     const parsed = new URL(request.url || "/", "http://localhost");
     if (!isSupportedProxyPath(parsed.pathname, options)) {
       rejectUpgrade(socket, 404, "Unrecognized request URL.");
@@ -245,7 +298,7 @@ const createAccountProxyWebSocketServer = (
     const upstreamUrl = new URL(`${mappedPath.pathname}${mappedPath.search}`, webSocketBaseUrl(options));
     const protocols = parseProtocols(request.headers["sec-websocket-protocol"]);
     const upstream = new WebSocket(upstreamUrl, protocols, {
-      headers: transparentWebSocketHeaders(request.headers),
+      headers: { ...transparentWebSocketHeaders(request.headers), ...options.requestHeaders },
       perMessageDeflate: true
     });
     let responseHeaders: string[] = [];
@@ -312,12 +365,24 @@ const createAccountProxyWebSocketServer = (
           durationMs: Date.now() - startedAt,
           upstreamUrl: upstreamUrl.toString()
         }));
+        let connectionModel = "";
         bridgeWebSockets({
           downstream,
           upstream,
           controller,
           bufferHighWaterBytes: positiveInteger(settings.gateway_websocket_buffer_high_water_bytes, 2 * 1024 * 1024),
           onDownstreamMessage: (data, isBinary) => {
+            if (options.allowedModels) {
+              let payload: Record<string, unknown>;
+              try { payload = JSON.parse(rawDataToBuffer(data).toString("utf8")); }
+              catch { payload = {}; }
+              const model = String(payload?.model || connectionModel);
+              if (!payload || !options.allowedModels.includes(model)) {
+                downstream.send(JSON.stringify({ type: "error", error: { code: "model_not_allowed", message: "只能使用所选第三方渠道的可用模型。" } }));
+                return false;
+              }
+              connectionModel = model;
+            }
             safelyObserve(store, () => observer?.onDownstreamMessage(data, isBinary));
             if (debugEnabled) safelyObserve(store, () => writeWebSocketMessage(apiDebugLogger, connectionId, "request", data, isBinary));
             return data;

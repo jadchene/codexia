@@ -96,6 +96,8 @@ async function inspectAccessModeMonitoring(debuggerUrl) {
         baseUrl: 'http://127.0.0.1:${upstream.address().port}/custom/v1', apiKey: 'smoke-monitor-key',
         modelCatalogJson: JSON.stringify({ models: [{ slug: 'smoke-monitor-model', display_name: '测试模型' }] }) });
       await api.applyApiAuth('third_party', channel.id, false);
+      const applied = await api.bootstrap();
+      if (applied.settings.third_party_use_api_proxy !== 'true') throw new Error('第三方模式未强制启用代理');
       await api.applyApiAuth('third_party', channel.id, true);
       return channel.id;
     })()`);
@@ -107,8 +109,10 @@ async function inspectAccessModeMonitoring(debuggerUrl) {
     const logs = await evaluate(debuggerUrl, `window.codexGateway.listTokenLogs({ page: 1, pageSize: 10, startAt: 0, endAt: ${Math.floor(Date.now() / 1000) + 60}, upstreamId: ${JSON.stringify(channel)} })`);
     if (logs.total !== 1 || logs.items[0].total_tokens !== 5) throw new Error("打包监控线程未正确落盘");
     if (received[0]?.url !== "/custom/v1/responses" || received[0]?.key !== "Bearer smoke-monitor-key") throw new Error("透明代理请求不一致");
+    const models = await fetch(`http://127.0.0.1:${port}/v1/models`).then(response => response.json());
+    if (models.data.length !== 1 || models.data[0].id !== 'smoke-monitor-model') throw new Error('第三方模式泄露了其他渠道模型');
     await evaluate(debuggerUrl, "window.codexGateway.stopGateway()");
-    return { directAndProxyApplied: true, transparent: true, workerPersisted: true };
+    return { forcedProxyApplied: true, transparent: true, workerPersisted: true, selectedModelsOnly: true };
   } finally { await new Promise(resolve => upstream.close(resolve)); }
 }
 

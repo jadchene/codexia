@@ -133,6 +133,11 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
         const channel = hooks.upstreamService?.getRuntime?.(settings.codex_selected_upstream_id);
         if (!channel || channel.kind !== "responses_api") throw new Error("所选 API 渠道不存在。");
         return { upstreamBaseUrl: channel.baseUrl, apiTarget: { id: channel.id, name: channel.name, kind: channel.kind },
+          ...(settings.codex_auth_mode === "third_party" ? {
+            allowedModels: (hooks.upstreamService?.listModels?.(channel.id) || []).filter((model: Dynamic) => model.available).map((model: Dynamic) => model.modelId),
+            requestHeaders: channel.requestHeaders,
+            supportsWebSocket: channel.supportsWebSocket
+          } : {}),
           getModelPricing: (modelId: string) => hooks.upstreamService?.getModelPricing?.(channel.id, modelId) };
       },
       upstreamBaseUrl: hooks.accountModeUpstreamBaseUrl,
@@ -294,7 +299,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
 const useAccountModeGatewayProxy = (settings: Dynamic, requestUrl: unknown): boolean => {
   const mode = settings.codex_auth_mode;
   if (!["account", "openai", "third_party"].includes(mode)) return false;
-  if (settings[mode === "account" ? "account_mode_use_api_proxy" : `${mode}_use_api_proxy`] !== "true") return false;
+  if (mode !== "third_party" && settings[mode === "account" ? "account_mode_use_api_proxy" : `${mode}_use_api_proxy`] !== "true") return false;
   const pathname = new URL(String(requestUrl || "/"), "http://localhost").pathname;
   return pathname.startsWith("/v1/");
 };

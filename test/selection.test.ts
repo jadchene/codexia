@@ -923,16 +923,13 @@ test("gatewayProviderBlock uses openai_base_url override by default", () => {
   assert.match(block, /model_catalog_json = "C:\/data\/models\.json"/);
 });
 
-test("gatewayProviderBlock keeps custom provider when simplified config is disabled", () => {
+test("gatewayProviderBlock ignores the retired custom provider setting", () => {
   const block = gatewayProviderBlock(
     { gateway_host: "localhost", gateway_port: "8436", codex_config_use_openai_base_url: "false" },
     { modelCatalogPath: "C:/data/models.json" }
   );
-  assert.match(block, /^model_provider = "codexia"/m);
-  assert.match(block, /name = "OpenAI"/);
-  assert.match(block, /wire_api = "responses"/);
-  assert.match(block, /supports_websockets = true/);
-  assert.doesNotMatch(block, /openai_base_url/);
+  assert.doesNotMatch(block, /model_provider/);
+  assert.match(block, /openai_base_url/);
 });
 
 test("gateway config replaces any previous catalog with the generated total catalog", () => {
@@ -1015,11 +1012,11 @@ test("replaceGatewayProviderBlock repairs existing provider name", () => {
     gateway_port: "8436",
     codex_config_use_openai_base_url: "false"
   }));
-  assert.equal((next.match(/\[model_providers\.codexia\]/g) || []).length, 1);
+  assert.equal((next.match(/\[model_providers\.codexia\]/g) || []).length, 0);
   assert.doesNotMatch(next, /\[model_providers\.codex_gateway\]/);
-  assert.match(next, /name = "OpenAI"/);
+  assert.match(next, /openai_base_url/);
   assert.doesNotMatch(next, /name = "Codex Gateway"/);
-  assert.ok(next.indexOf('model_provider = "codexia"') < next.indexOf("[notice.model_migrations]"));
+  assert.ok(next.indexOf('openai_base_url =') < next.indexOf("[notice.model_migrations]"));
 });
 
 test("default openai_base_url config replaces a legacy codex_gateway provider block", () => {

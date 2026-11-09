@@ -708,21 +708,35 @@ describe("Ant Design pages", () => {
       { id: "custom", name: "Custom only", kind: "responses_api", provider: "custom", hasApiKey: true }
     ] as UpstreamSummary[];
     render(<CodexIntegrationPage settings={{ codex_auth_mode: "", openai_selected_upstream_id: "official", third_party_selected_upstream_id: "custom" }}
-      accounts={[]} upstreams={channels} gatewayBase="http://localhost:8436/v1" modelCatalogPath="models.json" accountModelCatalogPath="account-models.json"
+      accounts={[]} upstreams={channels} gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json" accountModelCatalogPath="D:/data/account-models.json"
       onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={vi.fn()} onApplyAccount={vi.fn()} onApplyApi={onApplyApi} />);
     fireEvent.click(screen.getByRole("radio", { name: "OpenAI API 模式" }));
+    expect(screen.getByText("config.toml").closest(".ant-card")?.textContent).toContain("清除 openai_base_url");
+    expect(screen.getByText("auth.json").closest(".ant-card")?.textContent).toContain("所选渠道的 API Key");
     await user.click(screen.getByRole("combobox"));
     expect(screen.queryByText("Custom only")).toBeNull();
     await user.click(screen.getByRole("switch", { name: "自动重启 Codex 服务" }));
     await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
+    expect(screen.getByText("config.toml").closest(".ant-card")?.textContent).toContain('openai_base_url = "http://localhost:8436/v1"');
+    await user.click(screen.getByRole("switch", { name: "使用模型目录" }));
+    expect(screen.getByText("config.toml").closest(".ant-card")?.textContent).toContain("清除 model_catalog_json");
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ openai_auto_restart_app_server: "true" }));
     expect(onApplyApi).toHaveBeenCalledWith("openai", "official", true);
     expect(order).toEqual(["save", "apply"]);
     fireEvent.click(screen.getByRole("radio", { name: "第三方 API 模式" }));
+    for (const name of ["通过网关服务代理", "使用模型目录"]) {
+      expect(screen.getByRole("switch", { name }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("switch", { name }).hasAttribute("disabled")).toBe(true);
+    }
+    const apiPreview = screen.getByText("config.toml").closest(".ant-card")?.textContent;
+    expect(apiPreview).toContain('model_catalog_json = "D:/data/api-models.json"');
+    expect(apiPreview).toContain('openai_base_url = "http://localhost:8436/v1"');
     expect(screen.getByRole("switch", { name: "自动重启 Codex 服务" }).getAttribute("aria-checked")).toBe("false");
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
-    await waitFor(() => expect(onApplyApi).toHaveBeenLastCalledWith("third_party", "custom", false));
+    await waitFor(() => expect(onApplyApi).toHaveBeenLastCalledWith("third_party", "custom", true));
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI API 模式" }));
+    expect(screen.getByRole("switch", { name: "使用模型目录" }).getAttribute("aria-checked")).toBe("false");
   });
 
   it("synchronizes API channel and switches after settings are reloaded", async () => {
@@ -758,15 +772,15 @@ describe("Ant Design pages", () => {
     const proxy = screen.getByRole("switch", { name: "通过网关服务代理" });
     expect(proxy.getAttribute("aria-checked")).toBe("true");
     expect(proxy.hasAttribute("disabled")).toBe(true);
-    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    expect(screen.getAllByRole("switch")).toHaveLength(3);
     expect(screen.getByText("连接选项").compareDocumentPosition(screen.getByText("config.toml")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(/model_catalog_json = "D:\/data\/models\.json"/)).toBeTruthy();
     expect(screen.getByText(/openai_base_url = "http:\/\/localhost:8436\/v1"/)).toBeTruthy();
     expect(screen.queryByText(/model_provider = "openai"/)).toBeNull();
-    await user.click(screen.getByText("自定义 Provider"));
-    expect(screen.getByText(/model_provider = "codexia"/)).toBeTruthy();
+    expect(screen.queryByText("自定义 Provider")).toBeNull();
+    expect(screen.queryByText(/model_provider = "codexia"/)).toBeNull();
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
-    expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ codex_config_use_openai_base_url: "false" }));
+    expect(onSaveSettings).not.toHaveBeenCalled();
     expect(onApplyGateway).toHaveBeenCalledOnce();
   });
 
@@ -798,14 +812,14 @@ describe("Ant Design pages", () => {
     expect(screen.queryByText(/account@example\.com/, { selector: ".ant-select-item-option-content" })).toBeNull();
     await user.click(screen.getByText("测试账号", { selector: ".ant-select-item-option-content" }));
     expect(screen.getByText("通过现有网关服务透明转发，仅记录请求日志")).toBeTruthy();
-    expect(screen.queryByText("config.toml")).toBeNull();
+    expect(screen.getByText("config.toml").closest(".ant-card")?.textContent).toContain("清除 openai_base_url");
     await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
     const preview = screen.getByText("config.toml").closest(".ant-card")!;
     expect(preview.textContent).toContain('model_catalog_json = "D:/data/account-models.json"');
     expect(preview.textContent).toContain('openai_base_url = "http://localhost:8436/v1"');
-    expect(preview.textContent).not.toContain('model_provider');
+    expect(preview.textContent).not.toContain('model_provider =');
     await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
-    expect(screen.queryByText("config.toml")).toBeNull();
+    expect(preview.textContent).toContain("清除 openai_base_url");
     await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onApplyAccount).toHaveBeenCalledWith("account-1", true);

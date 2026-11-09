@@ -564,6 +564,7 @@ function registerIpc() {
     return stopMcpGateway("manual");
   });
   handleIpc("codexAuth:applyApiMode", async (_event, mode, upstreamId, useApiProxy) => {
+    if (mode === "third_party") useApiProxy = true;
     const summary = upstreamService.list().find((item) => item.id === upstreamId);
     if (!summary || summary.kind !== "responses_api" || (summary.provider === "openai") !== (mode === "openai")) {
       throw new Error("请选择对应类型的 API 渠道。");
@@ -580,7 +581,8 @@ function registerIpc() {
     })) }, null, 2);
     if (useApiProxy) await startGateway("api-proxy");
     syncLeavingCodexAccount();
-    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), modelCatalogPath: catalogPath, modelCatalogContent,
+    const result = applyApiMode(channel, { ...codexAccessOptions(runtimeProfile), mode, modelCatalogPath: catalogPath, modelCatalogContent,
+      useModelCatalog: mode === "third_party" || settings[`${mode}_use_model_catalog`] !== "false",
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {}) });
     store.saveSettings({ codex_auth_mode: mode, codex_selected_account_id: "", codex_selected_upstream_id: upstreamId,
       [`${mode}_selected_upstream_id`]: upstreamId, [`${mode}_use_api_proxy`]: String(useApiProxy) });
@@ -608,6 +610,7 @@ function registerIpc() {
     const result = applyAccountMode(currentAccount as Parameters<typeof applyAccountMode>[0], {
       ...codexAccessOptions(runtimeProfile),
       modelCatalogPath: modelCatalogService.accountPath,
+      useModelCatalog: settings.account_use_model_catalog !== "false",
       ...(useApiProxy ? { accountModeBaseUrl: accountModeGatewayBaseUrl(settings) } : {})
     });
     store.saveSettings({
@@ -785,7 +788,8 @@ async function startGateway(reason: Dynamic = "manual") {
 }
 
 function gatewayCodexOptions() {
-  return { ...codexAccessOptions(runtimeProfile), modelCatalogPath: modelCatalogService.path };
+  return { ...codexAccessOptions(runtimeProfile), modelCatalogPath: modelCatalogService.path,
+    useModelCatalog: store.getSettings().gateway_use_model_catalog !== "false" };
 }
 
 

@@ -1,12 +1,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parse } from "smol-toml";
+import { cleanCodexConnectionConfig, insertCodexConfigBlock } from "./codex-config-document";
 import { accountModeGatewayBaseUrl } from "../shared/account-mode-config.ts";
 import type { Settings } from "../shared/contracts/settings";
 
 interface CodexPathOptions {
   codexDir?: string;
   modelCatalogPath?: string;
+  /** 是否将当前模式的模型目录写入 Codex 配置，默认开启。 */
+  useModelCatalog?: boolean;
   environment?: NodeJS.ProcessEnv;
   accountModeBaseUrl?: string;
 }
@@ -83,7 +87,7 @@ export function applyGatewayMode(settings: Settings, options: CodexPathOptions =
   ], () => {
     if (readJsonSafe(authPath(options))?.OPENAI_API_KEY !== apiKey
       || !hasGatewayProvider(readText(configPath(options)))
-      || !hasManagedModelCatalog(readText(configPath(options)))) {
+      || (options.useModelCatalog !== false && !hasManagedModelCatalog(readText(configPath(options))))) {
       throw new Error("写入后的 Codex 网关模式认证校验失败。");
     }
   });
@@ -115,9 +119,9 @@ export function applyAccountMode(account: AccountRecord | null | undefined, opti
   });
   const currentConfig = readText(configPath(options));
   let accountConfig = withoutGatewayProvider(currentConfig);
-  if (options.modelCatalogPath) {
+  if (options.modelCatalogPath && options.useModelCatalog !== false) {
     accountConfig = insertProviderBlockIntoConfig(
-      accountConfig.replace(/^\s*model_catalog_json\s*=.*\r?\n?/m, ""),
+      accountConfig,
       `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`
     );
   }
@@ -132,7 +136,7 @@ export function applyAccountMode(account: AccountRecord | null | undefined, opti
     if (auth?.auth_mode !== "chatgpt"
       || auth?.tokens?.access_token !== account.access_token
       || hasCustomGatewayProvider(writtenConfig)
-      || (options.modelCatalogPath && !hasManagedModelCatalog(writtenConfig))
+      || (options.modelCatalogPath && options.useModelCatalog !== false && !hasManagedModelCatalog(writtenConfig))
       || (proxyBaseUrl && readOpenaiBaseUrl(writtenConfig) !== proxyBaseUrl)) {
       throw new Error("写入后的 Codex 账号认证校验失败。");
     }
@@ -183,25 +187,24 @@ export function readCodexOwnedAccountTokens(account: AccountRecord, settings: Se
 export function applyApiMode(channel: {
   id: string; baseUrl: string; apiKey: string; supportsWebSocket: boolean;
   requestHeaders: Record<string, string>;
-}, options: CodexPathOptions & { modelCatalogContent?: string } = {}) {
+}, options: CodexPathOptions & { mode: "openai" | "third_party"; modelCatalogContent?: string }) {
   if (!channel.apiKey) throw new Error("所选渠道未配置 API Key。");
+  if (options.mode === "third_party" && !options.accountModeBaseUrl) throw new Error("第三方 API 模式必须通过网关服务代理。");
   const url = new URL(channel.baseUrl);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw new Error("渠道 Base URL 必须为不含凭据、查询参数和片段的 HTTP(S) 地址。");
   }
   ensureCodexDir(options);
   const current = readText(configPath(options));
-  const clean = withoutGatewayProvider(current).replace(/^\s*model_provider\s*=.*\r?\n?/m, "");
-  const headers = Object.entries(channel.requestHeaders).map(([key, value]) => `${tomlString(key)} = ${tomlString(value)}`).join(", ");
+  const clean = withoutGatewayProvider(current);
   const block = [
     `# codexia_channel = ${tomlString(channel.id)}`,
-    'model_provider = "codexia"',
-    `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`,
-    "", "[model_providers.codexia]", 'name = "OpenAI"',
-    `base_url = ${tomlString(options.accountModeBaseUrl || channel.baseUrl)}`,
-    'wire_api = "responses"', 'requires_openai_auth = true',
-    `supports_websockets = ${channel.supportsWebSocket}`,
-    `http_headers = { ${headers} }`
+    ...(options.mode === "third_party" || options.useModelCatalog !== false ? [
+      `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`
+    ] : []),
+    ...(options.accountModeBaseUrl ? [
+      `openai_base_url = ${tomlString(options.accountModeBaseUrl)}`
+    ] : [])
   ].join("\n");
   const next = insertProviderBlockIntoConfig(clean, block);
   writeFilesTransaction([
@@ -219,7 +222,7 @@ export function ensureProviderConfig(settings: Settings, options: CodexPathOptio
   const next = nextGatewayConfig(current, settings, options);
   if (next === current) return false;
   writeFilesTransaction([{ file, content: next }], () => {
-    if (!hasGatewayProvider(readText(file)) || !hasManagedModelCatalog(readText(file))) {
+    if (!hasGatewayProvider(readText(file)) || (options.useModelCatalog !== false && !hasManagedModelCatalog(readText(file)))) {
       throw new Error("Codex Provider 配置校验失败。");
     }
   });
@@ -227,95 +230,41 @@ export function ensureProviderConfig(settings: Settings, options: CodexPathOptio
 }
 
 export function nextGatewayConfig(current: unknown, settings: Settings, options: CodexPathOptions = {}): string {
-  const withoutActiveProvider = String(current || "")
-    .replace(/^\s*model_provider\s*=.*\r?\n?/m, "")
-    .replace(/^\s*model_catalog_json\s*=.*\r?\n?/m, "")
-    .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
-  return replaceGatewayProviderBlock(withoutActiveProvider, gatewayProviderBlock(settings, options));
+  return replaceGatewayProviderBlock(current, gatewayProviderBlock(settings, options));
 }
 
 export function gatewayProviderBlock(settings: Settings, options: CodexPathOptions = {}): string {
   const baseUrl = accountModeGatewayBaseUrl(settings);
   const catalog = `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`;
-  if (useOpenaiBaseUrl(settings)) {
-    return [
-      catalog,
-      `openai_base_url = "${baseUrl}"`,
-      ""
-    ].join("\n");
-  }
   return [
-    'model_provider = "codexia"',
-    catalog,
-    "",
-    "[model_providers.codexia]",
-    'name = "OpenAI"',
-    `base_url = "${baseUrl}"`,
-    'wire_api = "responses"',
-    "supports_websockets = true",
+    ...(options.useModelCatalog !== false ? [catalog] : []),
+    `openai_base_url = "${baseUrl}"`,
     ""
   ].join("\n");
 }
 
 export function replaceGatewayProviderBlock(current: unknown, block: unknown): string {
-  let next = String(current || "").replace(/^# codexia_channel = .*\r?\n?/gm, "");
-  if (/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(next)) {
-    next = next.replace(/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*\r?\n?/m, "");
-  }
-  next = next.replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
-  next = next.replace(/\r?\n?\[model_providers\.(?:codexia|codex_gateway)\]\r?\n(?:[^\[\r\n].*\r?\n?)*/gm, "\n");
-  next = next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-  return insertProviderBlockIntoConfig(next, block);
+  return insertProviderBlockIntoConfig(withoutGatewayProvider(current), block);
 }
 
 export function insertProviderBlockIntoConfig(current: unknown, block: unknown): string {
-  const text = String(current || "");
-  const normalizedBlock = String(block || "").trimEnd();
-  if (!text.trim()) return `${normalizedBlock}\n`;
-  const newline = text.includes("\r\n") ? "\r\n" : "\n";
-  const lines = text.split(/\r?\n/);
-  const insertIndex = lines.findIndex((line) => /^\s*(?:\[[^\[\]\r\n]+\]|\[\[[^\[\]\r\n]+\]\])\s*(?:#.*)?$/.test(line));
-  if (insertIndex < 0) {
-    return `${text.trimEnd()}${newline}${newline}${normalizedBlock.replace(/\n/g, newline)}${newline}`;
-  }
-  const before = lines.slice(0, insertIndex).join(newline).trimEnd();
-  const after = lines.slice(insertIndex).join(newline);
-  const prefix = before ? `${before}${newline}${newline}` : "";
-  return `${prefix}${normalizedBlock.replace(/\n/g, newline)}${newline}${newline}${after}`;
+  return insertCodexConfigBlock(String(current || ""), String(block || ""));
 }
 
 export function withoutGatewayProvider(current: unknown): string {
-  let next = String(current || "").replace(/^# codexia_channel = .*\r?\n?/gm, "");
-  if (/^\s*openai_base_url\s*=.*$/m.test(next)) {
-    next = next.replace(/^\s*model_provider\s*=\s*"openai"\s*\r?\n?/m, "")
-      .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
-  }
-  next = next
-    .replace(/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*\r?\n?/m, "")
-    .replace(/^\s*model_catalog_json\s*=.*models\.json.*\r?\n?/m, "")
-    .replace(/\r?\n?\[model_providers\.(?:codexia|codex_gateway)\]\r?\n(?:[^\[\r\n].*\r?\n?)*/gm, "\n");
-  next = next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-  return next;
+  return cleanCodexConnectionConfig(String(current || ""));
 }
 
 export function readOpenaiBaseUrl(config: unknown): string {
-  const match = /^\s*openai_base_url\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/m.exec(String(config || ""));
-  return String(match?.[1] ?? match?.[2] ?? "").trim();
+  return String(parse(String(config || "")).openai_base_url || "").trim();
 }
 
 function withOpenaiBaseUrl(current: unknown, baseUrl: string): string {
-  return insertProviderBlockIntoConfig(removeOpenaiBaseUrl(current), `openai_base_url = ${tomlString(baseUrl)}`);
-}
-
-function removeOpenaiBaseUrl(current: unknown): string {
-  return String(current || "")
-    .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd() + "\n";
+  return insertProviderBlockIntoConfig(current, `openai_base_url = ${tomlString(baseUrl)}`);
 }
 
 function hasManagedModelCatalog(config: string): boolean {
-  return /^\s*model_catalog_json\s*=.*models\.json.*$/m.test(config);
+  return typeof parse(config).model_catalog_json === "string";
 }
 
 function tomlString(value: string): string {
@@ -325,6 +274,7 @@ function tomlString(value: string): string {
 export function detectCodexAuthMode(settings: Settings, accounts: AccountRecord[], options: CodexPathOptions = {}): AuthModeResult {
   const auth = readJsonSafe(authPath(options));
   const config = fs.existsSync(configPath(options)) ? fs.readFileSync(configPath(options), "utf8") : "";
+  try { parse(config); } catch { return { mode: "unknown", accountId: "" }; }
   const localKey = String(settings.gateway_api_key || "").trim();
   const authKey = String(auth?.OPENAI_API_KEY || "").trim();
   if (authKey && localKey && authKey === localKey && hasGatewayProvider(config)) {
@@ -352,18 +302,11 @@ export function detectCodexAuthMode(settings: Settings, accounts: AccountRecord[
 }
 
 function hasGatewayProvider(config: string): boolean {
-  return /^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(config)
-    || /^\s*\[model_providers\.(?:codexia|codex_gateway)\]\s*$/m.test(config)
-    || /^\s*openai_base_url\s*=.*$/m.test(config);
+  return hasCustomGatewayProvider(config) || Boolean(readOpenaiBaseUrl(config));
 }
 
 function hasCustomGatewayProvider(config: string): boolean {
-  return /^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(config)
-    || /^\s*\[model_providers\.(?:codexia|codex_gateway)\]\s*$/m.test(config);
-}
-
-function useOpenaiBaseUrl(settings: Settings): boolean {
-  return String(settings.codex_config_use_openai_base_url || "").trim() !== "false";
+  return ["codexia", "codex_gateway"].includes(String(parse(config).model_provider || ""));
 }
 
 function readJsonSafe(file: string): any {

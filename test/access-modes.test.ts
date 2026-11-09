@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parse } from "smol-toml";
 import { afterEach, expect, test, vi } from "vitest";
 import { applyAccountMode, applyApiMode, applyGatewayMode, detectCodexAuthMode, readCodexAccountTokens, readCodexOwnedAccountTokens } from "../src/main/codex-cli-auth.ts";
 
@@ -9,22 +10,149 @@ afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: 
 function fixture() {
   const codexDir = fs.mkdtempSync(path.join(os.tmpdir(), "codexia-access-"));
   dirs.push(codexDir);
-  return { codexDir, modelCatalogPath: path.join(codexDir, "api-models.json") };
+  return { codexDir, mode: "openai" as "openai" | "third_party", modelCatalogPath: path.join(codexDir, "api-models.json") };
 }
 const channel = { id: "channel-a", baseUrl: "https://api.example.com/custom/v1", apiKey: "channel-key", supportsWebSocket: false, requestHeaders: { "x-project": 'project "one"' } };
 const account = { id: "account-a", account_id: "workspace-a", access_token: "old-access", refresh_token: "old-refresh" };
 
-test.each(["openai", "third_party"])("%s API mode writes only selected credentials and survives restart detection", (mode) => {
+const variants = ["gateway-base", "gateway-legacy", "account-direct", "account-proxy", "openai-direct", "openai-proxy", "third_party-proxy"];
+const preservedConfig = [
+  '# 用户配置必须保留',
+  'model = "gpt-test"',
+  'model_provider = "user-provider"',
+  'model_catalog_json = "D:/catalog/custom.json"',
+  'developer_instructions = """',
+  '[model_providers.codexia]',
+  'model_provider = "文字内容，不是配置"',
+  '"""',
+  '[profiles.work]',
+  'model_provider = "user-provider"',
+  'model_catalog_json = "D:/profile/custom.json"',
+  'openai_base_url = "https://profile.example/v1"',
+  '[model_providers.user-provider]',
+  'name = "User"',
+  'base_url = "https://user.example/v1"',
+  '[mcp_servers.local]',
+  'command = "node"',
+  'args = [',
+  '  "server.js",',
+  ']',
+  ''
+].join("\n");
+
+/** 在隔离目录应用模式，覆盖直连、代理和旧网关设置的兼容清理。 */
+const applyVariant = (variant: string, options: ReturnType<typeof fixture>) => {
+  const base = variant.endsWith("proxy") ? { accountModeBaseUrl: "http://localhost:8436/v1" } : {};
+  if (variant.startsWith("gateway")) return applyGatewayMode({ gateway_api_key: "gateway-key", codex_config_use_openai_base_url: String(variant === "gateway-base") }, options);
+  if (variant.startsWith("account")) return applyAccountMode(account, { ...options, ...base });
+  return applyApiMode(channel, { ...options, ...base, mode: variant.startsWith("openai") ? "openai" : "third_party" });
+};
+
+test.each(["gateway", "account", "openai"])("%s can disable and re-enable its model catalog independently of proxying", (mode) => {
   const options = fixture();
+  const file = path.join(options.codexDir, "config.toml");
+  for (const enabled of [true, false, true]) {
+    const next = { ...options, useModelCatalog: enabled, accountModeBaseUrl: "http://localhost:8436/v1" };
+    if (mode === "gateway") applyGatewayMode({ gateway_api_key: "key" }, next);
+    else if (mode === "account") applyAccountMode(account, next);
+    else applyApiMode(channel, { ...next, mode: "openai" });
+    const config = parse(fs.readFileSync(file, "utf8"));
+    expect(config.model_catalog_json).toBe(enabled ? options.modelCatalogPath.replaceAll("\\", "/") : undefined);
+    expect(config.openai_base_url).toBe("http://localhost:8436/v1");
+  }
+});
+
+test("third-party mode requires proxying and cannot disable the selected catalog", () => {
+  const options = { ...fixture(), mode: "third_party" as const, useModelCatalog: false };
+  expect(() => applyApiMode(channel, options)).toThrow(/必须通过网关/);
+  applyApiMode(channel, { ...options, accountModeBaseUrl: "http://localhost:8436/v1" });
+  const config = parse(fs.readFileSync(path.join(options.codexDir, "config.toml"), "utf8"));
+  expect(config.model_catalog_json).toBe(options.modelCatalogPath.replaceAll("\\", "/"));
+  expect(config.model_provider).toBeUndefined();
+});
+
+test.each(variants.flatMap((from) => variants.map((to) => [from, to])))("switch %s -> %s keeps only the target connection and preserves user tables", (from, to) => {
+  const options = fixture();
+  const file = path.join(options.codexDir, "config.toml");
+  fs.writeFileSync(file, preservedConfig);
+  applyVariant(from!, options);
+  applyVariant(to!, options);
+  const written = fs.readFileSync(file, "utf8");
+  const config = parse(written);
+  const original = parse(preservedConfig);
+  expect(config.profiles).toEqual(original.profiles);
+  expect(config.mcp_servers).toEqual(original.mcp_servers);
+  expect(config.developer_instructions).toEqual(original.developer_instructions);
+  expect(config.model).toBe(original.model);
+  expect(written).toContain('# 用户配置必须保留');
+  expect(config.model_catalog_json).toBe(options.modelCatalogPath.replaceAll("\\", "/"));
+  const providers = config.model_providers as Record<string, unknown>;
+  expect(providers["user-provider"]).toEqual((original.model_providers as Record<string, unknown>)["user-provider"]);
+  expect(config.model_provider).toBeUndefined();
+  expect(providers.codexia).toBeUndefined();
+  expect(config.openai_base_url).toBe(to === "account-direct" || to === "openai-direct" ? undefined : "http://localhost:8436/v1");
+  const auth = JSON.parse(fs.readFileSync(path.join(options.codexDir, "auth.json"), "utf8"));
+  if (to!.startsWith("account")) expect(auth).toMatchObject({ auth_mode: "chatgpt", OPENAI_API_KEY: null, tokens: { access_token: account.access_token } });
+  else expect(auth).toEqual({ OPENAI_API_KEY: to!.startsWith("gateway") ? "gateway-key" : channel.apiKey });
+  applyVariant(to!, options);
+  expect(parse(fs.readFileSync(file, "utf8"))).toEqual(config);
+});
+
+test.each(["\n", "\r\n"])("account mode removes quoted legacy provider tables and nested headers (%j)", (newline) => {
+  const options = fixture();
+  const file = path.join(options.codexDir, "config.toml");
+  fs.writeFileSync(file, [
+    "model_provider = 'codex_gateway' # legacy",
+    "'model_catalog_json' = 'D:/old/catalog.json'",
+    "[model_providers.'codex_gateway'] # legacy",
+    'name = "Old"',
+    '',
+    'base_url = "https://old.example/v1"',
+    '[model_providers."codex_gateway".http_headers]',
+    'secret = "old-secret"',
+    '[features]',
+    'fast_mode = true'
+  ].join(newline));
+  applyAccountMode(account, options);
+  const result = fs.readFileSync(file, "utf8");
+  expect(result).not.toContain("old-secret");
+  expect(result).not.toContain("codex_gateway");
+  expect(parse(result).features).toEqual({ fast_mode: true });
+});
+
+test("invalid TOML leaves authentication, config and catalog untouched", () => {
+  const options = fixture();
+  applyApiMode(channel, { ...options, modelCatalogContent: '{"models":[]}' });
+  const configFile = path.join(options.codexDir, "config.toml");
+  fs.writeFileSync(configFile, 'model = "unterminated');
+  const files = [configFile, path.join(options.codexDir, "auth.json"), options.modelCatalogPath];
+  const before = files.map((file) => fs.readFileSync(file, "utf8"));
+  expect(() => applyAccountMode(account, options)).toThrow();
+  expect(files.map((file) => fs.readFileSync(file, "utf8"))).toEqual(before);
+  expect(detectCodexAuthMode({ gateway_api_key: channel.apiKey }, [], options).mode).toBe("unknown");
+});
+
+test("an active profile cannot silently override the selected connection mode", () => {
+  const options = fixture();
+  const file = path.join(options.codexDir, "config.toml");
+  const original = 'profile = "work"\n[profiles.work]\nmodel_provider = "other"\n';
+  fs.writeFileSync(file, original);
+  expect(() => applyApiMode(channel, { ...options, mode: "openai" })).toThrow(/profile/);
+  expect(fs.readFileSync(file, "utf8")).toBe(original);
+  expect(fs.existsSync(path.join(options.codexDir, "auth.json"))).toBe(false);
+});
+
+test.each(["openai", "third_party"] as const)("%s API mode writes only selected credentials and survives restart detection", (mode) => {
+  const options = { ...fixture(), mode, ...(mode === "third_party" ? { accountModeBaseUrl: "http://localhost:8436/v1" } : {}) };
   fs.writeFileSync(path.join(options.codexDir, "config.toml"), 'model = "gpt-test"\n[features]\nfast_mode = true\n');
   applyApiMode(channel, options);
   const auth = JSON.parse(fs.readFileSync(path.join(options.codexDir, "auth.json"), "utf8"));
   expect(auth).toEqual({ OPENAI_API_KEY: "channel-key" });
   const config = fs.readFileSync(path.join(options.codexDir, "config.toml"), "utf8");
-  expect(config).toContain('base_url = "https://api.example.com/custom/v1"');
-  expect(config).toContain('requires_openai_auth = true');
-  expect(config).toContain('supports_websockets = false');
-  expect(config).toContain('"x-project" = "project \\"one\\""');
+  expect(parse(config).model_provider).toBeUndefined();
+  expect(parse(config).model_providers).toBeUndefined();
+  expect(parse(config).openai_base_url).toBe(mode === "third_party" ? "http://localhost:8436/v1" : undefined);
+  expect(config).not.toContain("x-project");
   expect(config).toContain('[features]\nfast_mode = true');
   expect(detectCodexAuthMode({ codex_auth_mode: mode, codex_selected_upstream_id: channel.id }, [], options).mode).toBe(mode);
   applyApiMode(channel, { ...options, accountModeBaseUrl: "http://localhost:8436/v1" });

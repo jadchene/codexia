@@ -355,8 +355,7 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
   assert.match(safeSettings.gateway_api_key_fingerprint, /^[a-f0-9]{12}$/);
   assert.throws(() => editableSettingsPatch({ appearance_theme: "midnight" }), /取值无效/);
   assert.throws(() => editableSettingsPatch({ appearance_font_family: `Bad\nFont` }), /字体名称格式无效/);
-  assert.deepEqual(editableSettingsPatch({ codex_config_use_openai_base_url: "false" }), { codex_config_use_openai_base_url: "false" });
-  assert.throws(() => editableSettingsPatch({ codex_config_use_openai_base_url: "maybe" }), /取值无效/);
+  assert.deepEqual(editableSettingsPatch({ codex_config_use_openai_base_url: "false" }), {});
   assert.deepEqual(editableSettingsPatch({ auto_review_upstream_model: "deepseek-model" }), {
     auto_review_upstream_model: "deepseek-model"
   });
@@ -410,21 +409,21 @@ test("gateway provider config replaces another active provider while preserving 
     gateway_port: "8436",
     codex_config_use_openai_base_url: "false"
   });
-  assert.match(custom, /^model_provider = "codexia"/m);
+  assert.doesNotMatch(custom, /^model_provider =/m);
   assert.match(custom, /\[model_providers\.custom\]/);
-  assert.match(custom, /\[model_providers\.codexia\]/);
+  assert.doesNotMatch(custom, /\[model_providers\.codexia\]/);
 });
 
-test("switching gateway config to custom provider clears openai_base_url residue", () => {
+test("retired custom provider setting cannot change gateway base URL behavior", () => {
   const current = gatewayProviderBlock({ gateway_host: "localhost", gateway_port: "8436" });
   const next = nextGatewayConfig(current, {
     gateway_host: "localhost",
     gateway_port: "8436",
     codex_config_use_openai_base_url: "false"
   });
-  assert.doesNotMatch(next, /openai_base_url/);
-  assert.match(next, /^model_provider = "codexia"/m);
-  assert.match(next, /\[model_providers\.codexia\]/);
+  assert.match(next, /openai_base_url/);
+  assert.doesNotMatch(next, /^model_provider =/m);
+  assert.doesNotMatch(next, /\[model_providers\.codexia\]/);
   assert.match(next, /model_catalog_json/);
 });
 

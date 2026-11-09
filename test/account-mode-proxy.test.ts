@@ -324,7 +324,8 @@ const createHarness = async (upstreamBaseUrl: string, debugEnabled: boolean, fai
   const gateway = createGateway(store, null, {
     accountModeUpstreamBaseUrl: upstreamBaseUrl,
     upstreamService: {
-      getRuntime: () => ({ id: "fixed-channel", name: "Fixed API", kind: "responses_api", baseUrl: upstreamBaseUrl }),
+      getRuntime: () => ({ id: "fixed-channel", name: "Fixed API", kind: "responses_api", baseUrl: upstreamBaseUrl, supportsWebSocket: true, requestHeaders: { "x-project": "selected-project" } }),
+      listModels: () => [{ modelId: "test", available: true }, { modelId: "same-as-pool", available: true }, { modelId: "disabled-model", available: false }],
       getModelPricing: () => ({ inputPerMillion: 1, cachedInputPerMillion: 0.5, outputPerMillion: 1 })
     }
   });
@@ -426,6 +427,62 @@ test.each(["openai", "third_party"])("%s monitor preserves body, auth, query and
     expect(harness.tokenLogs[0]).toMatchObject({ account_id: null, upstream_id: "fixed-channel", attempt_count: 1 });
     expect(harness.quotaUpdates).toEqual([]);
   } finally { await harness.close(); await upstream.close(); }
+});
+
+test("third-party proxy restricts models and adds channel headers even with an old disabled proxy setting", async () => {
+  const received: Array<{ body: string; project: unknown }> = [];
+  const upstream = await listenHttp(async (req, res) => {
+    received.push({ body: (await readBody(req)).toString(), project: req.headers["x-project"] });
+    res.end('{"ok":true}');
+  });
+  const harness = await createHarness(`${upstream.url}/v1`, true);
+  Object.assign(harness.settings, { codex_auth_mode: "third_party", third_party_use_api_proxy: "false", codex_selected_upstream_id: "fixed-channel" });
+  try {
+    const models = await fetch(`${harness.gateway.status().url}/v1/models`).then((res) => res.json()) as { data: Array<{ id: string }> };
+    expect(models.data.map((model) => model.id)).toEqual(["test", "same-as-pool"]);
+    for (const model of ["other-channel-model", "disabled-model"]) {
+      const res = await fetch(`${harness.gateway.status().url}/v1/responses`, { method: "POST", body: JSON.stringify({ model }) });
+      expect(res.status).toBe(400);
+      expect((await res.json() as any).error.code).toBe("model_not_allowed");
+    }
+    const body = '{ "model": "test", "input": "unchanged" }';
+    const res = await fetch(`${harness.gateway.status().url}/v1/responses`, { method: "POST", body });
+    expect(res.status).toBe(200);
+    expect(received).toEqual([{ body, project: "selected-project" }]);
+    await harness.gateway.apiDebugLogger.flush();
+    expect(readDebugEntries(harness.dataDir).map((entry) => entry.kind)).toEqual(["request", "response"]);
+  } finally { await harness.close(); await upstream.close(); }
+});
+
+test("third-party WebSocket rejects models outside the selected channel before forwarding", async () => {
+  const server = http.createServer((_req, res) => res.end());
+  const upstream = await listenExisting(server);
+  const sockets = new WebSocketServer({ server });
+  const received: string[] = [];
+  sockets.on("connection", (socket) => socket.on("message", (data) => {
+    received.push(data.toString());
+    socket.send('{"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}');
+  }));
+  const harness = await createHarness(`${upstream.url}/v1`, false);
+  Object.assign(harness.settings, { codex_auth_mode: "third_party", codex_selected_upstream_id: "fixed-channel" });
+  let client: WebSocket | undefined;
+  try {
+    client = new WebSocket(`${harness.gateway.status().url.replace("http:", "ws:")}/v1/responses`);
+    await onceOpen(client);
+    const denied = nextMessages(client, 1);
+    client.send('{"type":"response.create","model":"other-channel-model"}');
+    expect(String((await denied)[0])).toContain("model_not_allowed");
+    expect(received).toEqual([]);
+    const allowed = nextMessages(client, 1);
+    client.send('{"type":"response.create","model":"test"}');
+    await allowed;
+    expect(received).toEqual(['{"type":"response.create","model":"test"}']);
+  } finally {
+    client?.terminate();
+    await harness.close();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await upstream.close();
+  }
 });
 
 test("API monitor preserves rejected WebSocket handshake headers and body", async () => {

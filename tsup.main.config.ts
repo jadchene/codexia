@@ -13,7 +13,7 @@ export default defineConfig({
   clean: true,
   ignoreWatch: ["**/.runtime/**", "**/data/**", "**/release/**"],
   external: ["electron", "ws"],
-  noExternal: ["zod"],
+  noExternal: ["zod", "smol-toml"],
   banner: {
     js: [
       'import { createRequire as __createRequire } from "node:module";',
