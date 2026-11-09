@@ -99,7 +99,7 @@ export const OverviewPage = ({
           <StatisticColumn title="总 Token" value={total.total_tokens || 0} tooltip={<TokenUsageDetails usage={total} />} />
           <StatisticColumn title="缓存命中率（%）" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} />
           <StatisticColumn title="平均耗时（s）" value={Math.round(Number(total.average_duration_ms || 0) / 100) / 10} precision={1} />
-          <StatisticColumn title="输出速度（tps）" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
+          <StatisticColumn title="输出速度" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
           <StatisticColumn title="错误" value={Number(total.errors || 0)} />
           <StatisticColumn title={`估算成本（${currencySymbol(settings.billing_currency || "USD")}）`} value={Number(total.estimated_cost || 0)} precision={4} />
         </div>

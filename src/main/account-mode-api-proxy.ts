@@ -119,6 +119,9 @@ const handleHttpRequest = async (
     finished = true;
     const requestMetadata = metadata?.finish();
     const model = requestMetadata?.model || "";
+    const usage = usageParser?.latestUsage() || emptyUsage();
+    // 流式业务失败也应计为失败，仅影响日志，不改写客户端收到的状态与正文。
+    const failure = statusCode >= 200 && statusCode < 300 ? usageParser?.terminalFailure() : null;
     try {
       store.addTokenLog(buildResponsesRequestLog({
         account: options.apiTarget ? null : quotaAccount || selectedAccount(settings),
@@ -127,15 +130,15 @@ const handleHttpRequest = async (
         requestPath: PUBLIC_RESPONSES_PATH,
         upstreamPath: `${mappedPath.pathname}${mappedPath.search}`,
         headers: request.headers,
-        status: statusCode,
+        status: failure?.status ?? statusCode,
         durationMs: Date.now() - startedAt,
-        usage: usageParser?.latestUsage() || emptyUsage(),
+        usage,
         requestedServiceTier: normalizeServiceTier(request.headers["openai-service-tier"]) ?? normalizeServiceTier(requestMetadata?.serviceTier),
         settings,
         clientModel: model,
         upstreamModel: model,
         modelPricing: options.getModelPricing?.(model),
-        message
+        message: message ?? failure?.message ?? null
       }));
     } catch (error) {
       logObservationFailure(store, error);

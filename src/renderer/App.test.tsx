@@ -144,3 +144,28 @@ it("refreshes the visible model channels when background data changes", async ()
   dataChanged?.(["upstreams"]);
   await waitFor(() => expect(listUpstreams).toHaveBeenCalledTimes(2));
 });
+
+it("reloads the applied access mode when the optional daemon restart fails", async () => {
+  const user = userEvent.setup();
+  let settings: Record<string, string> = { codex_auth_mode: "account" };
+  window.codexGateway = {
+    bootstrap: vi.fn(async () => ({
+      app: { version: "2.0.0" }, settings, accounts: [],
+      tokenLogs: { items: [], total: 0, page: 1, pageSize: 10 }, tokenSummary: { total: {}, byAccount: [] },
+      quotaSummary: { primary: {}, secondary: {} }, appLogs: { items: [], total: 0, page: 1, pageSize: 10 },
+      gateway: { running: false }, mcpGateway: { running: false }, paths: { dataDir: "", dbPath: "" }
+    })),
+    listUpstreams: vi.fn().mockResolvedValue([]),
+    applyGatewayAuth: vi.fn(async () => {
+      settings = { codex_auth_mode: "gateway" };
+      throw new Error("配置已应用，但重启失败");
+    })
+  } as unknown as CodexGatewayBridge;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  render(<MemoryRouter initialEntries={["/codexIntegration"]}><QueryClientProvider client={client}><AntApp><App /></AntApp></QueryClientProvider></MemoryRouter>);
+  await screen.findByText("当前：账号模式");
+  await user.click(screen.getByRole("radio", { name: /网关模式/ }).closest("label")!);
+  await user.click(screen.getByRole("button", { name: "应用到 Codex" }));
+  expect(await screen.findByText("当前：网关模式")).toBeTruthy();
+  expect(await screen.findByText(/配置已应用，但重启失败/)).toBeTruthy();
+});

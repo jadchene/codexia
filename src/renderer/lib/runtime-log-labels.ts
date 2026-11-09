@@ -9,6 +9,7 @@ export const logScopeLabels: Record<string, string> = {
 };
 
 export const logActionLabels: Record<string, string> = {
+  "sync-codex-auth": "同步 Codex 账号凭据",
   start: "启动", stop: "停止", request: "处理请求", connect: "建立连接", disconnect: "断开连接",
   reject: "拒绝连接", relay: "转发请求", observe: "采集调用信息", logging: "调试日志记录",
   "refresh-all": "刷新全部额度", "persist-routing": "保存路由状态", "account-proxy": "账号请求代理",

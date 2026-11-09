@@ -466,3 +466,23 @@ test("upstream failure after the complete request body is logged as 502, not cli
     await upstream.close();
   }
 });
+
+test.each(["account", "openai", "third_party"])("%s monitoring records streamed failures without changing the wire response", async (mode) => {
+  const body = 'data: {"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"quota exceeded"}}}\n\n';
+  const upstream = await listenHttp(async (request, response) => {
+    await readBody(request);
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(body);
+  });
+  const harness = await createHarness(mode === "account" ? upstream.url : `${upstream.url}/v1`, false);
+  Object.assign(harness.settings, { codex_auth_mode: mode, [`${mode}_use_api_proxy`]: "true", codex_selected_upstream_id: "fixed-channel" });
+  try {
+    const response = await fetch(`${harness.gateway.status().url}/v1/responses`, {
+      method: "POST", body: JSON.stringify({ model: "test", stream: true })
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(body);
+    expect(harness.tokenLogs).toHaveLength(1);
+    expect(harness.tokenLogs[0]).toMatchObject({ status: 429, message: "quota exceeded" });
+  } finally { await harness.close(); await upstream.close(); }
+});

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import net from "node:net";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -45,6 +46,7 @@ const child = spawn(executable, [
   cwd: unpackedRoot,
   env: {
     ...process.env,
+    CODEX_HOME: path.join(smokeHome, ".codex"),
     HOME: smokeHome,
     USERPROFILE: smokeHome
   },
@@ -69,8 +71,45 @@ try {
   inspection.quotaNormalization = await inspectQuotaNormalization(target.webSocketDebuggerUrl);
   inspection.officialPricing = await inspectOfficialPricing(target.webSocketDebuggerUrl);
   inspection.overviewModelCount = await inspectOverviewModelCount(target.webSocketDebuggerUrl, child);
+  inspection.accessModeMonitoring = await inspectAccessModeMonitoring(target.webSocketDebuggerUrl);
 } finally {
   stopProcessTree(child.pid);
+}
+
+/** 只在隔离配置目录及本机测试上游验证模式切换、透明转发与 Electron 写入线程。 */
+async function inspectAccessModeMonitoring(debuggerUrl) {
+  const body = 'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n';
+  const received = [];
+  const upstream = http.createServer((request, response) => {
+    received.push({ url: request.url, key: request.headers.authorization });
+    request.resume();
+    request.on("end", () => { response.writeHead(200, { "content-type": "text/event-stream" }); response.end(body); });
+  });
+  await new Promise(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  const port = await freePort();
+  try {
+    const channel = await evaluate(debuggerUrl, `(async () => {
+      const api = window.codexGateway;
+      await api.saveSettings({ gateway_host: '127.0.0.1', gateway_port: '${port}', third_party_auto_restart_app_server: 'false' });
+      const channel = await api.saveUpstream({ name: '隔离监控检查', provider: 'custom',
+        enabled: false, supportsWebSocket: false, balanceQueryType: 'none', modelPricing: {},
+        baseUrl: 'http://127.0.0.1:${upstream.address().port}/custom/v1', apiKey: 'smoke-monitor-key',
+        modelCatalogJson: JSON.stringify({ models: [{ slug: 'smoke-monitor-model', display_name: '测试模型' }] }) });
+      await api.applyApiAuth('third_party', channel.id, false);
+      await api.applyApiAuth('third_party', channel.id, true);
+      return channel.id;
+    })()`);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/responses`, {
+      method: "POST", headers: { authorization: "Bearer smoke-monitor-key", "content-type": "application/json" },
+      body: JSON.stringify({ model: "smoke-monitor-model", stream: true })
+    });
+    if (response.status !== 200 || await response.text() !== body) throw new Error("打包代理改写了响应");
+    const logs = await evaluate(debuggerUrl, `window.codexGateway.listTokenLogs({ page: 1, pageSize: 10, startAt: 0, endAt: ${Math.floor(Date.now() / 1000) + 60}, upstreamId: ${JSON.stringify(channel)} })`);
+    if (logs.total !== 1 || logs.items[0].total_tokens !== 5) throw new Error("打包监控线程未正确落盘");
+    if (received[0]?.url !== "/custom/v1/responses" || received[0]?.key !== "Bearer smoke-monitor-key") throw new Error("透明代理请求不一致");
+    await evaluate(debuggerUrl, "window.codexGateway.stopGateway()");
+    return { directAndProxyApplied: true, transparent: true, workerPersisted: true };
+  } finally { await new Promise(resolve => upstream.close(resolve)); }
 }
 
 /** 检查官方渠道在真实打包 IPC 中继承费率，并保留用户明确设置的零费率。 */

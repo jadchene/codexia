@@ -550,21 +550,23 @@ function App() {
             modelCatalogPath={`${paths.dataDir.replace(/[\\/]+$/, "")}/models.json`}
             upstreams={upstreamQuery.data || []}
             onApplyApi={async (mode, upstreamId, useApiProxy) => {
-              await api.applyApiAuth(mode, upstreamId, useApiProxy);
-              await reload();
+              try { await api.applyApiAuth(mode, upstreamId, useApiProxy); }
+              finally { await reload(); }
               setMessage(mode === "openai" ? "已应用 OpenAI 官方 API 模式" : "已应用第三方 API 模式");
             }}
             accountModelCatalogPath={`${paths.dataDir.replace(/[\\/]+$/, "")}/account-models.json`}
             onMessage={setMessage}
             onSaveSettings={saveSettings}
             onApplyGateway={async () => {
-              const result = await api.applyGatewayAuth();
-              await reload();
+              let result;
+              try { result = await api.applyGatewayAuth(); }
+              finally { await reload(); }
               setMessage(result.providerChanged ? "已应用网关模式" : "已更新网关模式");
             }}
             onApplyAccount={async (accountId, useApiProxy) => {
-              const result = await api.applyAccountAuth(accountId, useApiProxy);
-              await reload();
+              let result;
+              try { result = await api.applyAccountAuth(accountId, useApiProxy); }
+              finally { await reload(); }
               setMessage(result.providerRemoved ? "已应用账号模式" : "已更新账号模式");
             }}
           />

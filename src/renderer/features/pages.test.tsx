@@ -68,7 +68,7 @@ describe("Ant Design pages", () => {
     expect(await screen.findByText("可选模型")).toBeTruthy();
     expect(screen.getByText("缓存命中率（%）")).toBeTruthy();
     expect(screen.getByText("平均耗时（s）")).toBeTruthy();
-    expect(screen.getByText("输出速度（tps）")).toBeTruthy();
+    expect(screen.getByText("输出速度")).toBeTruthy();
     expect(screen.getByText("平均耗时（s）").closest(".ant-statistic")?.querySelector(".ant-statistic-content")?.textContent).toBe("0.3");
     expect(screen.queryByText("s")).toBeNull();
     expect(screen.getByText("估算成本（$）")).toBeTruthy();
@@ -533,7 +533,7 @@ describe("Ant Design pages", () => {
     expect(screen.getAllByText("估算成本（¥）").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Token（输入 / 缓存输入 / 输出）").length).toBeGreaterThanOrEqual(1);
     const rowToken = screen.getByText("1,234 / 234 / 56");
-    expect(screen.getByRole("columnheader", { name: "输出速度（tps）" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
     expect(screen.getByText("28.0")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "耗时（s）" })).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
@@ -628,18 +628,18 @@ describe("Ant Design pages", () => {
       onQuery: vi.fn().mockResolvedValue(undefined)
     };
     const view = renderWithQueries(<RequestAnalyticsPage {...props} />);
-    expect(screen.getByRole("columnheader", { name: "输出速度（tps）" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "模型" })).toBeNull();
     await user.click(screen.getByRole("button", { name: /列设置/ }));
     await user.click(screen.getByRole("checkbox", { name: "路径" }));
-    await user.click(screen.getByRole("checkbox", { name: "输出速度（tps）" }));
+    await user.click(screen.getByRole("checkbox", { name: "输出速度" }));
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
     await waitFor(() => expect(localStorage.getItem("codexia:request-analytics:visible-columns:v2")).toContain("path"));
 
     view.unmount();
     renderWithQueries(<RequestAnalyticsPage {...props} />);
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
-    expect(screen.queryByRole("columnheader", { name: "输出速度（tps）" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "输出速度" })).toBeNull();
   });
 
   it("pauses runtime logs", async () => {

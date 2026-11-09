@@ -51,7 +51,7 @@ const ANALYTICS_COLUMN_OPTIONS = [
   { label: "路径", value: "path" },
   { label: "状态", value: "status" },
   { label: "耗时（s）", value: "duration" },
-  { label: "输出速度（tps）", value: "outputSpeed" },
+  { label: "输出速度", value: "outputSpeed" },
   { label: "Token", value: "tokens" },
   { label: "估算", value: "cost" }
 ] as const;
@@ -162,7 +162,7 @@ export const RequestAnalyticsPage = ({
     { key: "duration", title: "耗时（s）", dataIndex: "duration_ms", width: 130, render: formatDurationSeconds },
     {
       key: "outputSpeed",
-      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度（tps）</Tooltip>,
+      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度</Tooltip>,
       width: 150,
       align: "center",
       className: "v1-nowrap",
@@ -295,7 +295,7 @@ export const RequestAnalyticsPage = ({
           </TokenUsageTooltip>
           <div className="v1-analytics-metric"><Statistic title="缓存命中率（%）" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} /></div>
           <div className="v1-analytics-metric"><Statistic title="平均耗时（s）" value={Math.round(Number(summary.total.average_duration_ms || 0) / 100) / 10} precision={1} /></div>
-          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度（tps）</Tooltip>}
+          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度</Tooltip>}
             value={summary.total.output_tokens_per_second ?? "-"} precision={1} /></div>
           <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
           <div className="v1-analytics-metric"><Statistic title={`估算成本（${currencyLabel}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>

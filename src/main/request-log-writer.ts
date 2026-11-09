@@ -51,7 +51,10 @@ export function createRequestLogWriter(dbPath: string, onError: (message: string
     setImmediate(send);
   });
   worker.on("error", () => fail("监控日志写入线程发生错误，待写日志未确认。"));
-  worker.on("exit", () => { if (!closed) fail("监控日志写入线程意外退出，待写日志未确认。"); });
+  worker.on("exit", () => {
+    // 关闭期间仍需确认待写批次；线程提前退出时立即报错，避免继续等写入超时。
+    if (!closed || acknowledged < sequence) fail("监控日志写入线程意外退出，待写日志未确认。");
+  });
 
   const flush = (): Promise<void> => {
     if (failed) return Promise.reject(failed);
