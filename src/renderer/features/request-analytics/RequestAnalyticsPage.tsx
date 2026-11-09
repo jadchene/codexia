@@ -51,7 +51,7 @@ const ANALYTICS_COLUMN_OPTIONS = [
   { label: "路径", value: "path" },
   { label: "状态", value: "status" },
   { label: "耗时（s）", value: "duration" },
-  { label: "输出速度", value: "outputSpeed" },
+  { label: "输出速度（tps）", value: "outputSpeed" },
   { label: "Token", value: "tokens" },
   { label: "估算", value: "cost" }
 ] as const;
@@ -128,11 +128,11 @@ export const RequestAnalyticsPage = ({
     || "ChatGPT 订阅账号池";
   const breakdownTotal = upstreamUsage.reduce((total, item) => total + Number(item.total_tokens || 0), Number(accountPoolUsage.total_tokens || 0));
   const allColumns: TableColumnsType<RequestLog> = [
-    { key: "time", title: "时间", dataIndex: "created_at", width: 200, className: "v1-nowrap", render: (value) => formatTime(value) },
+    { key: "time", title: "时间", dataIndex: "created_at", width: 180, className: "v1-nowrap", render: (value) => formatTime(value) },
     {
       title: "渠道",
       key: "target",
-      width: 240,
+      width: 170,
       render: (_, log) => {
         const targetName = log.account_id
           ? accountPoolName
@@ -143,7 +143,7 @@ export const RequestAnalyticsPage = ({
     {
       title: "模型",
       key: "model",
-      width: 280,
+      width: 147,
       render: (_, log) => {
         const route = log.upstream_model && log.upstream_model !== log.client_model
           ? `${log.client_model || "-"} → ${log.upstream_model}`
@@ -151,7 +151,7 @@ export const RequestAnalyticsPage = ({
         return <Typography.Text className="v1-mono v1-analytics-wrap">{route}</Typography.Text>;
       }
     },
-    { key: "path", title: "路径", dataIndex: "request_path", width: 240, className: "v1-analytics-wrap", render: (value) => value || "-" },
+    { key: "path", title: "路径", dataIndex: "request_path", width: 150, className: "v1-analytics-wrap", render: (value) => value || "-" },
     {
       title: "状态",
       key: "status",
@@ -159,19 +159,20 @@ export const RequestAnalyticsPage = ({
       width: 76,
       render: (value) => <Tag color={Number(value) >= 200 && Number(value) < 300 ? "success" : "error"}>{Number(value) >= 200 && Number(value) < 300 ? "成功" : "失败"}</Tag>
     },
-    { key: "duration", title: "耗时（s）", dataIndex: "duration_ms", width: 130, render: formatDurationSeconds },
+    { key: "duration", title: "耗时（s）", dataIndex: "duration_ms", width: 100, align: "center", render: formatDurationSeconds },
     {
       key: "outputSpeed",
-      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度</Tooltip>,
+      title: <Tooltip title="输出 Token ÷ 请求总耗时，包含等待时间。">输出速度（tps）</Tooltip>,
       width: 150,
       align: "center",
       className: "v1-nowrap",
       render: (_, log) => formatOutputSpeed(log)
     },
     {
-      title: "Token（输入 / 缓存输入 / 输出）",
+      title: "Token（I/CI/O）",
       key: "tokens",
-      width: 360,
+      align: "center",
+      width: 250,
       render: (_, log) => (
         <TokenUsageTooltip usage={{
           input_tokens: Number(log.input_tokens || 0),
@@ -188,7 +189,8 @@ export const RequestAnalyticsPage = ({
     {
       title: `估算成本（${currencyLabel}）`,
       key: "cost",
-      width: 170,
+      align: "center",
+      width: 140,
       render: (_, log) => log.estimated_cost !== null && log.estimated_cost !== undefined
         ? Number(log.estimated_cost).toFixed(4)
         : "-"
@@ -295,7 +297,7 @@ export const RequestAnalyticsPage = ({
           </TokenUsageTooltip>
           <div className="v1-analytics-metric"><Statistic title="缓存命中率（%）" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} /></div>
           <div className="v1-analytics-metric"><Statistic title="平均耗时（s）" value={Math.round(Number(summary.total.average_duration_ms || 0) / 100) / 10} precision={1} /></div>
-          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度</Tooltip>}
+          <div className="v1-analytics-metric"><Statistic title={<Tooltip title="当前筛选内有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。">输出速度（tps）</Tooltip>}
             value={summary.total.output_tokens_per_second ?? "-"} precision={1} /></div>
           <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
           <div className="v1-analytics-metric"><Statistic title={`估算成本（${currencyLabel}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>

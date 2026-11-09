@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, KeyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ApiOutlined, CheckCircleOutlined, CloudOutlined, KeyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Flex, Segmented, Select, Space, Switch, Tag, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
@@ -8,7 +8,7 @@ import { accountModeGatewayBaseUrl } from "../../../shared/account-mode-config";
 import { isUsableAccount } from "../../lib/formatters";
 
 type AuthMode = "gateway" | "account" | "openai" | "third_party" | "";
-const modeLabels: Record<string, string> = { gateway: "网关模式", account: "账号模式", openai: "OpenAI 官方 API 模式", third_party: "第三方 API 模式" };
+const modeLabels: Record<string, string> = { gateway: "网关模式", account: "账号模式", openai: "OpenAI API 模式", third_party: "第三方 API 模式" };
 type GatewayConfigMode = "base_url" | "provider";
 
 interface CodexIntegrationPageProps {
@@ -93,7 +93,7 @@ export const CodexIntegrationPage = ({
   };
 
   return (
-    <Card className="v1-page-card" variant="borderless">
+    <Card className="v1-page-card v1-access-page" variant="borderless">
       <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
         {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{modeLabels[settings.codex_auth_mode] || "未知"}</Tag>}
       </Flex>
@@ -101,25 +101,27 @@ export const CodexIntegrationPage = ({
       <Segmented
         block
         value={mode}
+        disabled={busy}
         onChange={(value) => setMode(value as AuthMode)}
         className="v1-auth-mode-group"
         options={[
           { label: "网关模式", value: "gateway", icon: <SafetyCertificateOutlined /> },
           { label: "账号模式", value: "account", icon: <KeyOutlined /> },
-          { label: modeLabels.openai, value: "openai" },
-          { label: modeLabels.third_party, value: "third_party" }
+          { label: modeLabels.openai, value: "openai", icon: <CloudOutlined aria-hidden="true" /> },
+          { label: modeLabels.third_party, value: "third_party", icon: <ApiOutlined aria-hidden="true" /> }
         ]}
       />
 
+      <div className="v1-access-content">
       {!mode && <Alert showIcon type="info" title="请选择 Codex 的接入方式。" />}
 
       {mode === "gateway" && (
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert
             showIcon
-            type="success"
-            title="网关模式"
-            description="Codex 将使用已配置的订阅账号和模型渠道，并根据所选模型发送请求。"
+            type="info"
+            title="通过网关统一使用账号和渠道"
+            description="Codex 连接本地网关，由网关根据所选模型分配请求，并记录调用和用量。使用前请在服务管理中启动网关。"
           />
           <Card size="small" title="配置写入方式">
             <Space orientation="vertical" size={8} style={{ width: "100%" }}>
@@ -135,23 +137,24 @@ export const CodexIntegrationPage = ({
               />
             </Space>
           </Card>
-          <div className="v1-auth-preview-grid">
-            <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: maskedGatewayKey(settings) }, null, 2)} />
-            <CodePreview title="config.toml" value={providerToml(previewSettings, gatewayBase, modelCatalogPath)} />
-          </div>
+
         </Space>
       )}
 
       {mode === "account" && (
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert
             showIcon
-            type="warning"
-            title="Codex 将直接使用所选账号"
-            description="关闭代理时直接访问官方服务；开启后通过本地网关服务透明转发。模型列表沿用账号池的覆盖、名称和显示设置，不包含 API 渠道模型。"
+            type="info"
+            title="使用一个 ChatGPT 订阅账号"
+            description="Codex 使用所选账号的订阅额度，模型列表沿用账号池设置。默认直连，开启网关代理可在 Codexia 中查看调用记录。"
           />
           <Select
             showSearch
+            className="v1-account-select"
+            aria-label="订阅账号"
+            style={{ width: "100%" }}
+            disabled={busy}
             value={accountId || null}
             placeholder="选择一个可用订阅账号"
             optionFilterProp="label"
@@ -163,38 +166,54 @@ export const CodexIntegrationPage = ({
             onChange={setAccountId}
           />
           {accounts.length > 0 && usableAccounts.length === 0 && <Alert showIcon type="error" title="当前没有可用账号，请先刷新额度或重新登录。" />}
-          <Space orientation="vertical" size={2}>
-            <Flex align="center" gap={10}>
-              <Typography.Text strong>通过网关服务代理</Typography.Text>
-              <Switch aria-label="通过网关服务代理" checked={useApiProxy} onChange={setUseApiProxy} />
-            </Flex>
-            <Typography.Text type="secondary">通过现有网关服务透明转发，仅记录请求日志</Typography.Text>
-          </Space>
-          {useApiProxy && <CodePreview title="config.toml" value={providerToml(
-            { ...settings, codex_config_use_openai_base_url: "true" },
-            accountModeGatewayBaseUrl(settings),
-            accountModelCatalogPath
-          )} />}
         </Space>
       )}
 
       {apiMode && <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-        <Alert showIcon type="info" title="仅使用所选模型渠道" description="直接使用该渠道的 API Key 和模型目录；开启代理后固定转发至该渠道，不使用账号池、路由回退或参数改写。" />
-        <Select aria-label="模型渠道" placeholder="选择模型渠道" value={apiChannel[mode] || null}
+        <Alert
+          showIcon
+          type="info"
+          title={mode === "openai" ? "使用 OpenAI API 调用模型" : "使用第三方 API 调用模型"}
+          description={mode === "openai"
+            ? "选择一个 OpenAI 渠道，使用其 API Key 和模型目录，费用由 OpenAI 计收。默认直连，开启网关代理可在 Codexia 中查看调用记录。"
+            : "选择一个第三方渠道，使用其 API 地址、密钥和模型目录，费用由该渠道计收。默认直连，开启网关代理可在 Codexia 中查看调用记录。"}
+        />
+        <Select style={{ width: "100%" }} disabled={busy} aria-label="模型渠道" placeholder="选择模型渠道" value={apiChannel[mode] || null}
           options={channels.map((item) => ({ value: item.id, label: item.name, disabled: !item.hasApiKey }))}
           onChange={(value) => setApiChannel((current) => ({ ...current, [mode]: value }))} />
         {!channels.length && <Typography.Text type="secondary">请先在模型渠道中添加对应类型的 API 渠道。</Typography.Text>}
-        <Flex align="center" gap={10}>
-          <Typography.Text strong>通过网关服务代理</Typography.Text>
-          <Switch aria-label="通过网关服务代理" checked={Boolean(apiProxy[mode])} onChange={(value) => setApiProxy((current) => ({ ...current, [mode]: value }))} />
-        </Flex>
-        <Typography.Text type="secondary">透明转发，仅记录请求日志；渠道开关仅影响网关模式。</Typography.Text>
       </Space>}
-      {mode && <Flex align="center" gap={10} style={{ marginTop: 16 }}>
-        <Typography.Text strong>自动重启 appserver</Typography.Text>
-        <Switch aria-label="自动重启 appserver" checked={Boolean(autoRestart[mode])} onChange={(value) => setAutoRestart((current) => ({ ...current, [mode]: value }))} />
-        <Typography.Text type="secondary">应用到 Codex 后重启 daemon app server</Typography.Text>
-      </Flex>}
+      {mode && <Card size="small" title="连接选项" className="v1-access-options">
+        <div className="v1-access-option">
+          <div>
+            <Typography.Text strong>通过网关服务代理</Typography.Text>
+            <Typography.Paragraph type="secondary">
+              {mode === "gateway" ? "网关模式通过本地网关分配请求，此选项始终开启。" : "通过现有网关服务透明转发，仅记录请求日志"}
+            </Typography.Paragraph>
+          </div>
+          <Switch aria-label="通过网关服务代理" disabled={busy || mode === "gateway"}
+            checked={mode === "gateway" || (mode === "account" ? useApiProxy : Boolean(apiProxy[mode]))}
+            onChange={(value) => mode === "account" ? setUseApiProxy(value) : setApiProxy((current) => ({ ...current, [mode]: value }))} />
+        </div>
+        <div className="v1-access-option">
+          <div>
+            <Typography.Text strong>自动重启 Codex 服务</Typography.Text>
+            <Typography.Paragraph type="secondary">应用配置后自动重启 Codex 后台服务；关闭时需手动重启。</Typography.Paragraph>
+          </div>
+          <Switch aria-label="自动重启 Codex 服务" disabled={busy} checked={Boolean(autoRestart[mode])}
+            onChange={(value) => setAutoRestart((current) => ({ ...current, [mode]: value }))} />
+        </div>
+      </Card>}
+      {mode === "gateway" && (
+          <div className="v1-auth-preview-grid">
+            <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: maskedGatewayKey(settings) }, null, 2)} />
+            <CodePreview title="config.toml" value={providerToml(previewSettings, gatewayBase, modelCatalogPath)} />
+          </div>
+      )}
+      {mode === "account" && useApiProxy && <CodePreview title="config.toml" value={providerToml(
+        { ...settings, codex_config_use_openai_base_url: "true" }, accountModeGatewayBaseUrl(settings), accountModelCatalogPath
+      )} />}
+      </div>
       <Flex justify="flex-end" className="v1-auth-actions">
         <Button
           type="primary"

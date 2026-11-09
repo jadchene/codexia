@@ -998,7 +998,7 @@ function syncDetectedCodexAuthMode() {
     ? `启动时识别 Codex 认证模式：账号模式${account ? `（${account.email || account.name}）` : ""}`
     : detected.mode === "gateway"
       ? "启动时识别 Codex 认证模式：网关模式"
-      : detected.mode === "openai" ? "启动时识别 Codex 认证模式：OpenAI 官方 API 模式"
+      : detected.mode === "openai" ? "启动时识别 Codex 认证模式：OpenAI API 模式"
       : detected.mode === "third_party" ? "启动时识别 Codex 认证模式：第三方 API 模式"
       : "启动时识别 Codex 认证模式：未知";
   store.addAppLog({

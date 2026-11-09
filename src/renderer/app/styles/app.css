@@ -280,7 +280,7 @@ textarea,
 
 .v1-analytics-summary {
   display: grid;
-  grid-template-columns: minmax(110px, .8fr) minmax(210px, 1.6fr) repeat(3, minmax(135px, 1fr)) minmax(110px, .8fr) minmax(200px, 1.5fr);
+  grid-template-columns: minmax(0, .65fr) minmax(0, 1.45fr) repeat(3, minmax(0, 1fr)) minmax(0, .65fr) minmax(0, 1.3fr);
   margin-bottom: 20px;
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary);
@@ -297,12 +297,12 @@ textarea,
   min-width: 0;
   max-width: 100%;
   box-shadow: 1px 1px 0 var(--ant-color-border-secondary);
-  padding: 18px 16px;
+  padding: 16px 10px;
 }
 
 
 .v1-analytics-metric .ant-statistic-content {
-  font-size: clamp(21px, 1.65vw, 28px);
+  font-size: clamp(18px, 1.55vw, 26px);
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -532,6 +532,41 @@ textarea,
 
 .v1-auth-mode-group {
   margin-bottom: 18px;
+}
+
+.v1-access-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.v1-account-select:not(.ant-select-open):not(.ant-select-disabled) input {
+  cursor: pointer;
+}
+
+.v1-access-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 0;
+}
+
+.v1-access-option + .v1-access-option {
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.v1-access-option .ant-typography-secondary {
+  margin: 4px 0 0;
+}
+
+.v1-access-option .ant-switch {
+  flex-shrink: 0;
+}
+
+.v1-access-page .v1-auth-actions {
+  padding-top: 20px;
+  border-top: 1px solid var(--ant-color-border-secondary);
 }
 
 .v1-auth-preview-grid {
@@ -781,18 +816,18 @@ textarea,
 }
 .v1-overview-statistics {
   display: grid;
-  grid-template-columns: minmax(110px, .8fr) minmax(210px, 1.6fr) repeat(3, minmax(135px, 1fr)) minmax(110px, .8fr) minmax(200px, 1.5fr);
-  gap: 24px;
+  grid-template-columns: minmax(0, .65fr) minmax(0, 1.45fr) repeat(3, minmax(0, 1fr)) minmax(0, .65fr) minmax(0, 1.3fr);
+  gap: 12px;
 }
 .v1-statistic-item {
   min-width: 0;
 }
 .v1-statistic-item .ant-statistic-content {
-  font-size: clamp(21px, 1.65vw, 28px);
+  font-size: clamp(18px, 1.55vw, 26px);
   overflow-wrap: anywhere;
   white-space: normal;
 }
-@container (max-width: 1350px) {
+@container (max-width: 700px) {
   .v1-overview-statistics,
   .v1-analytics-summary {
     grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -825,4 +860,10 @@ textarea,
 @container (max-width: 320px) {
   .v1-overview-statistics,
   .v1-analytics-summary { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 汇总数值和标题沿同一中心线对齐。 */
+.v1-overview-statistics .ant-statistic,
+.v1-analytics-summary .ant-statistic {
+  text-align: center;
 }

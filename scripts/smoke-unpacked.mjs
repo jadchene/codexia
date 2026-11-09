@@ -327,6 +327,21 @@ async function inspectStatisticLayout(webSocketDebuggerUrl, processHandle) {
     ["analytics", "汇总指标", ".v1-analytics-summary"]
   ]) {
     await navigateToPage(webSocketDebuggerUrl, processHandle, route, title);
+    if (route === "analytics") {
+      await evaluate(webSocketDebuggerUrl, `(() => {
+        const header = Array.from(document.querySelectorAll('th')).find(item => item.textContent.includes('输出速度'));
+        if (!header) throw new Error('输出速度列缺失');
+        const range = document.createRange();
+        range.selectNodeContents(header);
+        const text = range.getBoundingClientRect();
+        const cell = header.getBoundingClientRect();
+        const style = getComputedStyle(header);
+        if (text.width > cell.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) + 1) {
+          throw new Error('输出速度表头宽度不足：文字 ' + text.width + 'px，单元格 ' + cell.width + 'px');
+        }
+        return true;
+      })()`);
+    }
     results[route] = await evaluate(webSocketDebuggerUrl, `(() => {
       const container = document.querySelector(${JSON.stringify(selector)});
       const sizing = container.parentElement;
@@ -346,6 +361,7 @@ async function inspectStatisticLayout(webSocketDebuggerUrl, processHandle) {
             top: cell.getBoundingClientRect().top
           }));
           if (cells.some(cell => cell.width <= 0 || cell.left < bounds.left - 1 || cell.right > bounds.right + 1)) throw new Error('统计项超出容器');
+          if (width >= 780 && new Set(cells.map(cell => Math.round(cell.top))).size !== 1) throw new Error('桌面统计项没有保持单行');
           if (width === 1100) {
             const calls = cells.find(cell => cell.title === '调用');
             const tokens = cells.find(cell => cell.title === '总 Token');
@@ -471,7 +487,7 @@ function evaluate(webSocketUrl, expression) {
       clearTimeout(timer);
       socket.terminate();
       if (message.result?.exceptionDetails) {
-        reject(new Error(message.result.exceptionDetails.text || "Renderer evaluation failed."));
+        reject(new Error(message.result.exceptionDetails.exception?.description || message.result.exceptionDetails.text || "Renderer evaluation failed."));
         return;
       }
       resolve(message.result?.result?.value);

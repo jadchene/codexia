@@ -3,7 +3,7 @@ export const logLevelLabels: Record<string, string> = {
 };
 
 export const logScopeLabels: Record<string, string> = {
-  app: "应用", gateway: "接口服务", "gateway-http": "请求代理", "gateway-websocket": "长连接代理",
+  app: "应用", gateway: "网关服务", "gateway-http": "请求代理", "gateway-websocket": "长连接代理",
   upstream: "模型渠道", usage: "额度刷新", "v1-dev": "开发模式", security: "安全",
   models: "模型目录", auth: "账号认证", mcp: "工具服务", logs: "日志管理", storage: "数据存储", "api-debug": "接口调试"
 };
@@ -47,7 +47,7 @@ export const logStatusLabels: Record<string, string> = {
   "gateway-no-usable-account": "无可用账号", shutdown: "正在关闭", tray: "托盘操作",
   "app-before-quit": "应用退出", "tray-quit": "托盘退出", sigint: "中断退出", sigterm: "终止退出",
   "uncaught-exception": "未捕获异常", "unhandled-rejection": "未处理异常",
-  account: "账号模式", api: "接口模式", gateway: "网关模式", openai: "OpenAI 官方 API 模式", third_party: "第三方 API 模式", unknown: "未知", none: "未配置",
+  account: "账号模式", api: "接口模式", gateway: "网关模式", openai: "OpenAI API 模式", third_party: "第三方 API 模式", unknown: "未知", none: "未配置",
   ECONNRESET: "连接重置", ECONNREFUSED: "连接被拒绝", ETIMEDOUT: "连接超时", ENOTFOUND: "地址无法解析",
   "1000": "正常关闭", "1001": "连接离开", "1006": "异常断开", "1008": "策略拒绝", "1011": "服务异常"
 };

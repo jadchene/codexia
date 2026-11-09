@@ -271,12 +271,12 @@ describe("settings appearance and display units", () => {
     await user.type(proInput, "12");
     expect((screen.getByRole("spinbutton", { name: "Pro 100 倍率" }) as HTMLInputElement).value).toBe("12");
     expect(screen.getByText("账号调度")).toBeTruthy();
-    expect(screen.getByText("会话亲和有效期")).toBeTruthy();
+    expect(screen.getByText("会话账号保持时长")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));
     expect(screen.getByText("超时与并发")).toBeTruthy();
     expect(screen.getAllByRole("menuitem")).toHaveLength(7);
     await user.click(screen.getByRole("menuitem", { name: "日志与计费" }));
-    expect(screen.getByText("设置费用统计和界面展示使用的币种。")).toBeTruthy();
+    expect(screen.getByText("设置模型费率和估算成本使用的币种。")).toBeTruthy();
     await user.click(screen.getByRole("combobox", { name: "全局币种" }));
     expect(screen.getByText("美元（USD）")).toBeTruthy();
     expect(screen.getByText("人民币（CNY）")).toBeTruthy();

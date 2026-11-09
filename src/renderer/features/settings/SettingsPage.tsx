@@ -246,7 +246,7 @@ export const SettingsPage = ({
             <Alert
               showIcon
               type="warning"
-              title="当前监听地址会向本机外部开放代理能力，请使用随机 API Key 并限制防火墙访问范围。"
+              title="此地址允许其他设备访问网关。请设置随机访问密钥，并通过防火墙限制访问范围。"
             />
           )}
         </Form.Item>
@@ -278,7 +278,7 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
             <Typography.Text strong>API 调试日志</Typography.Text>
-            <Typography.Text type="secondary" className="v1-block">记录网关服务中的 HTTP 与 WebSocket 请求，最多开启 10 分钟；关闭后自动清空。</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">临时记录请求和响应，用于排查问题。最多开启 10 分钟，关闭后自动清空。</Typography.Text>
           </div>
           <Form.Item name="debug_api_logging_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>
@@ -289,7 +289,7 @@ export const SettingsPage = ({
             <Alert
               showIcon
               type="warning"
-              title="调试日志会保存完整正文，其中可能包含对话、提示词、工具参数和其他敏感数据。保存配置后开始记录，10 分钟后自动关闭并删除全部调试日志。"
+              title="保存后开始记录，日志可能包含对话、提示词和工具参数等敏感信息。关闭或达到 10 分钟上限后，调试日志会自动删除。"
             />
           ) : null}
         </Form.Item>
@@ -304,16 +304,16 @@ export const SettingsPage = ({
           <NumberField name="usage_refresh_timeout_seconds" label="单次刷新超时" suffix="秒" min={1} max={300} />
         </div>
       </SettingsSection>
-      <SettingsSection title="账号调度" description="设置会话账号亲和、账号选择和额度耗尽后的冷却策略。">
+      <SettingsSection title="账号调度" description="设置会话使用同一账号的时长，以及账号请求失败后的冷却时间。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <NumberField
             name="gateway_session_affinity_ttl_hours"
-            label="会话亲和有效期"
+            label="会话账号保持时长"
             suffix="小时"
             min={1}
             max={8760}
           />
-          <NumberField name="gateway_quota_cooldown_seconds" label="账号失败冷却" suffix="秒" min={1} max={3600} />
+          <NumberField name="gateway_quota_cooldown_seconds" label="失败后冷却时间" suffix="秒" min={1} max={3600} />
         </div>
         <Typography.Text type="secondary" className="v1-block">
           同一会话持续使用已绑定账号；每次成功使用后重新计时，过期后按 7 天剩余额度重新选择。
@@ -321,7 +321,7 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
             <Typography.Text strong>忽略 5 小时限制</Typography.Text>
-            <Typography.Text type="secondary" className="v1-block">账号选择和额度汇总只依据 7 天窗口。</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">选择账号和计算剩余额度时仅参考 7 天额度。</Typography.Text>
           </div>
           <Form.Item name="ignore_five_hour_limit_enabled" valuePropName="checked" noStyle><Switch aria-label="忽略 5 小时限制" /></Form.Item>
         </Flex>
@@ -335,7 +335,7 @@ export const SettingsPage = ({
             </Form.Item>
           ))}
         </div>
-        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响网关模式下的订阅账号池：隐藏额度响应头和 WebSocket 额度事件，或改写为账号池汇总额度。网关模式中的第三方渠道显示可用；账号、官方 API 和第三方 API 模式直连或通过代理均保留上游响应。">
+        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="网关模式可隐藏订阅额度或显示账号池汇总；API 渠道显示为可用。其他接入模式保留上游额度信息，开启代理也不改写。">
           <Segmented options={[
             { label: "隐藏账号额度", value: "block" },
             { label: "显示账号池汇总", value: "rewrite" }
@@ -370,18 +370,18 @@ export const SettingsPage = ({
           <NumberField name="login_session_retention_days" label="登录会话保留" suffix="天" min={0} max={3650} />
         </div>
       </SettingsSection>
-      <SettingsSection title="计费币种" description="设置费用统计和界面展示使用的币种。">
+      <SettingsSection title="计费币种" description="设置模型费率和估算成本使用的币种。">
         <Form.Item name="billing_currency" label="全局币种" style={{ maxWidth: 260 }}>
           <Select options={CURRENCY_OPTIONS} />
         </Form.Item>
       </SettingsSection>
-      <SettingsSection title="优先级倍率">
+      <SettingsSection title="请求计费倍率">
         <Typography.Paragraph type="secondary">
-          估算费用 = 模型 Token 费用 × 请求优先级倍率。未指定优先级时按标准计算，响应优先级不影响估算；修改仅影响后续调用。
+          估算成本按模型费率、Token 用量和请求优先级计算。未指定优先级时使用标准倍率；修改仅影响后续调用。
         </Typography.Paragraph>
         <div className="v1-settings-grid v1-settings-grid-3">
           {(["pool_standard", "pool_fast", "pool_ultrafast", "standard", "fast", "ultrafast"] as const).map((tier, index) => (
-            <Form.Item key={tier} name={`billing_service_tier_${tier}_multiplier`} label={`${index < 3 ? "账号池" : "API"} ${["标准", "快速", "超快速"][index % 3]}倍率`} rules={[{ required: true, message: "请输入优先级倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
+            <Form.Item key={tier} name={`billing_service_tier_${tier}_multiplier`} label={`${index < 3 ? "账号池" : "API"} ${["标准", "快速", "超快速"][index % 3]}倍率`} rules={[{ required: true, message: "请输入请求计费倍率" }, { type: "number", min: 0, max: 1000, message: "倍率须在 0-1000 之间" }]}>
               <InputNumber min={0} max={1000} step={0.1} style={{ width: "100%" }} />
             </Form.Item>
           ))}
@@ -425,8 +425,8 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" gap={16} wrap>
           <Typography.Text type="secondary">只清理本地记录，不删除账号、模型渠道或应用设置。</Typography.Text>
           <Space>
-            <Popconfirm title="清空全部调用分析？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearTokenLogs}>
-              <Button danger>清空调用分析</Button>
+            <Popconfirm title="清空全部调用记录？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearTokenLogs}>
+              <Button danger>清空调用记录</Button>
             </Popconfirm>
             <Popconfirm title="清空全部运行日志？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearAppLogs}>
               <Button danger>清空运行日志</Button>
@@ -447,12 +447,12 @@ export const SettingsPage = ({
             <>
               <div className="v1-settings-grid v1-settings-grid-3">
                 <NumberField name="gateway_connect_timeout_seconds" label="连接超时" suffix="秒" min={1} max={600} />
-                <NumberField name="gateway_stream_idle_timeout_seconds" label="SSE 空闲超时" suffix="秒" min={1} max={3600} />
+                <NumberField name="gateway_stream_idle_timeout_seconds" label="流式响应空闲超时" suffix="秒" min={1} max={3600} />
                 <NumberField name="gateway_unary_timeout_seconds" label="普通请求总超时" suffix="秒" min={1} max={3600} />
-                <NumberField name="gateway_websocket_idle_timeout_seconds" label="WS 响应空闲超时" suffix="秒" min={1} max={3600} />
-                <NumberField name="gateway_shutdown_grace_seconds" label="停机宽限" suffix="秒" min={0.1} max={60} />
-                <NumberField name="gateway_max_concurrent_requests" label="HTTP 最大并发" min={1} max={10000} />
-                <NumberField name="gateway_websocket_max_connections" label="WS 最大连接" min={1} max={10000} />
+                <NumberField name="gateway_websocket_idle_timeout_seconds" label="长连接响应空闲超时" suffix="秒" min={1} max={3600} />
+                <NumberField name="gateway_shutdown_grace_seconds" label="停止服务等待时间" suffix="秒" min={0.1} max={60} />
+                <NumberField name="gateway_max_concurrent_requests" label="HTTP 并发请求上限" min={1} max={10000} />
+                <NumberField name="gateway_websocket_max_connections" label="长连接数上限" min={1} max={10000} />
               </div>
               <Flex align="center" justify="space-between" className="v1-setting-switch-row">
                 <div>
@@ -472,9 +472,9 @@ export const SettingsPage = ({
               <NumberField name="gateway_request_body_limit_mib" label="请求体上限" suffix="MiB" min={0.01} max={1024} />
               <NumberField name="gateway_error_body_limit_mib" label="错误响应上限" suffix="MiB" min={0.01} max={64} />
               <NumberField name="gateway_compaction_response_limit_mib" label="压缩适配响应上限" suffix="MiB" min={0.01} max={1024} />
-              <NumberField name="gateway_websocket_max_payload_mib" label="WS 单消息上限" suffix="MiB" min={0.01} max={1024} />
-              <NumberField name="gateway_websocket_buffer_high_water_mib" label="WS 缓冲高水位" suffix="MiB" min={0.01} max={1024} />
-              <NumberField name="gateway_websocket_pending_queue_limit_mib" label="WS 握手队列上限" suffix="MiB" min={0.01} max={1024} />
+              <NumberField name="gateway_websocket_max_payload_mib" label="长连接单条消息上限" suffix="MiB" min={0.01} max={1024} />
+              <NumberField name="gateway_websocket_buffer_high_water_mib" label="长连接缓冲阈值" suffix="MiB" min={0.01} max={1024} />
+              <NumberField name="gateway_websocket_pending_queue_limit_mib" label="长连接握手队列上限" suffix="MiB" min={0.01} max={1024} />
             </div>
           )
         }

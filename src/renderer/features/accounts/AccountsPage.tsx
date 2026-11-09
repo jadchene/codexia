@@ -214,7 +214,7 @@ export const AccountsPage = ({
           </Tooltip>
           <Popconfirm
             title="删除这个账号？"
-            description="删除后需要重新完成浏览器授权。"
+            description="仅删除 Codexia 中保存的账号。再次使用时可重新登录或从 Codex 导入。"
             okButtonProps={{ danger: true }}
             onConfirm={() => onDelete(account.id)}
           >
@@ -238,7 +238,7 @@ export const AccountsPage = ({
 
       <Row gutter={[12, 12]} className="v1-summary-cards">
         <Col xs={24} md={6}>
-          <Card size="small"><Statistic title="可用账号" value={enabledAccounts.length} suffix={`/ ${accounts.length}`} /></Card>
+          <Card size="small"><Statistic title="已启用账号" value={enabledAccounts.length} suffix={`/ ${accounts.length}`} /></Card>
         </Col>
         {settings.ignore_five_hour_limit !== "true" && (
           <Col xs={24} md={6}>
@@ -257,7 +257,7 @@ export const AccountsPage = ({
         pagination={false}
         scroll={{ x: "max-content" }}
         tableLayout="fixed"
-        locale={{ emptyText: <Empty description="还没有账号，请先完成 ChatGPT/Codex 授权。" /> }}
+        locale={{ emptyText: <Empty description="暂无订阅账号，请添加账号或从本机 Codex 导入。" /> }}
       />
 
       <Modal title="添加订阅账号" open={addOpen} footer={null} onCancel={() => void closeAddModal()}>
@@ -270,16 +270,16 @@ export const AccountsPage = ({
           </Flex>
         ) : (
           <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-            {loginPhase === "failed" && <Alert showIcon type="error" title="浏览器认证失败" description={loginError || "请重试"} />}
+            {loginPhase === "failed" && <Alert showIcon type="error" title="浏览器登录失败" description={loginError || "请重试"} />}
             <Flex justify="center" gap={12}>
               <Button type="primary" icon={<LoginOutlined />} style={{ width: 160 }} onClick={() => void onStartLogin()}>
-                浏览器认证
+                浏览器登录
               </Button>
               <Button icon={<ImportOutlined />} loading={importingLocal} style={{ width: 160 }} onClick={() => void importLocalAccount()}>
-                从本机 Codex 读取
+                从本机 Codex 导入
               </Button>
             </Flex>
-            <Typography.Text type="secondary">登录新账号可以使用浏览器认证，也可以读取本机 Codex 当前登录的账号。</Typography.Text>
+            <Typography.Text type="secondary">可在浏览器中登录新账号，或导入本机 Codex 当前使用的账号。</Typography.Text>
           </Space>
         )}
       </Modal>

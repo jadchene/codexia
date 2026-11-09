@@ -106,7 +106,7 @@ export const UpstreamsPage = () => {
   };
   const saveMutation = useMutation({
     mutationFn: (input: SaveResponsesApiUpstreamInput) => window.codexGateway.saveUpstream(input),
-    onMutate: () => { message.loading({ key: "save-upstream", content: "正在保存模型渠道...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "save-upstream", content: "正在保存模型渠道…", duration: 0 }); },
     onSuccess: async () => {
       await invalidate();
       setDrawerOpen(false);
@@ -129,7 +129,7 @@ export const UpstreamsPage = () => {
   });
   const bundledMutation = useMutation({
     mutationFn: () => window.codexGateway.refreshBuiltinModels(),
-    onMutate: () => { message.loading({ key: "refresh-bundled-models", content: "正在刷新 GPT 账号池模型...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "refresh-bundled-models", content: "正在刷新订阅账号池模型…", duration: 0 }); },
     onSuccess: async (result) => {
       await invalidate();
       const source = { remote: "远程目录", "remote-cache": "远程缓存", cli: "本机目录", cache: "本机缓存", override: "手动覆盖" }[result.bundledSource];
@@ -144,7 +144,7 @@ export const UpstreamsPage = () => {
   });
   const bundledOverrideMutation = useMutation({
     mutationFn: (input: BundledModelOverride) => window.codexGateway.saveBundledModelOverride(input),
-    onMutate: () => { message.loading({ key: "save-bundled-override", content: "正在保存 Bundled 覆盖...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "save-bundled-override", content: "正在保存内置模型覆盖…", duration: 0 }); },
     onSuccess: async (result) => {
       await invalidate();
       setBundledOverrideOpen(false);
@@ -163,7 +163,7 @@ export const UpstreamsPage = () => {
       displayName: model.displayName.trim(),
       visible: model.visible
     }))),
-    onMutate: () => { message.loading({ key: "save-model-management", content: "正在保存模型配置...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "save-model-management", content: "正在保存模型配置…", duration: 0 }); },
     onSuccess: async (result) => {
       await invalidate();
       setManagedModels(result.models);
@@ -243,7 +243,7 @@ export const UpstreamsPage = () => {
       bundledOverrideForm.setFieldsValue(override);
       setBundledOverrideOpen(true);
     } catch (error) {
-      message.error(`读取 Bundled 覆盖失败：${readableError(error)}`);
+      message.error(`读取内置模型覆盖失败：${readableError(error)}`);
     }
   };
 
@@ -361,12 +361,12 @@ export const UpstreamsPage = () => {
             onClick={() => enabledMutation.mutate({ id: upstream.id, enabled: !upstream.enabled })}
           />
         </Tooltip>
-        <Tooltip title={upstream.kind === "chatgpt_subscription_pool" ? "编辑模型费率" : "编辑上游"}>
+        <Tooltip title={upstream.kind === "chatgpt_subscription_pool" ? "编辑模型费率" : "编辑渠道"}>
           <Button aria-label="编辑" icon={<EditOutlined />} onClick={() => void (upstream.kind === "chatgpt_subscription_pool" ? openPricing(upstream) : openEdit(upstream))} />
         </Tooltip>
         {upstream.kind === "chatgpt_subscription_pool" && (
-          <Tooltip title="配置 Bundled 覆盖">
-            <Button aria-label="配置 Bundled 覆盖" icon={<FileTextOutlined />} onClick={() => void openBundledOverride()} />
+          <Tooltip title="配置内置模型覆盖">
+            <Button aria-label="配置内置模型覆盖" icon={<FileTextOutlined />} onClick={() => void openBundledOverride()} />
           </Tooltip>
         )}
         {upstream.kind === "chatgpt_subscription_pool" && (
@@ -467,7 +467,7 @@ export const UpstreamsPage = () => {
     </Modal>
 
     <Modal
-      title="Codex Bundled 覆盖"
+      title="内置模型覆盖"
       width={760}
       open={bundledOverrideOpen}
       okText="保存"
@@ -485,12 +485,12 @@ export const UpstreamsPage = () => {
         <Alert
           showIcon
           type="info"
-          title="关闭时优先获取官方远程模型，本机目录作为兜底；启用后使用下方 JSON 覆盖账号池模型。第三方模型仍按各渠道配置合并。"
+          title="启用后，下方 JSON 将替换订阅账号池的模型目录。关闭后优先使用官方模型目录，获取失败时使用本机目录。API 渠道保持各自的模型配置。"
           style={{ marginBottom: 16 }}
         />
         <Form.Item
           name="modelCatalogJson"
-          label="Codex Bundled 模型 JSON"
+          label="内置模型 JSON"
           dependencies={["enabled"]}
           rules={[
             ({ getFieldValue }) => ({
@@ -526,7 +526,7 @@ export const UpstreamsPage = () => {
         </Form.Item>
         {isOfficial && <Alert showIcon type="info" style={{ marginBottom: 16 }}
           title="填写 OpenAI API Key 即可使用，无需配置地址和模型 JSON。"
-          description="自动使用内置模型目录。网关模式下，同名模型优先使用已启用的账号池；停用账号池后使用已启用的官方 API。账号模式仍使用选定账号。模型调用权限以 API Key 为准。"
+          description="自动使用内置模型目录，调用权限以 API Key 为准。网关模式下，同名模型优先使用已启用的账号池；如需固定使用此渠道，请选择 OpenAI API 模式。"
         />}
         <Typography.Title level={5}>连接信息</Typography.Title>
         <Flex gap={12} wrap>
@@ -540,8 +540,8 @@ export const UpstreamsPage = () => {
           {!isOfficial && <Form.Item name="balanceQueryType" label="余额查询方式" style={{ width: 220 }}>
             <Select options={[{ value: "none", label: "不查询" }, { value: "deepseek", label: "DeepSeek" }]} />
           </Form.Item>}
-          <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
-          {!isOfficial && <Form.Item name="supportsWebSocket" label="支持 WS" valuePropName="checked"><Switch /></Form.Item>}
+          <Form.Item name="enabled" label="参与网关路由" valuePropName="checked"><Switch /></Form.Item>
+          {!isOfficial && <Form.Item name="supportsWebSocket" label="支持 WebSocket" valuePropName="checked"><Switch /></Form.Item>}
           {!isOfficial && <Form.Item
             name="compactAdaptEnabled"
             label="适配远程压缩"

@@ -9,6 +9,7 @@ import { quotaRemainingPercent } from "../../../shared/quota-normalization";
 import type { ReactNode } from "react";
 import type { AppLog, TokenSummary } from "../../../shared/contracts/logs";
 import { currencySymbol } from "../../lib/currency";
+import { logDictionaryLabel, logScopeLabels, logStatusLabels } from "../../lib/runtime-log-labels";
 import { cacheHitRate, formatTokenNumber } from "../../lib/formatters";
 
 type SettingsRecord = Record<string, string>;
@@ -76,7 +77,7 @@ export const OverviewPage = ({
       <div className="v1-page-card">
         <Row gutter={[16, 16]}>
           <MetricCard span={8} icon={<TeamOutlined />} title="可用订阅账号" value={`${usableAccounts}/${accounts.length}`} />
-          <MetricCard span={10} icon={<ApiOutlined />} title="可用第三方渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
+          <MetricCard span={10} icon={<ApiOutlined />} title="可用 API 渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
           <MetricCard span={6} icon={<DashboardOutlined />} title="可选模型" value={modelsQuery.isError ? "-" : modelCount} loading={modelsQuery.isLoading} />
         </Row>
       </div>
@@ -99,7 +100,7 @@ export const OverviewPage = ({
           <StatisticColumn title="总 Token" value={total.total_tokens || 0} tooltip={<TokenUsageDetails usage={total} />} />
           <StatisticColumn title="缓存命中率（%）" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} />
           <StatisticColumn title="平均耗时（s）" value={Math.round(Number(total.average_duration_ms || 0) / 100) / 10} precision={1} />
-          <StatisticColumn title="输出速度" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
+          <StatisticColumn title="输出速度（tps）" value={total.output_tokens_per_second ?? "-"} precision={1} tooltip="有效记录的总输出 Token ÷ 总请求耗时，包含等待时间。" />
           <StatisticColumn title="错误" value={Number(total.errors || 0)} />
           <StatisticColumn title={`估算成本（${currencySymbol(settings.billing_currency || "USD")}）`} value={Number(total.estimated_cost || 0)} precision={4} />
         </div>
@@ -107,10 +108,10 @@ export const OverviewPage = ({
 
       <Card title="需要关注" className="v1-overview-card">
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          {unhealthyApiUpstreams.map((upstream) => <Alert key={upstream.id} showIcon type="warning" title={`${upstream.name} 健康检查失败`} description={upstream.healthMessage || "请检查地址、认证和网络。"} />)}
+          {unhealthyApiUpstreams.map((upstream) => <Alert key={upstream.id} showIcon type="warning" title={`${upstream.name} 连接检查失败`} description={upstream.healthMessage || "请检查地址、认证和网络。"} />)}
           {errorLogs.length === 0 && unhealthyApiUpstreams.length === 0
-            ? <Alert showIcon type="success" title="当前运行正常" />
-            : <List size="small" dataSource={errorLogs} renderItem={(log) => <List.Item><Typography.Text type="danger">{log.scope || "system"} · {log.message || log.status || "未知错误"}</Typography.Text></List.Item>} />}
+            ? <Alert showIcon type="success" title="暂无需要关注的问题" />
+            : <List size="small" dataSource={errorLogs} renderItem={(log) => <List.Item><Typography.Text type="danger">{logDictionaryLabel(logScopeLabels, log.scope || "app", "模块")} · {log.message || logDictionaryLabel(logStatusLabels, log.status, "状态")}</Typography.Text></List.Item>} />}
         </Space>
       </Card>
     </Space>

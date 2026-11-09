@@ -68,7 +68,7 @@ describe("Ant Design pages", () => {
     expect(await screen.findByText("可选模型")).toBeTruthy();
     expect(screen.getByText("缓存命中率（%）")).toBeTruthy();
     expect(screen.getByText("平均耗时（s）")).toBeTruthy();
-    expect(screen.getByText("输出速度")).toBeTruthy();
+    expect(screen.getByText("输出速度（tps）")).toBeTruthy();
     expect(screen.getByText("平均耗时（s）").closest(".ant-statistic")?.querySelector(".ant-statistic-content")?.textContent).toBe("0.3");
     expect(screen.queryByText("s")).toBeNull();
     expect(screen.getByText("估算成本（$）")).toBeTruthy();
@@ -154,8 +154,8 @@ describe("Ant Design pages", () => {
     };
     const view = render(<AccountsPage {...props} />);
     await user.click(screen.getByRole("button", { name: /添加账号/ }));
-    const browserLogin = screen.getByRole("button", { name: /浏览器认证/ });
-    const localLogin = screen.getByRole("button", { name: /从本机 Codex 读取/ });
+    const browserLogin = screen.getByRole("button", { name: /浏览器登录/ });
+    const localLogin = screen.getByRole("button", { name: /从本机 Codex 导入/ });
     expect(browserLogin.parentElement).toBe(localLogin.parentElement);
     expect(browserLogin.style.width).toBe("160px");
     expect(localLogin.style.width).toBe("160px");
@@ -165,7 +165,7 @@ describe("Ant Design pages", () => {
 
     view.rerender(<AccountsPage {...props} loginPhase="waiting" />);
     expect(screen.getByText("等待浏览器授权")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /从本机 Codex 读取/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /从本机 Codex 导入/ })).toBeNull();
     await user.click(screen.getByRole("button", { name: /取\s*消/ }));
     expect(onCancelLogin).toHaveBeenCalledOnce();
   });
@@ -349,7 +349,7 @@ describe("Ant Design pages", () => {
     renderWithQueries(<UpstreamsPage />);
     expect(await screen.findByText("内置账号渠道")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "删除" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "配置 Bundled 覆盖" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "配置内置模型覆盖" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新账号池模型" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新余额" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "更多操作" })).toHaveLength(2);
@@ -417,8 +417,8 @@ describe("Ant Design pages", () => {
     }));
     renderWithQueries(<UpstreamsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "配置 Bundled 覆盖" }));
-    const dialog = await screen.findByRole("dialog", { name: "Codex Bundled 覆盖" });
+    await user.click(await screen.findByRole("button", { name: "配置内置模型覆盖" }));
+    const dialog = await screen.findByRole("dialog", { name: "内置模型覆盖" });
     const enabled = within(dialog).getByRole("switch", { name: "启用覆盖" });
     expect(enabled.getAttribute("aria-checked")).toBe("false");
     await user.click(enabled);
@@ -426,7 +426,7 @@ describe("Ant Design pages", () => {
     expect(await within(dialog).findByText("模型 JSON 格式不正确")).toBeTruthy();
 
     const modelCatalogJson = '{"models":[{"slug":"gpt-override"}]}';
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Codex Bundled 模型 JSON" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "内置模型 JSON" }), {
       target: { value: modelCatalogJson }
     });
     await user.click(within(dialog).getByRole("button", { name: /保\s*存/ }));
@@ -531,12 +531,12 @@ describe("Ant Design pages", () => {
     };
     renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={summary} accounts={[]} settings={{ billing_currency: "CNY" }} onMessage={vi.fn()} onQuery={onQuery} />);
     expect(screen.getAllByText("估算成本（¥）").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText("Token（输入 / 缓存输入 / 输出）").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Token（I/CI/O）").length).toBeGreaterThanOrEqual(1);
     const rowToken = screen.getByText("1,234 / 234 / 56");
-    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "输出速度（tps）" })).toBeTruthy();
     expect(screen.getByText("28.0")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "耗时（s）" })).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
+    expect(screen.getByText("2.0")).toBeTruthy();
     expect(screen.getByText("成功")).toBeTruthy();
     expect(screen.queryByText("200")).toBeNull();
     expect(rowToken.getAttribute("title")).toBeNull();
@@ -565,7 +565,7 @@ describe("Ant Design pages", () => {
     expect(requestRow).toBeTruthy();
     await user.click(within(requestRow!).getByText("ChatGPT 订阅账号池"));
     expect(await screen.findByText("账号 A · a@example.com")).toBeTruthy();
-    for (const label of ["渠道类型", "请求优先级", "计费优先级", "计费依据", "优先级倍率"]) {
+    for (const label of ["渠道类型", "请求优先级", "计费优先级", "计费依据", "请求计费倍率"]) {
       expect(screen.queryByText(label)).toBeNull();
     }
     expect(screen.getByText("HTTP状态码")).toBeTruthy();
@@ -628,18 +628,18 @@ describe("Ant Design pages", () => {
       onQuery: vi.fn().mockResolvedValue(undefined)
     };
     const view = renderWithQueries(<RequestAnalyticsPage {...props} />);
-    expect(screen.getByRole("columnheader", { name: "输出速度" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "输出速度（tps）" })).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "模型" })).toBeNull();
     await user.click(screen.getByRole("button", { name: /列设置/ }));
     await user.click(screen.getByRole("checkbox", { name: "路径" }));
-    await user.click(screen.getByRole("checkbox", { name: "输出速度" }));
+    await user.click(screen.getByRole("checkbox", { name: "输出速度（tps）" }));
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
     await waitFor(() => expect(localStorage.getItem("codexia:request-analytics:visible-columns:v2")).toContain("path"));
 
     view.unmount();
     renderWithQueries(<RequestAnalyticsPage {...props} />);
     expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
-    expect(screen.queryByRole("columnheader", { name: "输出速度" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "输出速度（tps）" })).toBeNull();
   });
 
   it("pauses runtime logs", async () => {
@@ -655,7 +655,7 @@ describe("Ant Design pages", () => {
       ]
     };
     render(<RuntimeLogsPage pageData={pageData} paused={false} newLogCount={0} onPausedChange={onPausedChange} onMessage={vi.fn()} onQuery={onQuery} />);
-    expect(screen.getByText("接口服务")).toBeTruthy();
+    expect(screen.getByText("网关服务")).toBeTruthy();
     expect(screen.getByText("长连接代理")).toBeTruthy();
     expect(screen.queryByText("gateway-websocket")).toBeNull();
     await user.click(screen.getByRole("button", { name: /暂停自动刷新/ }));
@@ -710,17 +710,17 @@ describe("Ant Design pages", () => {
     render(<CodexIntegrationPage settings={{ codex_auth_mode: "", openai_selected_upstream_id: "official", third_party_selected_upstream_id: "custom" }}
       accounts={[]} upstreams={channels} gatewayBase="http://localhost:8436/v1" modelCatalogPath="models.json" accountModelCatalogPath="account-models.json"
       onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={vi.fn()} onApplyAccount={vi.fn()} onApplyApi={onApplyApi} />);
-    fireEvent.click(screen.getByRole("radio", { name: "OpenAI 官方 API 模式" }));
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI API 模式" }));
     await user.click(screen.getByRole("combobox"));
     expect(screen.queryByText("Custom only")).toBeNull();
-    await user.click(screen.getByRole("switch", { name: "自动重启 appserver" }));
+    await user.click(screen.getByRole("switch", { name: "自动重启 Codex 服务" }));
     await user.click(screen.getByRole("switch", { name: "通过网关服务代理" }));
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ openai_auto_restart_app_server: "true" }));
     expect(onApplyApi).toHaveBeenCalledWith("openai", "official", true);
     expect(order).toEqual(["save", "apply"]);
     fireEvent.click(screen.getByRole("radio", { name: "第三方 API 模式" }));
-    expect(screen.getByRole("switch", { name: "自动重启 appserver" }).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("switch", { name: "自动重启 Codex 服务" }).getAttribute("aria-checked")).toBe("false");
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     await waitFor(() => expect(onApplyApi).toHaveBeenLastCalledWith("third_party", "custom", false));
   });
@@ -740,7 +740,7 @@ describe("Ant Design pages", () => {
     view.rerender(<CodexIntegrationPage {...props} settings={{ codex_auth_mode: "openai", openai_selected_upstream_id: "new", openai_use_api_proxy: "true", openai_auto_restart_app_server: "true" }} />);
     expect(screen.getByText("New channel")).toBeTruthy();
     expect(screen.getByRole("switch", { name: "通过网关服务代理" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("switch", { name: "自动重启 appserver" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: "自动重启 Codex 服务" }).getAttribute("aria-checked")).toBe("true");
     await userEvent.setup().click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onApplyApi).toHaveBeenCalledWith("openai", "new", true);
     expect(onSaveSettings).not.toHaveBeenCalled();
@@ -755,6 +755,11 @@ describe("Ant Design pages", () => {
       onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
     expect(screen.getByRole("radio", { name: /网关模式/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /网关模式/ }));
+    const proxy = screen.getByRole("switch", { name: "通过网关服务代理" });
+    expect(proxy.getAttribute("aria-checked")).toBe("true");
+    expect(proxy.hasAttribute("disabled")).toBe(true);
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    expect(screen.getByText("连接选项").compareDocumentPosition(screen.getByText("config.toml")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(/model_catalog_json = "D:\/data\/models\.json"/)).toBeTruthy();
     expect(screen.getByText(/openai_base_url = "http:\/\/localhost:8436\/v1"/)).toBeTruthy();
     expect(screen.queryByText(/model_provider = "openai"/)).toBeNull();
@@ -787,7 +792,7 @@ describe("Ant Design pages", () => {
       onApplyAccount={onApplyAccount}
     />);
     fireEvent.click(screen.getByRole("radio", { name: /账号模式/ }));
-    expect(screen.getByText(/模型列表沿用账号池的覆盖、名称和显示设置，不包含 API 渠道模型/)).toBeTruthy();
+    expect(screen.getByText(/模型列表沿用账号池设置/)).toBeTruthy();
     await user.click(screen.getByRole("combobox"));
     expect(await screen.findByText("测试账号", { selector: ".ant-select-item-option-content" })).toBeTruthy();
     expect(screen.queryByText(/account@example\.com/, { selector: ".ant-select-item-option-content" })).toBeNull();

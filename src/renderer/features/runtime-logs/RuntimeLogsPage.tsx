@@ -68,7 +68,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
     <Card className="v1-page-card v1-page-fill" variant="borderless">
       <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
         <Space>
-          {paused && newLogCount > 0 && <Tag color="processing">收到 {newLogCount} 批新日志</Tag>}
+          {paused && newLogCount > 0 && <Tag color="processing">有新日志，恢复刷新后查看</Tag>}
           <Button icon={paused ? <PlayCircleOutlined /> : <PauseOutlined />} onClick={() => onPausedChange(!paused)}>
             {paused ? "恢复自动刷新" : "暂停自动刷新"}
           </Button>

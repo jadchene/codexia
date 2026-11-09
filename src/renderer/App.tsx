@@ -25,9 +25,9 @@ const RuntimeLogsPage = React.lazy(() => import("./features/runtime-logs/Runtime
 const pages = [
   { id: "overview", label: "运行概览", description: "快速查看服务状态、可用额度和调用概况。" },
   { id: "accounts", label: "订阅账号", description: "添加和管理用于 Codex 的 ChatGPT 订阅账号。" },
-  { id: "upstreams", label: "模型渠道", description: "管理订阅账号池和第三方模型，并设置连接方式与模型费率。" },
+  { id: "upstreams", label: "模型渠道", description: "管理订阅账号池、OpenAI 和第三方渠道，配置连接信息与模型费率。" },
   { id: "services", label: "服务管理", description: "启动、停止或重启本地网关与 MCP 服务。" },
-  { id: "codexIntegration", label: "接入模式", description: "选择账号、OpenAI 官方 API、第三方 API 或网关模式。" },
+  { id: "codexIntegration", label: "接入模式", description: "选择账号、OpenAI API、第三方 API 或网关模式。" },
   { id: "analytics", label: "调用分析", description: "按渠道、模型和账号查看调用量、Token、耗时与费用。" },
   { id: "runtimeLogs", label: "运行日志", description: "查看服务运行记录和错误信息。" },
   { id: "settings", label: "设置中心", description: "调整应用、网关服务、MCP 服务、额度、日志和外观设置。" }
@@ -329,7 +329,7 @@ function App() {
       setMessage(`已导入账号：${account.name}`);
       return true;
     } catch (error) {
-      setMessage(`本地读取失败：${errorMessage(error)}`);
+      setMessage(`导入本机账号失败：${errorMessage(error)}`);
       return false;
     }
   }
@@ -382,16 +382,16 @@ function App() {
   }
 
   async function refreshAllUsage() {
-    setMessage("正在刷新所有账号额度...");
+    setMessage("正在刷新已启用账号的额度…");
     try {
       const results = await api.refreshAllUsage();
       await reload();
       const okCount = results.filter((item) => item.ok).length;
       const failCount = results.length - okCount;
       if (results.length === 0) {
-        setMessage("没有可刷新的启用账号");
+        setMessage("暂无已启用的账号可刷新");
       } else if (failCount === 0) {
-        setMessage("所有账号额度刷新完成");
+        setMessage("已启用账号的额度已全部刷新");
       } else if (okCount === 0) {
         setMessage(`刷新全部失败：${failCount}/${results.length} 个账号失败`);
       } else {
@@ -462,9 +462,9 @@ function App() {
       setTokenLogs(await api.listTokenLogs(query));
       setTokenSummary(await api.tokenSummary(query));
       setDashboardSummary(await api.tokenSummary());
-      setMessage(`已清空调用分析：${result.deleted || 0} 条`);
+      setMessage(`已清空调用记录：${result.deleted || 0} 条`);
     } catch (error) {
-      setMessage(`清空调用分析失败：${errorMessage(error)}`);
+      setMessage(`清空调用记录失败：${errorMessage(error)}`);
     }
   }
 
@@ -552,7 +552,7 @@ function App() {
             onApplyApi={async (mode, upstreamId, useApiProxy) => {
               try { await api.applyApiAuth(mode, upstreamId, useApiProxy); }
               finally { await reload(); }
-              setMessage(mode === "openai" ? "已应用 OpenAI 官方 API 模式" : "已应用第三方 API 模式");
+              setMessage(mode === "openai" ? "已应用 OpenAI API 模式" : "已应用第三方 API 模式");
             }}
             accountModelCatalogPath={`${paths.dataDir.replace(/[\\/]+$/, "")}/account-models.json`}
             onMessage={setMessage}
