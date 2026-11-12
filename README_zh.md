@@ -4,7 +4,7 @@
 
 Codexia 是一个 Windows 桌面应用，用于在 Codex 中集中使用 ChatGPT 订阅账号、OpenAI 官方 API 和第三方模型渠道。
 
-![Codexia 概览](docs/screenshots/overview.png)
+![Codexia 概览](docs/screenshots/overview-v2.png)
 
 ## 功能
 

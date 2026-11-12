@@ -4,7 +4,7 @@
 
 Codexia is a Windows desktop app for using ChatGPT subscription accounts, the official OpenAI API, and third-party model channels from Codex.
 
-![Codexia overview](docs/screenshots/overview.png)
+![Codexia overview](docs/screenshots/overview-v2.png)
 
 ## Features
 
